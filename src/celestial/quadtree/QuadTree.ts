@@ -18,7 +18,7 @@ export type Bounds = {
 
 export type Face = "front" | "back" | "left" | "right" | "top" | "bottom";
 
-export const globalWorkerPool = new WorkerPool(8);
+export const globalWorkerPool = new WorkerPool(1);
 
 export class QuadTree {
     scene: Scene;
@@ -125,12 +125,13 @@ export class QuadTree {
                             samplers: [
                                 "diffuseTexture",
                                 "detailTexture",
+                                "normalMap",
                                 "heightMap",
                             ],
                         }
                     );
 
-                    terrainShader.setInt("debugLOD", 1);
+                    terrainShader.setInt("debugLOD", 0);
                     terrainShader.setInt("debugUV", 0);
                     terrainShader.setFloat("time", 0.0);
                     terrainShader.setFloat("amplitude", 0.0);
@@ -157,30 +158,39 @@ export class QuadTree {
                         "uPlanetCenter",
                         PlanetData.get("Mercury").position
                     );
+
                     terrainShader.setTexture(
                         "heightMap",
-                        new Texture("textures/heightmap.ktx2", this.scene)
+                        new Texture("textures/moon_heightmap.ktx2", this.scene)
                     );
-                    terrainShader.setFloat("heightFactor", 100.0);
+                    terrainShader.setFloat("heightFactor", 50.0);
+
                     terrainShader.setTexture(
                         "diffuseTexture",
+                        new Texture("textures/moon_heightmap.ktx2", this.scene)
+                    );
+                    terrainShader.setFloat("textureScale", 1.0);
+
+                    terrainShader.setTexture(
+                        "normalMap",
                         new Texture(
-                            "textures/rock_face_diff_8k.png",
+                            "textures/5672_mars_12k_normal.jpg",
                             this.scene
                         )
                     );
-                    terrainShader.setFloat("textureScale", 0.0002);
+                    terrainShader.setFloat("normalScale", 1.0);
+
                     terrainShader.setTexture(
                         "detailTexture",
                         new Texture(
-                            "textures/rock_face_diff_8k.png",
+                            "textures/cracked_red_ground_diff_8k.png",
                             this.scene
                         )
                     );
-                    terrainShader.setFloat("detailScale", 0.1);
-                    terrainShader.setFloat("detailBlend", 1.0);
+                    terrainShader.setFloat("detailScale", 2.0);
+                    terrainShader.setFloat("detailBlend", 1.1);
 
-                    terrainShader.wireframe = true;
+                    //terrainShader.wireframe = true;
                     finalMesh.material = terrainShader;
                     finalMesh.checkCollisions = true;
 
@@ -319,7 +329,7 @@ export class QuadTree {
                 ),
             ];
             const minDistance = Math.min(...distances);
-            const lodRange = this.radius * Math.pow(0.65, this.level);
+            const lodRange = this.radius * Math.pow(0.6, this.level);
 
             if (minDistance < lodRange && this.level < this.maxLevel) {
                 // Si le patch est proche et qu'on peut subdiviser, on passe aux enfants.

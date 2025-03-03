@@ -60,10 +60,10 @@ export class FloatingCameraScene {
         camera.keysDownward.push(65); // E
         camera.minZ = 0.001;
         camera.maxZ = 1_000_000_0;
-        camera.fov = 2.4;
+        camera.fov = 1.8;
         camera.checkCollisions = true;
         camera.applyGravity = false;
-        camera.ellipsoid = new Vector3(1, 1, 1);
+        camera.ellipsoid = new Vector3(0.1, 0.1, 0.1);
         camera.attachControl(canvas, true);
 
         // Adjust camera speed with mouse wheel
@@ -186,11 +186,11 @@ export class FloatingCameraScene {
             "top",
             "bottom",
         ];
-        const maxLevel: number = 8;
+        const maxLevel: number = 7;
         const radius: number =
             ScaleManager.toSimulationUnits(PlanetData.get("Mercury").diameter) /
             2;
-        const resolution: number = 32;
+        const resolution: number = 128;
 
         const quadTreePool = new QuadTreePool(250);
         const mercury = faces.map(
@@ -219,16 +219,14 @@ export class FloatingCameraScene {
         // const depthRenderer = scene.enableDepthRenderer(camera);
         // const atmosphereSettings = {
         //     rayleighHeight: 20,
-        //     // Augmentez le coefficient rouge et réduisez le vert et le bleu pour une dominante rouge
-        //     rayleighScatteringCoefficients: new Vector3(0.0001, 0.0001, 0.0001),
-        //     mieHeight: 4,
-        //     mieScatteringCoefficients: new Vector3(0.01, 0.005, 0.005),
-        //     mieAsymmetry: 0.5,
-        //     ozoneHeight: 0.8,
-        //     // Vous pouvez aussi réduire l'absorption dans le rouge si nécessaire
-        //     ozoneAbsorptionCoefficients: new Vector3(0.001, 0.003, 0.01),
-        //     ozoneFalloff: 12,
-        //     lightIntensity: 50.0,
+        //     rayleighScatteringCoefficients: new Vector3(0.0032, 0.001, 0.0003),
+        //     mieHeight: 15.0,
+        //     mieScatteringCoefficients: new Vector3(0.00032, 0.0001, 0.00001),
+        //     mieAsymmetry: 25.0,
+        //     ozoneHeight: 0.1,
+        //     ozoneAbsorptionCoefficients: new Vector3(0.0, 0.0, 0.0),
+        //     ozoneFalloff: 15.0,
+        //     lightIntensity: 5.0,
         // };
 
         // const mercuryProxy = MeshBuilder.CreateSphere(
@@ -243,7 +241,7 @@ export class FloatingCameraScene {
         //     "atmosphere",
         //     mercuryProxy,
         //     radius,
-        //     radius + 1000,
+        //     radius + 500,
         //     sun,
         //     camera,
         //     depthRenderer,

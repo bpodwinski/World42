@@ -87,7 +87,7 @@ export class AtmosphericScatteringPostProcess extends PostProcess {
             }
 
             effect.setVector3("sunPosition", this.sun.getAbsolutePosition());
-            effect.setVector3("cameraPosition", this.camera.doublepos);
+            effect.setVector3("cameraPosition", this.camera.position);
             effect.setVector3("planetPosition", this.planet.absolutePosition);
 
             effect.setMatrix(

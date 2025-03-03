@@ -1,3 +1,5 @@
+import { blobURL } from "./MeshWorkerNew";
+
 export interface WorkerTask {
     data: any; // données à envoyer au Worker
     priority: number; // par exemple, distance à la caméra (plus faible = plus prioritaire)
@@ -19,10 +21,12 @@ export class WorkerPool {
         this.maxWorkers = maxWorkers;
         // Précrée les Workers
         for (let i = 0; i < maxWorkers; i++) {
-            const worker = new Worker(
-                new URL("./MeshWorker", import.meta.url),
-                { type: "module" }
-            );
+            // const worker = new Worker(
+            //     new URL("./MeshWorker", import.meta.url),
+            //     { type: "module" }
+            // );
+            const worker = new Worker(blobURL, { type: "module" });
+
             worker.onmessage = (event: MessageEvent) => {
                 this.busyWorkers.delete(worker);
                 // Récupérer la tâche associée au Worker (nous devons la transmettre par closure)

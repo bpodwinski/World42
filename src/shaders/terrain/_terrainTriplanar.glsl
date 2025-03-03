@@ -33,3 +33,42 @@ vec4 triplanar(sampler2D tex, vec3 pos, vec3 normal, float scale, vec2 offset, b
 
     return xProjection * blending.x + yProjection * blending.y + zProjection * blending.z;
 }
+
+/**
+ * @brief Computes an equirectangular projection UV and samples the texture.
+ *
+ * The function converts the world-space position relative to the sphere's center into spherical coordinates,
+ * then maps those coordinates to UV space using an equirectangular projection. The resulting UVs are scaled
+ * and offset. If noTile is true, it uses non-tiling sampling (textureNoTile), otherwise standard texture2D sampling.
+ *
+ * @param tex The texture sampler.
+ * @param pos World-space position.
+ * @param center The center of the sphere.
+ * @param scale UV scaling factor.
+ * @param offset Additional UV offset.
+ * @param noTile If true, apply non-tiling sampling.
+ * @return The color obtained from the texture.
+ */
+vec4 equirectangularProjection(sampler2D tex, vec3 pos, vec3 center, float scale, vec2 offset, bool noTile) {
+    // Compute the normalized direction from the center to the position.
+    vec3 dir = normalize(pos - center);
+
+    // Compute spherical coordinates: 
+    // longitude: angle around Y (from -pi to +pi)
+    // latitude: angle from the Y axis (from -pi/2 to +pi/2)
+    float longitude = atan(dir.z, dir.x);
+    float latitude = asin(dir.y);
+
+    // Map longitude and latitude to UV coordinates in [0,1]
+    float u = (longitude + 3.14159) / (2.0 * 3.14159);
+    float v = (latitude + 1.5708) / 3.14159;
+    vec2 uv = vec2(u, v);
+
+    // Apply scale and offset
+    uv = uv * scale + offset;
+
+    // Sample the texture using non-tiling mode if requested.
+    vec4 color = noTile ? textureNoTile(tex, uv) : texture2D(tex, uv);
+
+    return color;
+}
