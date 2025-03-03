@@ -294,72 +294,74 @@ export class QuadTree {
         if (this.updating) return;
         this.updating = true;
 
-        const { uMin, uMax, vMin, vMax } = this.bounds;
-        const center = this.getCenter();
-        const cornersUV = [
-            { u: uMin, v: vMin },
-            { u: uMin, v: vMax },
-            { u: uMax, v: vMin },
-            { u: uMax, v: vMax },
-        ];
-        const corners = cornersUV.map(({ u, v }) => {
-            const posCube = Terrain.mapUVtoCube(u, v, this.face);
-            return this.parentEntity.doublepos.add(
-                posCube.normalize().scale(this.radius)
-            );
-        });
-        const distances = [
-            Vector3.Distance(center, camera.doublepos),
-            ...corners.map((corner) =>
-                Vector3.Distance(corner, camera.doublepos)
-            ),
-        ];
-        const minDistance = Math.min(...distances);
-        const lodRange = this.radius * Math.pow(0.6, this.level);
+        try {
+            const { uMin, uMax, vMin, vMax } = this.bounds;
+            const center = this.getCenter();
+            const cornersUV = [
+                { u: uMin, v: vMin },
+                { u: uMin, v: vMax },
+                { u: uMax, v: vMin },
+                { u: uMax, v: vMax },
+            ];
+            const corners = cornersUV.map(({ u, v }) => {
+                const posCube = Terrain.mapUVtoCube(u, v, this.face);
+                return this.parentEntity.doublepos.add(
+                    posCube.normalize().scale(this.radius)
+                );
+            });
+            const distances = [
+                Vector3.Distance(center, camera.doublepos),
+                ...corners.map((corner) =>
+                    Vector3.Distance(corner, camera.doublepos)
+                ),
+            ];
+            const minDistance = Math.min(...distances);
+            const lodRange = this.radius * Math.pow(0.6, this.level);
 
-        if (minDistance < lodRange && this.level < this.maxLevel) {
-            // Si le patch est proche et qu'on peut subdiviser, on passe aux enfants.
-            if (!this.children) {
-                this.subdivide();
-            }
-            // Ici, on désactive l'actuel patch pour éviter des recouvrements avec ses enfants.
-            if (this.mesh) {
-                this.mesh.setEnabled(false);
-            }
+            if (minDistance < lodRange && this.level < this.maxLevel) {
+                // Si le patch est proche et qu'on peut subdiviser, on passe aux enfants.
+                if (!this.children) {
+                    this.subdivide();
+                }
+                // Ici, on désactive l'actuel patch pour éviter des recouvrements avec ses enfants.
+                if (this.mesh) {
+                    this.mesh.setEnabled(false);
+                }
 
-            // for (const child of this.children!) {
-            //     await child.updateLOD(camera, debugMode);
-            // }
+                // for (const child of this.children!) {
+                //     await child.updateLOD(camera, debugMode);
+                // }
 
-            await Promise.all(
-                this.children!.map((child) =>
-                    child.updateLOD(camera, debugMode)
-                )
-            );
-        } else {
-            if (!this.mesh) {
-                // Aucun mesh existant, créer le nouveau mesh et fade-in
-                this.mesh = await this.createMeshAsync();
+                await Promise.all(
+                    this.children!.map((child) =>
+                        child.updateLOD(camera, debugMode)
+                    )
+                );
             } else {
-                // Un mesh existant est présent, effectuer un crossfade
-                const oldMesh = this.mesh;
-                // Forcer la création d'un nouveau mesh en réinitialisant le cache
-                this.meshPromise = null;
-                const newMesh = await this.createMeshAsync();
-                // Commencer le fade-in du nouveau mesh
-                // Ensuite, fade-out l'ancien mesh
-                await this.fadeOutMesh(oldMesh, 0);
-                oldMesh.dispose();
-                this.mesh = newMesh;
+                if (!this.mesh) {
+                    // Aucun mesh existant, créer le nouveau mesh et fade-in
+                    this.mesh = await this.createMeshAsync();
+                } else {
+                    // Un mesh existant est présent, effectuer un crossfade
+                    const oldMesh = this.mesh;
+                    // Forcer la création d'un nouveau mesh en réinitialisant le cache
+                    this.meshPromise = null;
+                    const newMesh = await this.createMeshAsync();
+                    // Commencer le fade-in du nouveau mesh
+                    // Ensuite, fade-out l'ancien mesh
+                    await this.fadeOutMesh(oldMesh, 0);
+                    oldMesh.dispose();
+                    this.mesh = newMesh;
+                }
+                if (this.children) {
+                    this.disposeChildren();
+                }
+                if (this.mesh) {
+                    this.mesh.setEnabled(true);
+                }
             }
-            if (this.children) {
-                this.disposeChildren();
-            }
-            if (this.mesh) {
-                this.mesh.setEnabled(true);
-            }
+        } finally {
+            this.updating = false;
         }
-
-        this.updating = false;
     }
 }
