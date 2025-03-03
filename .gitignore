@@ -1,0 +1,10 @@
+node_modules
+*.jpg
+*.png
+*.webp
+*.ktx2
+*.dds
+*.tif
+*.hdr
+*.exr
+package-lock.json
