@@ -325,7 +325,23 @@ export class QuadTree {
                 // Si le patch est proche et qu'on peut subdiviser, on passe aux enfants.
                 if (!this.children) {
                     this.subdivide();
+
+                    // Ici, this.children est garanti d'être non nul grâce à la subdivision.
+                    await Promise.all(
+                        this.children!.map((child) => child.createMeshAsync())
+                    );
+
+                    for (const child of this.children!) {
+                        if (child.mesh) {
+                            child.mesh.setEnabled(true);
+                        }
+                    }
+
+                    if (this.mesh) {
+                        this.mesh.setEnabled(false);
+                    }
                 }
+
                 // Désactiver le patch actuel pour éviter le recouvrement avec les enfants.
                 if (this.mesh) {
                     this.mesh.setEnabled(false);
@@ -336,18 +352,32 @@ export class QuadTree {
                     )
                 );
             } else {
-                // Pas de fade-out, transition instantanée.
                 if (this.mesh && this.currentLODLevel === this.level) {
                     // Le mesh est déjà à jour pour ce niveau.
                 } else if (!this.mesh) {
                     this.mesh = await this.createMeshAsync();
                 } else {
-                    // Le niveau a changé : recréer immédiatement le mesh.
+                    // Le niveau a changé : créer immédiatement le nouveau mesh,
+                    // puis attendre que celui-ci soit rendu avant de supprimer l'ancien.
                     const oldMesh = this.mesh;
                     this.meshPromise = null; // Réinitialiser le cache pour forcer la création d'un nouveau mesh
                     const newMesh = await this.createMeshAsync();
-                    oldMesh.dispose();
+                    newMesh.setEnabled(true);
                     this.mesh = newMesh;
+
+                    // Attendre que le nouveau mesh soit effectivement rendu
+                    await new Promise<void>((resolve) => {
+                        const observer = this.scene.onAfterRenderObservable.add(
+                            () => {
+                                this.scene.onAfterRenderObservable.remove(
+                                    observer
+                                );
+                                resolve();
+                            }
+                        );
+                    });
+                    // Une fois le nouveau mesh rendu, supprimer l'ancien
+                    oldMesh.dispose();
                 }
                 if (this.children) {
                     this.disposeChildren();
