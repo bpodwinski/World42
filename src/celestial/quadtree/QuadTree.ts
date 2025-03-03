@@ -38,6 +38,8 @@ export class QuadTree {
     private meshPromise: Promise<Mesh> | null = null;
     // Garde-fou pour éviter que updateLOD ne soit appelé en parallèle
     private updating: boolean = false;
+    // Suivi du niveau de LOD pour lequel le mesh a été créé
+    private currentLODLevel: number | null = null;
 
     constructor(
         scene: Scene,
@@ -97,7 +99,7 @@ export class QuadTree {
                         this.face,
                         this.level
                     );
-                    // Assure que le mesh final est attaché à l'entité stable (ex : entMercury)
+                    // Attacher le mesh à l'entité stable (ex : entMercury)
                     finalMesh.parent = this.parentEntity;
 
                     const terrainShader = new ShaderMaterial(
@@ -182,8 +184,10 @@ export class QuadTree {
                     finalMesh.material = terrainShader;
                     finalMesh.checkCollisions = true;
 
+                    // Réinitialiser le cache et enregistrer le niveau de LOD actuel
                     this.meshPromise = null;
                     this.mesh = finalMesh;
+                    this.currentLODLevel = this.level;
                     resolve(finalMesh);
                 },
             });
@@ -265,7 +269,7 @@ export class QuadTree {
         return new Promise((resolve) => {
             const start = performance.now();
             const material = mesh.material as ShaderMaterial;
-            // Assurez-vous que le material supporte l'alpha blending :
+            // Assurer que le material supporte l'alpha blending :
             material.transparencyMode = 2; // ALPHA_COMBINE
             const animate = () => {
                 const now = performance.now();
@@ -290,7 +294,6 @@ export class QuadTree {
         camera: OriginCamera,
         debugMode: boolean = false
     ): Promise<void> {
-        // Garde-fou pour éviter les appels concurrents
         if (this.updating) return;
         this.updating = true;
 
@@ -323,14 +326,10 @@ export class QuadTree {
                 if (!this.children) {
                     this.subdivide();
                 }
-                // Ici, on désactive l'actuel patch pour éviter des recouvrements avec ses enfants.
+                // Désactiver le patch actuel pour éviter le recouvrement avec les enfants.
                 if (this.mesh) {
                     this.mesh.setEnabled(false);
                 }
-
-                // for (const child of this.children!) {
-                //     await child.updateLOD(camera, debugMode);
-                // }
 
                 await Promise.all(
                     this.children!.map((child) =>
@@ -338,17 +337,16 @@ export class QuadTree {
                     )
                 );
             } else {
-                if (!this.mesh) {
-                    // Aucun mesh existant, créer le nouveau mesh et fade-in
+                // Si le mesh existe et que le LOD n'a pas changé, ne rien faire.
+                if (this.mesh && this.currentLODLevel === this.level) {
+                    // Mesh déjà à jour pour ce niveau.
+                } else if (!this.mesh) {
                     this.mesh = await this.createMeshAsync();
                 } else {
-                    // Un mesh existant est présent, effectuer un crossfade
+                    // Le niveau a changé : effectuer un crossfade
                     const oldMesh = this.mesh;
-                    // Forcer la création d'un nouveau mesh en réinitialisant le cache
-                    this.meshPromise = null;
+                    this.meshPromise = null; // Forcer la création d'un nouveau mesh
                     const newMesh = await this.createMeshAsync();
-                    // Commencer le fade-in du nouveau mesh
-                    // Ensuite, fade-out l'ancien mesh
                     await this.fadeOutMesh(oldMesh, 0);
                     oldMesh.dispose();
                     this.mesh = newMesh;
