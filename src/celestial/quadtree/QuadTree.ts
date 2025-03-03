@@ -18,7 +18,7 @@ export type Bounds = {
 
 export type Face = "front" | "back" | "left" | "right" | "top" | "bottom";
 
-export const globalWorkerPool = new WorkerPool(32);
+export const globalWorkerPool = new WorkerPool(3);
 
 export class QuadTree {
     scene: Scene;
