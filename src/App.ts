@@ -158,7 +158,7 @@ export class FloatingCameraScene {
         );
 
         sunMaterial.emissiveTexture = new Texture(
-            "/sun/sun__surface_albedo.ktx2",
+            "sun/sun_surface_albedo.ktx2",
             scene
         );
         sunMaterial.emissiveColor = new Color3(1, 1, 1);

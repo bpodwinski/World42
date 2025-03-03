@@ -38,7 +38,7 @@ export class StarGlare {
             0
         );
 
-        particleSystem.particleTexture = new Texture("/T_Star.png", scene);
+        particleSystem.particleTexture = new Texture("T_Star.png", scene);
 
         particleSystem.minAngularSpeed = 0.01;
         particleSystem.maxAngularSpeed = 0.1;
