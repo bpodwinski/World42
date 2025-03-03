@@ -29,4 +29,4 @@ World42 is designed to render detailed, textured planetary surfaces with efficie
 
    ```bash
    git clone https://github.com/bpodwinski/World42.git
-   cd stellarquad
+   cd World42
