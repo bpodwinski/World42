@@ -330,24 +330,22 @@ export class QuadTree {
                 if (this.mesh) {
                     this.mesh.setEnabled(false);
                 }
-
                 await Promise.all(
                     this.children!.map((child) =>
                         child.updateLOD(camera, debugMode)
                     )
                 );
             } else {
-                // Si le mesh existe et que le LOD n'a pas changé, ne rien faire.
+                // Pas de fade-out, transition instantanée.
                 if (this.mesh && this.currentLODLevel === this.level) {
-                    // Mesh déjà à jour pour ce niveau.
+                    // Le mesh est déjà à jour pour ce niveau.
                 } else if (!this.mesh) {
                     this.mesh = await this.createMeshAsync();
                 } else {
-                    // Le niveau a changé : effectuer un crossfade
+                    // Le niveau a changé : recréer immédiatement le mesh.
                     const oldMesh = this.mesh;
-                    this.meshPromise = null; // Forcer la création d'un nouveau mesh
+                    this.meshPromise = null; // Réinitialiser le cache pour forcer la création d'un nouveau mesh
                     const newMesh = await this.createMeshAsync();
-                    await this.fadeOutMesh(oldMesh, 0);
                     oldMesh.dispose();
                     this.mesh = newMesh;
                 }
