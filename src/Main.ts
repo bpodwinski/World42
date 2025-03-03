@@ -27,7 +27,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     }
 
     const scene = FloatingCameraScene.CreateScene(engine as Engine, canvas);
-    scene.debugLayer.show();
+    //scene.debugLayer.show();
 
     engine.runRenderLoop(() => {
         scene.render();

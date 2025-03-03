@@ -60,7 +60,7 @@ export class FloatingCameraScene {
         camera.keysDownward.push(65); // E
         camera.minZ = 0.001;
         camera.maxZ = 1_000_000_0;
-        camera.fov = 2.0;
+        camera.fov = 2.4;
         camera.checkCollisions = true;
         camera.applyGravity = false;
         camera.ellipsoid = new Vector3(1, 1, 1);
@@ -186,11 +186,11 @@ export class FloatingCameraScene {
             "top",
             "bottom",
         ];
-        const maxLevel: number = 6;
+        const maxLevel: number = 8;
         const radius: number =
             ScaleManager.toSimulationUnits(PlanetData.get("Mercury").diameter) /
             2;
-        const resolution: number = 64;
+        const resolution: number = 32;
 
         const quadTreePool = new QuadTreePool(250);
         const mercury = faces.map(
@@ -265,10 +265,27 @@ export class FloatingCameraScene {
             //mercury.rotation.y += PlanetData.planets.Mercury.rotationSpeed;
         });
 
+        // Fonction asynchrone pour mettre à jour les LOD en boucle
+        async function updateLODs() {
+            while (true) {
+                // Mettre à jour les LOD pour chaque node (ici, 'mercury')
+                mercury.forEach((node) => {
+                    node.updateLOD(camera, false).catch((err) =>
+                        console.error(err)
+                    );
+                });
+                // Attendre la prochaine frame pour ne pas saturer le CPU
+                await new Promise<void>((resolve) =>
+                    requestAnimationFrame(resolve)
+                );
+            }
+        }
+
+        // Lancer la boucle d'update dédiée
+        updateLODs();
+
+        // Boucle de rendu principale
         engine.runRenderLoop(() => {
-            mercury.forEach((node) => {
-                node.updateLOD(camera, false);
-            });
             scene.render();
         });
 

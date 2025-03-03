@@ -18,7 +18,7 @@ export type Bounds = {
 
 export type Face = "front" | "back" | "left" | "right" | "top" | "bottom";
 
-export const globalWorkerPool = new WorkerPool(3);
+export const globalWorkerPool = new WorkerPool(8);
 
 export class QuadTree {
     scene: Scene;
@@ -319,7 +319,7 @@ export class QuadTree {
                 ),
             ];
             const minDistance = Math.min(...distances);
-            const lodRange = this.radius * Math.pow(0.6, this.level);
+            const lodRange = this.radius * Math.pow(0.65, this.level);
 
             if (minDistance < lodRange && this.level < this.maxLevel) {
                 // Si le patch est proche et qu'on peut subdiviser, on passe aux enfants.

@@ -113,5 +113,6 @@ self.onmessage = (event: MessageEvent) => {
         level,
         maxLevel
     );
+
     self.postMessage(meshData);
 };

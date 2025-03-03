@@ -13,6 +13,7 @@ export class WorkerPool {
     private maxWorkers: number;
     private taskQueue: WorkerTask[] = [];
     private busyWorkers: Set<Worker> = new Set();
+    private workerStatusTimeout: number | null = null;
 
     constructor(maxWorkers: number) {
         this.maxWorkers = maxWorkers;
@@ -33,28 +34,63 @@ export class WorkerPool {
                 }
 
                 // Lance la prochaine tâche si disponible
+                this.updateWorkerStatus();
                 this.scheduleNext();
             };
+
+            worker.onerror = (error) => {
+                console.error("[Worker Error]", error);
+                this.busyWorkers.delete(worker);
+                this.updateWorkerStatus();
+            };
+
             this.workers.push(worker);
         }
+    }
+
+    // Fonction pour mettre à jour l'élément DOM avec le statut des workers
+    private updateWorkerStatus() {
+        // Si une mise à jour est déjà programmée, ne rien faire.
+        if (this.workerStatusTimeout !== null) {
+            return;
+        }
+        // Planifier une mise à jour dans 500 ms (vous pouvez ajuster ce délai)
+        this.workerStatusTimeout = window.setTimeout(() => {
+            const busyCount = this.busyWorkers.size;
+            const total = this.workers.length;
+            const pendingTasks = this.taskQueue.length;
+            const info = `Workers busy: ${busyCount} / ${total}, Chunks pending: ${pendingTasks}`;
+            const statusDiv = document.getElementById("worker-status");
+            if (statusDiv) {
+                statusDiv.innerText = info;
+            }
+            // Réinitialiser le timer
+            this.workerStatusTimeout = null;
+        }, 25);
     }
 
     // Ajoute une tâche dans la file et essaie de la lancer immédiatement
     enqueueTask(task: WorkerTask) {
         this.taskQueue.push(task);
+
         // Trier la file par priorité (distance croissante)
         this.taskQueue.sort((a, b) => a.priority - b.priority);
+        this.updateWorkerStatus();
         this.scheduleNext();
     }
 
     private scheduleNext() {
         // Si aucune tâche en file, rien à faire
         if (this.taskQueue.length === 0) return;
+
         // Trouver un Worker libre
         const availableWorker = this.workers.find(
             (w) => !this.busyWorkers.has(w)
         );
-        if (!availableWorker) return; // Tous occupés, attendre qu'un se libère
+        if (!availableWorker) {
+            this.updateWorkerStatus();
+            return; // Tous occupés, attendre qu'un se libère
+        }
 
         // Récupérer la tâche la plus prioritaire
         const task = this.taskQueue.shift()!;
@@ -62,6 +98,8 @@ export class WorkerPool {
 
         this.busyWorkers.add(availableWorker);
         availableWorker.postMessage(task.data);
+
+        this.updateWorkerStatus();
     }
 
     // Pour nettoyer les Workers
@@ -70,5 +108,7 @@ export class WorkerPool {
         this.workers = [];
         this.taskQueue = [];
         this.busyWorkers.clear();
+
+        this.updateWorkerStatus();
     }
 }
