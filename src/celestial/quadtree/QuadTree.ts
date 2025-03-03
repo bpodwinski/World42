@@ -326,9 +326,16 @@ export class QuadTree {
             if (this.mesh) {
                 this.mesh.setEnabled(false);
             }
-            for (const child of this.children!) {
-                await child.updateLOD(camera, debugMode);
-            }
+
+            // for (const child of this.children!) {
+            //     await child.updateLOD(camera, debugMode);
+            // }
+
+            await Promise.all(
+                this.children!.map((child) =>
+                    child.updateLOD(camera, debugMode)
+                )
+            );
         } else {
             if (!this.mesh) {
                 // Aucun mesh existant, créer le nouveau mesh et fade-in
