@@ -1,42 +1,32 @@
-# Floating-Origin Camera Test for Babylon.js
+# StellarQuad
+
+World42 is a high-performance, multithreaded planet rendering engine that leverages a quadtree structure to dynamically manage Levels of Detail (LOD) for planetary surfaces. The project uses Web Workers for heavy geometry calculations and a floating-origin system to maintain precision even at vast distances.
 
 ## Overview
-This project is a **test implementation of a Floating-Origin camera system** for **Babylon.js**, combined with a **real-scale Solar System simulation**. The main goal is to mitigate floating-point precision issues when rendering vast distances by keeping the camera fixed at the origin and moving all celestial bodies relative to it.
+
+World42 is designed to render detailed, textured planetary surfaces with efficient LOD management. It uses a custom quadtree structure to subdivide the planet's surface and dynamically update patches based on the camera's distance and movement. By offloading geometry calculations to Web Workers, the engine maintains a smooth, responsive user experience.
 
 ## Features
-### **Floating-Origin Camera (`OriginCamera`)**
-- The camera stays at `(0,0,0)`, while objects move around it.
-- Uses **double precision positioning (`doublepos`)** to store accurate locations.
-- Avoids floating-point inaccuracies when rendering astronomical distances.
 
-### **Real-Scale Solar System**
-- Uses a **scale manager (`ScaleManager`)** to convert real-world distances (km) into simulation units.
-- Example: `1 Babylon.js unit = 1000 km`.
-- The scene currently includes:
-  - **The Sun** (light source with emissive material)
-  - **Pluto** (PBR material with real textures)
-  - **(Mercury and Venus are commented but ready to be enabled)**
+- **Dynamic LOD Management:**  
+  Efficiently subdivides and replaces patches based on camera proximity to ensure high detail where needed.
 
-## Why Use Floating-Origin?
-When simulating the **real-scale Solar System**, we face a major issue:
-- **Floating-point precision loss** at extremely large distances.
-- Example: Pluto is at **5.9 billion km** from the Sun, causing position inaccuracies in standard Babylon.js rendering.
+- **Multithreading with Web Workers:**  
+  Offloads intensive geometry computations to separate threads for improved performance.
 
-## Installation & Usage
-1. Clone the repository:
+- **Floating-Origin System:**  
+  Uses a floating-origin camera system to maintain precision over large distances.
+
+- **Optimized Quadtree Structure:**  
+  Organizes planetary patches in a hierarchical quadtree, allowing for fast LOD updates and rendering.
+
+- **Custom Shader Materials:**  
+  Applies shader-based materials to patches for realistic texturing and lighting effects.
+
+## Installation
+
+1. **Clone the repository:**
+
    ```bash
-   git clone https://github.com/bpodwinski/Floating-Origin-Babylon.js.git
-   cd floating-origin-babylonjs
-   ```
-2. Install dependencies:
-   ```bash
-   npm i
-   ```
-3. Run the project:
-   ```bash
-   npm run dev
-   ```
-4. Open your browser and navigate to `http://localhost:5173`
-
-## Credits
-Built with **Babylon.js**: https://doc.babylonjs.com/features/featuresDeepDive/scene/floating_origin
+   git clone https://github.com/bpodwinski/World42.git
+   cd stellarquad
