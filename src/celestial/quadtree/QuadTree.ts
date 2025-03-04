@@ -5,8 +5,6 @@ import {
     FloatingEntityInterface,
     OriginCamera,
 } from "../../utils/OriginCamera";
-import { ScaleManager } from "../../utils/ScaleManager";
-import { PlanetData } from "../PlanetData";
 import { WorkerPool } from "../../utils/WorkerPool";
 import { TerrainShader } from "../TerrainShader";
 

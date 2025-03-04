@@ -2,19 +2,33 @@ import { Vector3 } from "@babylonjs/core";
 import { ScaleManager } from "../utils/ScaleManager";
 
 /**
- * Définition du type contenant les informations d'une planète.
+ * Type definition containing information about a planet
+ *
+ * Contains planet position (in simulation units), diameter (in simulation units) and rotation speed (in radians per second)
+ *
+ * @typedef {PlanetInfo} PlanetInfo
  */
 export type PlanetInfo = {
-    /** Position de la planète dans l'espace (convertie en unités de simulation) */
+    /**
+     * Planet position in space (converted to simulation units)
+     */
     position: Vector3;
-    /** Diamètre de la planète en unités de simulation */
+
+    /**
+     * Planet diameter in simulation units
+     */
     diameter: number;
-    /** Vitesse de rotation de la planète en radians par seconde */
+
+    /**
+     * Planet rotation speed in radians per second
+     */
     rotationSpeed: number;
 };
 
 /**
- * Classe statique regroupant les données de plusieurs corps célestes.
+ * Class that groups data for multiple celestial bodies
+ *
+ * Provides static methods to access planet data
  */
 export class PlanetData {
     public static planets: Record<string, PlanetInfo> = {
@@ -89,9 +103,10 @@ export class PlanetData {
     };
 
     /**
-     * Récupère les données d'une planète à partir de son nom.
-     * @param planetName Le nom de la planète (ex. "Mercury", "Earth", etc.).
-     * @returns Les informations associées à la planète.
+     * Retrieves planet data by name
+     *
+     * @param {keyof typeof PlanetData.planets} planetName - Name of the planet (eg "Mercury", "Earth", etc.)
+     * @returns {PlanetInfo} Information associated with the planet
      */
     public static get(planetName: keyof typeof PlanetData.planets): PlanetInfo {
         return PlanetData.planets[planetName];
