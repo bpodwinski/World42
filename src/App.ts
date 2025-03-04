@@ -202,6 +202,7 @@ export class FloatingCameraScene {
                     0,
                     maxLevel,
                     radius,
+                    PlanetData.get("Mercury").position,
                     resolution,
                     face,
                     quadTreePool,
@@ -218,15 +219,15 @@ export class FloatingCameraScene {
         // Athmos
         // const depthRenderer = scene.enableDepthRenderer(camera);
         // const atmosphereSettings = {
-        //     rayleighHeight: 20,
-        //     rayleighScatteringCoefficients: new Vector3(0.0032, 0.001, 0.0003),
-        //     mieHeight: 15.0,
-        //     mieScatteringCoefficients: new Vector3(0.00032, 0.0001, 0.00001),
-        //     mieAsymmetry: 25.0,
-        //     ozoneHeight: 0.1,
-        //     ozoneAbsorptionCoefficients: new Vector3(0.0, 0.0, 0.0),
-        //     ozoneFalloff: 15.0,
-        //     lightIntensity: 5.0,
+        //     rayleighHeight: 50,
+        //     rayleighScatteringCoefficients: new Vector3(0.01, 0.015, 0.024),
+        //     mieHeight: 40.0,
+        //     mieScatteringCoefficients: new Vector3(0.001, 0.001, 0.0011),
+        //     mieAsymmetry: 20.0,
+        //     ozoneHeight: 45.0,
+        //     ozoneAbsorptionCoefficients: new Vector3(0.001, 0.001, 0.0008),
+        //     ozoneFalloff: 20.0,
+        //     lightIntensity: 20.0,
         // };
 
         // const mercuryProxy = MeshBuilder.CreateSphere(

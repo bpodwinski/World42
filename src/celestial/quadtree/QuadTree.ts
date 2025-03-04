@@ -33,6 +33,7 @@ export class QuadTree {
     level: number;
     maxLevel: number;
     radius: number;
+    center: Vector3;
     resolution: number;
     children: QuadTree[] | null;
     mesh: Mesh | null;
@@ -57,6 +58,7 @@ export class QuadTree {
         level: number,
         maxLevel: number,
         radius: number,
+        center: Vector3,
         resolution: number,
         face: Face,
         quadTreePool: QuadTreePool = new QuadTreePool(),
@@ -68,6 +70,7 @@ export class QuadTree {
         this.level = level;
         this.maxLevel = maxLevel;
         this.radius = radius;
+        this.center = center;
         this.resolution = resolution;
         this.face = face;
         this.children = null;
@@ -102,7 +105,7 @@ export class QuadTree {
                 data: taskData,
                 priority: priority,
                 callback: (meshData: any) => {
-                    const terrainMesh = Terrain.createMeshFromData(
+                    const terrainMesh = Terrain.createMeshFromWorker(
                         this.scene,
                         meshData,
                         this.face,
@@ -117,7 +120,11 @@ export class QuadTree {
                         taskData.resolution,
                         this.level,
                         taskData.maxLevel,
-                        this.camera.doublepos
+                        this.camera.doublepos,
+                        this.radius,
+                        this.center,
+                        false,
+                        false
                     );
 
                     // Réinitialiser le cache et enregistrer le niveau de LOD actuel
@@ -151,6 +158,7 @@ export class QuadTree {
             this.level + 1,
             this.maxLevel,
             this.radius,
+            this.center,
             this.resolution,
             this.face,
             this.quadTreePool,

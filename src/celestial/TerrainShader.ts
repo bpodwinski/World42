@@ -1,14 +1,29 @@
 import {
-    Mesh,
+    Effect,
     Scene,
     ShaderMaterial,
     Texture,
     Vector3,
-    VertexData,
 } from "@babylonjs/core";
-import { PlanetData } from "./PlanetData";
 import { ScaleManager } from "../utils/ScaleManager";
-import { Face } from "./quadtree/QuadTree";
+
+import textureNoTileShader from "../shaders/terrain/_textureNoTile.glsl?raw";
+import terrainTriplanarShader from "../shaders/terrain/_terrainTriplanar.glsl?raw";
+import terrainMorphingShader from "../shaders/terrain/_terrainMorphing.glsl?raw";
+import terrainNoiseShader from "../shaders/terrain/_terrainNoiseShader.glsl?raw";
+import terrainDebugLODShader from "../shaders/terrain/_terrainDebugLOD.glsl?raw";
+
+import terrainVertexShader from "../shaders/terrain/terrainVertexShader.glsl?raw";
+import terrainFragmentShader from "../shaders/terrain/terrainFragmentShader.glsl?raw";
+
+Effect.IncludesShadersStore["textureNoTile"] = textureNoTileShader;
+Effect.IncludesShadersStore["triplanar"] = terrainTriplanarShader;
+Effect.IncludesShadersStore["morphing"] = terrainMorphingShader;
+Effect.IncludesShadersStore["noise"] = terrainNoiseShader;
+Effect.IncludesShadersStore["debugLOD"] = terrainDebugLODShader;
+
+Effect.ShadersStore["terrainVertexShader"] = terrainVertexShader;
+Effect.ShadersStore["terrainFragmentShader"] = terrainFragmentShader;
 
 /**
  * TerrainShader creates and configures ShaderMaterial for terrain rendering
@@ -34,6 +49,8 @@ export class TerrainShader {
      * @param {number} lodLevel - Current level of detail
      * @param {number} maxLevel - Maximum level of detail
      * @param {Vector3} cameraPosition - Camera position in world space
+     * @param {number} planetRadius - Radius of the planet
+     * @param {Vector3} planetCenter - Center position of the planet
      * @param {boolean} [wireframe=false] - Enable or disable wireframe mode
      * @param {boolean} [debugLOD=false] - Enable or disable debug mode for LOD
      * @returns {ShaderMaterial} Configured ShaderMaterial for terrain
@@ -43,6 +60,8 @@ export class TerrainShader {
         lodLevel: number,
         maxLevel: number,
         cameraPosition: Vector3,
+        planetRadius: number,
+        planetCenter: Vector3,
         wireframe: boolean = false,
         debugLOD: boolean = false
     ): ShaderMaterial {
@@ -89,14 +108,10 @@ export class TerrainShader {
         const lodRanges: number[] = [];
         for (let i = 0; i < maxLevel; i++) {
             lodRanges[i] =
-                (ScaleManager.toSimulationUnits(
-                    PlanetData.get("Mercury").diameter
-                ) /
-                    2) *
-                Math.pow(2, i);
+                ScaleManager.toSimulationUnits(planetRadius) * Math.pow(2, i);
         }
         shader.setFloats("lodRangesLUT", lodRanges);
-        shader.setVector3("uPlanetCenter", PlanetData.get("Mercury").position);
+        shader.setVector3("uPlanetCenter", planetCenter);
 
         // Height
         shader.setTexture(
@@ -130,63 +145,5 @@ export class TerrainShader {
         shader.wireframe = wireframe;
 
         return shader;
-    }
-
-    /**
-     * Crée un Mesh Babylon.js à partir des données géométriques fournies.
-     * Cette méthode est appelée une fois que le Worker a terminé ses calculs.
-     *
-     * @param scene Scène Babylon.js.
-     * @param meshData Données géométriques calculées (positions, indices, normales, uvs).
-     * @returns Le Mesh construit à partir de ces données.
-     */
-    static createMeshFromWorker(
-        scene: Scene,
-        meshData: {
-            positions: number[];
-            indices: number[];
-            normals: number[];
-            uvs: number[];
-        },
-        face: Face,
-        level: number
-    ): Mesh {
-        const customMesh = new Mesh("patch_" + level + "_" + face, scene);
-
-        const vertexData = new VertexData();
-        vertexData.positions = meshData.positions;
-        vertexData.indices = meshData.indices;
-        vertexData.normals = meshData.normals;
-        vertexData.uvs = meshData.uvs;
-        vertexData.applyToMesh(customMesh, true);
-
-        return customMesh;
-    }
-
-    /**
-     * Transforme les coordonnées (u, v) en coordonnées du cube selon la face.
-     * Les valeurs de u et v doivent déjà être "ajustées" via tan() dans la méthode createPatchMesh.
-     * @param u Coordonnée u.
-     * @param v Coordonnée v.
-     * @param face Face de la planète.
-     * @returns Coordonnées dans l'espace cube.
-     */
-    static mapUVtoCube(u: number, v: number, face: Face): Vector3 {
-        switch (face) {
-            case "front":
-                return new Vector3(u, v, 1);
-            case "back":
-                return new Vector3(-u, v, -1);
-            case "left":
-                return new Vector3(-1, v, u);
-            case "right":
-                return new Vector3(1, v, -u);
-            case "top":
-                return new Vector3(u, 1, -v);
-            case "bottom":
-                return new Vector3(u, -1, v);
-            default:
-                return new Vector3(u, v, 1);
-        }
     }
 }
