@@ -8,6 +8,7 @@ import {
 import { ScaleManager } from "../../utils/ScaleManager";
 import { PlanetData } from "../PlanetData";
 import { WorkerPool } from "../../utils/WorkerPool";
+import { TerrainShader } from "../TerrainShader";
 
 export type Bounds = {
     uMin: number;
@@ -39,10 +40,13 @@ export class QuadTree {
     parentEntity: FloatingEntityInterface;
 
     private quadTreePool: QuadTreePool;
+
     // Cache pour la création asynchrone du mesh
     private meshPromise: Promise<Mesh> | null = null;
+
     // Garde-fou pour éviter que updateLOD ne soit appelé en parallèle
     private updating: boolean = false;
+
     // Suivi du niveau de LOD pour lequel le mesh a été créé
     private currentLODLevel: number | null = null;
 
@@ -98,106 +102,30 @@ export class QuadTree {
                 data: taskData,
                 priority: priority,
                 callback: (meshData: any) => {
-                    const finalMesh = Terrain.createMeshFromData(
+                    const terrainMesh = Terrain.createMeshFromData(
                         this.scene,
                         meshData,
                         this.face,
                         this.level
                     );
+
                     // Attacher le mesh à l'entité stable (ex : entMercury)
-                    finalMesh.parent = this.parentEntity;
+                    terrainMesh.parent = this.parentEntity;
+                    terrainMesh.checkCollisions = true;
 
-                    const terrainShader = new ShaderMaterial(
-                        "terrainShader",
-                        this.scene,
-                        { vertex: "terrain", fragment: "terrain" },
-                        {
-                            attributes: ["position", "normal", "uv"],
-                            uniforms: [
-                                "worldViewProjection",
-                                "world",
-                                "time",
-                                "amplitude",
-                                "frequency",
-                                "mesh_dim",
-                                "lodLevel",
-                                "lodRangesLUT",
-                                "cameraPosition",
-                                "uPlanetCenter",
-                                "showUV",
-                                "debugUV",
-                            ],
-                            samplers: [
-                                "diffuseTexture",
-                                "detailTexture",
-                                "normalMap",
-                                "heightMap",
-                            ],
-                        }
-                    );
-
-                    terrainShader.setInt("debugLOD", 1);
-                    terrainShader.setInt("debugUV", 0);
-                    terrainShader.setFloat("time", 0.0);
-                    terrainShader.setFloat("amplitude", 0.0);
-                    terrainShader.setFloat("frequency", 0.0);
-                    terrainShader.setFloat("mesh_dim", this.resolution);
-                    terrainShader.setFloat("lodLevel", this.level);
-                    terrainShader.setFloat("lodMaxLevel", this.maxLevel);
-                    terrainShader.setVector3(
-                        "cameraPosition",
+                    terrainMesh.material = new TerrainShader(this.scene).create(
+                        taskData.resolution,
+                        this.level,
+                        taskData.maxLevel,
                         this.camera.doublepos
                     );
 
-                    const lodRanges: number[] = [];
-                    for (let i = 0; i < this.maxLevel; i++) {
-                        lodRanges[i] =
-                            (ScaleManager.toSimulationUnits(
-                                PlanetData.get("Mercury").diameter
-                            ) /
-                                2) *
-                            Math.pow(2, i);
-                    }
-                    terrainShader.setFloats("lodRangesLUT", lodRanges);
-                    terrainShader.setVector3(
-                        "uPlanetCenter",
-                        PlanetData.get("Mercury").position
-                    );
-
-                    terrainShader.setTexture(
-                        "heightMap",
-                        new Texture("textures/moon_heightmap.ktx2", this.scene)
-                    );
-                    terrainShader.setFloat("heightFactor", 15.0);
-
-                    terrainShader.setTexture(
-                        "diffuseTexture",
-                        new Texture("textures/moon_diffuse.ktx2", this.scene)
-                    );
-                    terrainShader.setFloat("textureScale", 1.0);
-
-                    terrainShader.setTexture(
-                        "normalMap",
-                        new Texture("textures/moon_normal.ktx2", this.scene)
-                    );
-                    terrainShader.setFloat("normalScale", 1.0);
-
-                    terrainShader.setTexture(
-                        "detailTexture",
-                        new Texture("textures/moon_detail.ktx2", this.scene)
-                    );
-                    terrainShader.setFloat("detailScale", 2.0);
-                    terrainShader.setFloat("detailBlend", 1.0);
-
-                    terrainShader.wireframe = true;
-                    finalMesh.material = terrainShader;
-                    finalMesh.checkCollisions = true;
-
                     // Réinitialiser le cache et enregistrer le niveau de LOD actuel
                     this.meshPromise = null;
-                    this.mesh = finalMesh;
+                    this.mesh = terrainMesh;
                     this.currentLODLevel = this.level;
-                    resolve(finalMesh);
+
+                    resolve(terrainMesh);
                 },
             });
         });
