@@ -7,7 +7,7 @@ import {
 } from "../../utils/OriginCamera";
 import { ScaleManager } from "../../utils/ScaleManager";
 import { PlanetData } from "../PlanetData";
-import { WorkerPool } from "./WorkerPool";
+import { WorkerPool } from "../../utils/WorkerPool";
 
 export type Bounds = {
     uMin: number;
