@@ -1,4 +1,4 @@
-import { blobURL } from "./MeshWorkerNew";
+import { createWorker } from "../../workers/workerManager";
 
 export interface WorkerTask {
     data: any; // données à envoyer au Worker
@@ -26,7 +26,12 @@ export class WorkerPool {
         this.maxWorkers = maxWorkers;
         this.maxConcurrentTasks = maxConcurrentTasks;
         for (let i = 0; i < maxWorkers; i++) {
-            const worker = new Worker(blobURL, { type: "module" });
+            const meshChunkWorkerURL = new URL(
+                "../../workers/meshChunkWorker",
+                import.meta.url
+            ).href;
+            const worker = createWorker(meshChunkWorkerURL);
+
             worker.onmessage = (event: MessageEvent) => {
                 this.busyWorkers.delete(worker);
                 this.activeTaskCount--; // Une tâche vient de se terminer
