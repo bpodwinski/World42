@@ -1,6 +1,5 @@
 import { Scene, Mesh, Vector3, ShaderMaterial, Texture } from "@babylonjs/core";
 import { Terrain } from "../Terrain";
-import { QuadTreePool } from "./QuadTreePool";
 import {
     FloatingEntityInterface,
     OriginCamera,
@@ -38,7 +37,7 @@ export class QuadTree {
     face: Face;
     parentEntity: FloatingEntityInterface;
 
-    private quadTreePool: QuadTreePool;
+    //private quadTreePool: QuadTreePool;
 
     // Cache pour la création asynchrone du mesh
     private meshPromise: Promise<Mesh> | null = null;
@@ -59,7 +58,7 @@ export class QuadTree {
         center: Vector3,
         resolution: number,
         face: Face,
-        quadTreePool: QuadTreePool = new QuadTreePool(),
+        //quadTreePool: QuadTreePool = new QuadTreePool() || null,
         parentEntity: FloatingEntityInterface
     ) {
         this.scene = scene;
@@ -72,7 +71,7 @@ export class QuadTree {
         this.resolution = resolution;
         this.face = face;
         this.children = null;
-        this.quadTreePool = quadTreePool;
+        //this.quadTreePool = quadTreePool;
         this.mesh = null;
         this.parentEntity = parentEntity;
     }
@@ -159,7 +158,7 @@ export class QuadTree {
             this.center,
             this.resolution,
             this.face,
-            this.quadTreePool,
+            //this.quadTreePool,
             this.parentEntity
         );
     }

@@ -21,7 +21,6 @@ import { FloatingEntity, OriginCamera } from "./utils/OriginCamera";
 import { PlanetData } from "./utils/PlanetData";
 import { AtmosphericScatteringPostProcess } from "./celestial/AtmosphericScatteringPostProcess";
 import { Face, QuadTree } from "./celestial/quadtree/QuadTree";
-import { QuadTreePool } from "./celestial/quadtree/QuadTreePool";
 
 export class FloatingCameraScene {
     public static CreateScene(
@@ -192,7 +191,7 @@ export class FloatingCameraScene {
             2;
         const resolution: number = 128;
 
-        const quadTreePool = new QuadTreePool(250);
+        //const quadTreePool = new QuadTreePool(100);
         const mercury = faces.map(
             (face) =>
                 new QuadTree(
@@ -205,7 +204,7 @@ export class FloatingCameraScene {
                     PlanetData.get("Mercury").position,
                     resolution,
                     face,
-                    quadTreePool,
+                    //quadTreePool,
                     entMercury
                 )
         );
