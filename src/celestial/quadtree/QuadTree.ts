@@ -1,12 +1,19 @@
 import { Scene, Mesh, Vector3, ShaderMaterial, Texture } from "@babylonjs/core";
-import { Terrain } from "../Terrain";
+import { WorkerPool } from "../../utils/WorkerPool";
 import {
     FloatingEntityInterface,
     OriginCamera,
 } from "../../utils/OriginCamera";
-import { WorkerPool } from "../../utils/WorkerPool";
+import { Terrain } from "../Terrain";
 import { TerrainShader } from "../TerrainShader";
 
+/**
+ * Type defining the UV bounds of a terrain chunk
+ *
+ * Contains minimum and maximum u and v values
+ *
+ * @typedef {Bounds}
+ */
 export type Bounds = {
     uMin: number;
     uMax: number;
@@ -14,8 +21,18 @@ export type Bounds = {
     vMax: number;
 };
 
+/**
+ * Type defining the possible cube faces
+ *
+ * @typedef {Face}
+ */
 export type Face = "front" | "back" | "left" | "right" | "top" | "bottom";
 
+/**
+ * Global worker pool for mesh chunk computation
+ *
+ * Instantiated with the worker script URL and using hardware concurrency for both workers and concurrent tasks
+ */
 export const globalWorkerPool = new WorkerPool(
     new URL("../../workers/meshChunkWorker", import.meta.url).href,
     navigator.hardwareConcurrency,
@@ -23,6 +40,11 @@ export const globalWorkerPool = new WorkerPool(
     true
 );
 
+/**
+ * QuadTree class represents a terrain chunk and manages its hierarchical subdivision
+ *
+ * Stores spatial information and holds reference to the generated mesh if available
+ */
 export class QuadTree {
     scene: Scene;
     camera: OriginCamera;
@@ -39,15 +61,29 @@ export class QuadTree {
 
     //private quadTreePool: QuadTreePool;
 
-    // Cache pour la création asynchrone du mesh
+    // Cache for asynchronous mesh creation to avoid duplicate generation
     private meshPromise: Promise<Mesh> | null = null;
 
-    // Garde-fou pour éviter que updateLOD ne soit appelé en parallèle
+    // Guard to prevent concurrent updateLOD calls
     private updating: boolean = false;
 
-    // Suivi du niveau de LOD pour lequel le mesh a été créé
+    // Keeps track of the LOD level for which the mesh was generated
     private currentLODLevel: number | null = null;
 
+    /**
+     * Creates new QuadTree instance
+     *
+     * @param {Scene} scene - Babylon.js scene used for mesh creation
+     * @param {OriginCamera} camera - Camera used for LOD calculations
+     * @param {Bounds} bounds - UV bounds of the terrain chunk
+     * @param {number} level - Current LOD level
+     * @param {number} maxLevel - Maximum LOD level allowed
+     * @param {number} radius - Radius of the planet in simulation units
+     * @param {Vector3} center - Center position of the chunk (in simulation units)
+     * @param {number} resolution - Grid resolution for the chunk
+     * @param {Face} face - Cube face for the terrain chunk
+     * @param {FloatingEntityInterface} parentEntity - Entity to which the mesh is attached
+     */
     constructor(
         scene: Scene,
         camera: OriginCamera,
@@ -77,8 +113,11 @@ export class QuadTree {
     }
 
     /**
-     * Crée et renvoie le mesh final asynchrone en utilisant le worker.
-     * On utilise un cache pour éviter les duplications.
+     * Asynchronously creates and returns the mesh for the chunk using a worker
+     *
+     * Uses caching to avoid duplicate mesh creation
+     *
+     * @returns {Promise<Mesh>} Promise resolving to the generated Mesh
      */
     async createMeshAsync(): Promise<Mesh> {
         if (this.meshPromise) {
@@ -109,7 +148,6 @@ export class QuadTree {
                         this.level
                     );
 
-                    // Attacher le mesh à l'entité stable (ex : entMercury)
                     terrainMesh.parent = this.parentEntity;
                     terrainMesh.checkCollisions = true;
 
@@ -121,10 +159,10 @@ export class QuadTree {
                         this.radius,
                         this.center,
                         false,
-                        false
+                        true
                     );
 
-                    // Réinitialiser le cache et enregistrer le niveau de LOD actuel
+                    /// Reset cache and record current LOD level
                     this.meshPromise = null;
                     this.mesh = terrainMesh;
                     this.currentLODLevel = this.level;
@@ -137,6 +175,13 @@ export class QuadTree {
         return this.meshPromise;
     }
 
+    /**
+     * Returns the center position of the chunk in world space
+     *
+     * Uses bounds and parent's double position for calculation
+     *
+     * @returns {Vector3} Center position of the chunk
+     */
     getCenter(): Vector3 {
         const { uMin, uMax, vMin, vMax } = this.bounds;
         const uCenter = (uMin + uMax) / 2;
@@ -147,6 +192,12 @@ export class QuadTree {
         );
     }
 
+    /**
+     * Creates a new child QuadTree node with given bounds
+     *
+     * @param {Bounds} bounds - New bounds for the child node
+     * @returns {QuadTree} New child QuadTree node
+     */
     private createChild(bounds: Bounds): QuadTree {
         return new QuadTree(
             this.scene,
@@ -163,6 +214,11 @@ export class QuadTree {
         );
     }
 
+    /**
+     * Subdivides the current node into four child nodes
+     *
+     * Computes new bounds for each quadrant and creates child QuadTree nodes
+     */
     subdivide(): void {
         this.children = [];
         const { uMin, uMax, vMin, vMax } = this.bounds;
@@ -180,6 +236,9 @@ export class QuadTree {
         this.children.push(this.createChild(boundsBR));
     }
 
+    /**
+     * Disposes all child nodes and clears the children array
+     */
     disposeChildren(): void {
         if (this.children) {
             this.children.forEach((child) => child.dispose());
@@ -187,6 +246,9 @@ export class QuadTree {
         }
     }
 
+    /**
+     * Deactivates the current node and its children by disabling their meshes
+     */
     deactivate(): void {
         if (this.mesh) {
             this.mesh.setEnabled(false);
@@ -196,6 +258,9 @@ export class QuadTree {
         }
     }
 
+    /**
+     * Disposes the current node's mesh and recursively disposes its children
+     */
     dispose(): void {
         if (this.mesh) {
             this.mesh.dispose();
@@ -208,8 +273,13 @@ export class QuadTree {
     }
 
     /**
-     * Mise à jour du LOD.
-     * On attend la création du mesh final pour éviter des créations multiples.
+     * Asynchronously updates the level of detail (LOD) for the chunk
+     *
+     * Waits for final mesh creation to avoid duplicate generation and manages subdivision
+     *
+     * @param {OriginCamera} camera - Camera used for LOD calculation
+     * @param {boolean} [debugMode=false] - Enable or disable debug mode during LOD update
+     * @returns {Promise<void>} Promise resolving when LOD update is complete
      */
     async updateLOD(
         camera: OriginCamera,
@@ -243,11 +313,11 @@ export class QuadTree {
             const lodRange = this.radius * Math.pow(0.65, this.level);
 
             if (minDistance < lodRange && this.level < this.maxLevel) {
-                // Si le patch est proche et qu'on peut subdiviser, on passe aux enfants.
+                // If chunk is close and can be subdivided, process children
                 if (!this.children) {
                     this.subdivide();
 
-                    // Ici, this.children est garanti d'être non nul grâce à la subdivision.
+                    // Children are guaranteed to exist after subdivision
                     await Promise.all(
                         this.children!.map((child) => child.createMeshAsync())
                     );
@@ -263,7 +333,7 @@ export class QuadTree {
                     }
                 }
 
-                // Désactiver le patch actuel pour éviter le recouvrement avec les enfants.
+                // Disable current mesh to prevent overlap with children
                 if (this.mesh) {
                     this.mesh.setEnabled(false);
                 }
@@ -274,19 +344,21 @@ export class QuadTree {
                 );
             } else {
                 if (this.mesh && this.currentLODLevel === this.level) {
-                    // Le mesh est déjà à jour pour ce niveau.
+                    // Mesh is already up to date for this level
                 } else if (!this.mesh) {
                     this.mesh = await this.createMeshAsync();
                 } else {
-                    // Le niveau a changé : créer immédiatement le nouveau mesh,
-                    // puis attendre que celui-ci soit rendu avant de supprimer l'ancien.
+                    // LOD level has changed: create new mesh immediately,
+                    // wait for it to render then dispose the old mesh
                     const oldMesh = this.mesh;
-                    this.meshPromise = null; // Réinitialiser le cache pour forcer la création d'un nouveau mesh
+
+                    this.meshPromise = null; // Reset cache to force new mesh creation
+
                     const newMesh = await this.createMeshAsync();
                     newMesh.setEnabled(true);
                     this.mesh = newMesh;
 
-                    // Attendre que le nouveau mesh soit effectivement rendu
+                    // Wait for new mesh to render
                     await new Promise<void>((resolve) => {
                         const observer = this.scene.onAfterRenderObservable.add(
                             () => {
@@ -297,7 +369,8 @@ export class QuadTree {
                             }
                         );
                     });
-                    // Une fois le nouveau mesh rendu, supprimer l'ancien
+
+                    // Once new mesh is rendered, dispose the old mesh
                     oldMesh.dispose();
                 }
                 if (this.children) {
