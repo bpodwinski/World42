@@ -207,27 +207,6 @@ export class QuadTree {
         }
     }
 
-    private fadeOutMesh(mesh: Mesh, duration: number = 500): Promise<void> {
-        return new Promise((resolve) => {
-            const start = performance.now();
-            const material = mesh.material as ShaderMaterial;
-            // Assurer que le material supporte l'alpha blending :
-            material.transparencyMode = 2; // ALPHA_COMBINE
-            const animate = () => {
-                const now = performance.now();
-                const elapsed = now - start;
-                const factor = Math.max(1 - elapsed / duration, 0);
-                material.alpha = factor;
-                if (factor > 0) {
-                    requestAnimationFrame(animate);
-                } else {
-                    resolve();
-                }
-            };
-            requestAnimationFrame(animate);
-        });
-    }
-
     /**
      * Mise à jour du LOD.
      * On attend la création du mesh final pour éviter des créations multiples.
