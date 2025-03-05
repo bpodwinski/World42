@@ -13,6 +13,9 @@ window.addEventListener("DOMContentLoaded", async () => {
     // Create scene
     const scene = FloatingCameraScene.CreateScene(engine, canvas);
 
+    // Global flag for debugLOD
+    let debugLODEnabled = false;
+
     // Toggle the debug layer when the "²" key is pressed
     window.addEventListener("keydown", (evt) => {
         if (evt.key === "²") {

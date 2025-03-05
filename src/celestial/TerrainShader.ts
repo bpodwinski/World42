@@ -118,7 +118,7 @@ export class TerrainShader {
             "heightMap",
             new Texture("textures/moon_heightmap.ktx2", this.scene)
         );
-        shader.setFloat("heightFactor", 15.0);
+        shader.setFloat("heightFactor", 20.0);
 
         // Diffuse
         shader.setTexture(
@@ -140,7 +140,7 @@ export class TerrainShader {
             new Texture("textures/moon_detail.ktx2", this.scene)
         );
         shader.setFloat("detailScale", 2.0);
-        shader.setFloat("detailBlend", 1.0);
+        shader.setFloat("detailBlend", 1.2);
 
         shader.wireframe = wireframe;
 

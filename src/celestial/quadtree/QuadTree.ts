@@ -70,6 +70,10 @@ export class QuadTree {
     // Keeps track of the LOD level for which the mesh was generated
     private currentLODLevel: number | null = null;
 
+    // Flag to enable or disable debug mode for LOD (passed to the shader)
+    public debugLOD: boolean;
+    public static debugLODEnabled: boolean = false;
+
     /**
      * Creates new QuadTree instance
      *
@@ -83,6 +87,7 @@ export class QuadTree {
      * @param {number} resolution - Grid resolution for the chunk
      * @param {Face} face - Cube face for the terrain chunk
      * @param {FloatingEntityInterface} parentEntity - Entity to which the mesh is attached
+     * @param {boolean} [debugLOD=false] - Whether to enable LOD debug mode
      */
     constructor(
         scene: Scene,
@@ -95,7 +100,8 @@ export class QuadTree {
         resolution: number,
         face: Face,
         //quadTreePool: QuadTreePool = new QuadTreePool() || null,
-        parentEntity: FloatingEntityInterface
+        parentEntity: FloatingEntityInterface,
+        debugLOD: boolean = false
     ) {
         this.scene = scene;
         this.camera = camera;
@@ -110,6 +116,7 @@ export class QuadTree {
         //this.quadTreePool = quadTreePool;
         this.mesh = null;
         this.parentEntity = parentEntity;
+        this.debugLOD = debugLOD;
     }
 
     /**
@@ -159,7 +166,7 @@ export class QuadTree {
                         this.radius,
                         this.center,
                         false,
-                        true
+                        QuadTree.debugLODEnabled
                     );
 
                     /// Reset cache and record current LOD level
@@ -210,13 +217,14 @@ export class QuadTree {
             this.resolution,
             this.face,
             //this.quadTreePool,
-            this.parentEntity
+            this.parentEntity,
+            this.debugLOD
         );
     }
 
     /**
      * Subdivides the current node into four child nodes
-     *
+     *ssss
      * Computes new bounds for each quadrant and creates child QuadTree nodes
      */
     subdivide(): void {
@@ -310,7 +318,7 @@ export class QuadTree {
                 ),
             ];
             const minDistance = Math.min(...distances);
-            const lodRange = this.radius * Math.pow(0.65, this.level);
+            const lodRange = this.radius * Math.pow(0.6, this.level);
 
             if (minDistance < lodRange && this.level < this.maxLevel) {
                 // If chunk is close and can be subdivided, process children
@@ -382,6 +390,24 @@ export class QuadTree {
             }
         } finally {
             this.updating = false;
+        }
+    }
+
+    /**
+     * Updates the debugLOD uniform on the shader material of this chunk
+     * and recursively for all child chunks.
+     *
+     * @param debugLOD - New value for debugLOD (true: enabled, false: disabled)
+     */
+    public updateDebugLOD(debugLOD: boolean): void {
+        if (this.mesh && this.mesh.material) {
+            (this.mesh.material as ShaderMaterial).setInt(
+                "debugLOD",
+                debugLOD ? 1 : 0
+            );
+        }
+        if (this.children) {
+            this.children.forEach((child) => child.updateDebugLOD(debugLOD));
         }
     }
 }

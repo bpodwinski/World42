@@ -47,21 +47,20 @@ export class FloatingCameraScene {
             texture.anisotropicFilteringLevel = 16;
         });
 
-        // Create an OriginCamera (a floating-origin UniversalCamera)
-        // Uses double precision properties (doublepos and doubletgt) instead of standard position and target
+        // Create OriginCamera
         let planetTarget = PlanetData.get("Mercury").position.clone();
-        planetTarget.x += ScaleManager.toSimulationUnits(-5000);
-        planetTarget.y += ScaleManager.toSimulationUnits(2500);
-        planetTarget.z += ScaleManager.toSimulationUnits(1000);
+        planetTarget.x += ScaleManager.toSimulationUnits(0);
+        planetTarget.y += ScaleManager.toSimulationUnits(2475);
+        planetTarget.z += ScaleManager.toSimulationUnits(0);
 
         let camera = new OriginCamera("camera", planetTarget, scene);
         camera.debugMode = false;
-        camera.doubletgt = PlanetData.get("Mercury").position;
+        camera.doubletgt = PlanetData.get("Sun").position;
 
         camera.touchAngularSensibility = 300000;
         camera.inertia = 0.4;
 
-        camera.speed = ScaleManager.toSimulationUnits(50);
+        camera.speed = ScaleManager.toSimulationUnits(10);
         camera.keysUp.push(90); // Z
         camera.keysDown.push(83); // S
         camera.keysLeft.push(81); // Q
@@ -70,7 +69,7 @@ export class FloatingCameraScene {
         camera.keysDownward.push(65); // E
         camera.minZ = 0.001;
         camera.maxZ = 1_000_000_0;
-        camera.fov = 0.65;
+        camera.fov = 0.6;
         camera.checkCollisions = true;
         camera.applyGravity = false;
         camera.ellipsoid = new Vector3(0.01, 0.01, 0.01);
@@ -81,8 +80,11 @@ export class FloatingCameraScene {
             "wheel",
             function (e) {
                 camera.speed = Math.min(
-                    50,
-                    Math.max(0.1, (camera.speed -= e.deltaY * 0.02))
+                    ScaleManager.toSimulationUnits(10),
+                    Math.max(
+                        ScaleManager.toSimulationUnits(0.1),
+                        (camera.speed -= e.deltaY * 0.0025)
+                    )
                 );
             },
             { passive: true }
@@ -197,7 +199,7 @@ export class FloatingCameraScene {
             "top",
             "bottom",
         ];
-        const maxLevel: number = 7;
+        const maxLevel: number = 8;
         const radius: number =
             ScaleManager.toSimulationUnits(PlanetData.get("Mercury").diameter) /
             2;
@@ -215,13 +217,26 @@ export class FloatingCameraScene {
                     PlanetData.get("Mercury").position,
                     resolution,
                     face,
-                    entMercury
+                    entMercury,
+                    false
                 )
         );
 
-        mercury.forEach((node) => {
-            if (node.mesh) {
-                node.mesh.parent = entMercury;
+        // mercury.forEach((node) => {
+        //     if (node.mesh) {
+        //         node.mesh.parent = entMercury;
+        //     }
+        // });
+
+        // Toggle the debug layer and debugLOD via keyboard
+        window.addEventListener("keydown", (evt) => {
+            if (evt.key.toLowerCase() === "l") {
+                QuadTree.debugLODEnabled = !QuadTree.debugLODEnabled;
+
+                mercury.forEach((node) => {
+                    node.debugLOD = QuadTree.debugLODEnabled;
+                    node.updateDebugLOD(QuadTree.debugLODEnabled);
+                });
             }
         });
 
