@@ -171,7 +171,7 @@ export class FloatingCameraScene {
             scene
         );
         sunMaterial.emissiveTexture = new Texture(
-            "/BabylonAssets/sun_surface_albedo.ktx2",
+            "https://benoitpodwinski.com/BabylonAssets/sun_surface_albedo.ktx2",
             scene
         );
         sunMaterial.emissiveColor = new Color3(1, 1, 1);

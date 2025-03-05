@@ -116,28 +116,40 @@ export class TerrainShader {
         // Height
         shader.setTexture(
             "heightMap",
-            new Texture("/BabylonAssets/moon_heightmap.ktx2", this.scene)
+            new Texture(
+                "https://benoitpodwinski.com/BabylonAssets/moon_heightmap.ktx2",
+                this.scene
+            )
         );
         shader.setFloat("heightFactor", 20.0);
 
         // Diffuse
         shader.setTexture(
             "diffuseTexture",
-            new Texture("/BabylonAssets/moon_diffuse.ktx2", this.scene)
+            new Texture(
+                "https://benoitpodwinski.com/BabylonAssets/moon_diffuse.ktx2",
+                this.scene
+            )
         );
         shader.setFloat("textureScale", 1.0);
 
         // Normal
         shader.setTexture(
             "normalMap",
-            new Texture("/BabylonAssets/moon_normal.ktx2", this.scene)
+            new Texture(
+                "https://benoitpodwinski.com/BabylonAssets/moon_normal.ktx2",
+                this.scene
+            )
         );
         shader.setFloat("normalScale", 1.0);
 
         // Detail
         shader.setTexture(
             "detailTexture",
-            new Texture("/BabylonAssets/moon_detail.ktx2", this.scene)
+            new Texture(
+                "https://benoitpodwinski.com/BabylonAssets/moon_detail.ktx2",
+                this.scene
+            )
         );
         shader.setFloat("detailScale", 2.0);
         shader.setFloat("detailBlend", 1.2);
