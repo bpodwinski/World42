@@ -1,10 +1,11 @@
 {
-  "name": "project42",
+  "name": "world42",
   "version": "0.0.1",
   "scripts": {
     "dev": "vite --open",
     "build": "tsc && vite build",
-    "preview": "tsc && vite build && vite preview --host --open"
+    "preview": "tsc && vite build && vite preview --host --open",
+    "deploy": "gh-pages -d dist"
   },
   "typeRoots": [
     "node_modules/@types",
