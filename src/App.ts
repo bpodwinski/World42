@@ -21,6 +21,7 @@ import { FloatingEntity, OriginCamera } from "./utils/OriginCamera";
 import { PlanetData } from "./utils/PlanetData";
 //import { AtmosphericScatteringPostProcess } from "./celestial/AtmosphericScatteringPostProcess";
 import { Face, QuadTree } from "./celestial/quadtree/QuadTree";
+import { TextureManager } from "./core/TextureManager";
 
 /**
  * FloatingCameraScene creates and configures the scene with a floating-origin camera,
@@ -104,7 +105,7 @@ export class FloatingCameraScene {
         skybox.material = skyboxMaterial;
         skybox.infiniteDistance = true;
         skyboxMaterial.reflectionTexture = new CubeTexture(
-            "https://benoitpodwinski.com/BabylonAssets/skybox",
+            `${import.meta.env.VITE_ASSETS_URL}/skybox`,
             scene
         );
         skyboxMaterial.reflectionTexture.coordinatesMode = Texture.SKYBOX_MODE;
@@ -170,8 +171,8 @@ export class FloatingCameraScene {
             "sunMaterial",
             scene
         );
-        sunMaterial.emissiveTexture = new Texture(
-            "https://benoitpodwinski.com/BabylonAssets/sun_surface_albedo.ktx2",
+        sunMaterial.emissiveTexture = new TextureManager(
+            "sun_surface_albedo.ktx2",
             scene
         );
         sunMaterial.emissiveColor = new Color3(1, 1, 1);

@@ -11,19 +11,10 @@ export default defineConfig(({ command, mode }) => {
                     mode === "development"
                         ? "babylonjs/babylon.max"
                         : "babylonjs",
-                BabylonAssets:
-                    mode === "development"
-                        ? "/BabylonAssets"
-                        : "https://benoitpodwinski.com/BabylonAssets",
             },
         },
         server: {
-            proxy: {
-                "/BabylonAssets": {
-                    target: "https://benoitpodwinski.com",
-                    changeOrigin: true,
-                },
-            },
+            port: 3000,
         },
     };
 });
