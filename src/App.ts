@@ -7,7 +7,7 @@ import {
     PointLight,
     Texture,
     PBRMetallicRoughnessMaterial,
-    GlowLayer,
+    //GlowLayer,
     Mesh,
     StandardMaterial,
     CubeTexture,
@@ -15,11 +15,11 @@ import {
 import "@babylonjs/core/Materials/Textures/Loaders/ktxTextureLoader";
 
 import { PostProcess } from "./utils/PostProcess";
-import { StarGlare } from "./utils/SunGlare";
+//import { StarGlare } from "./utils/SunGlare";
 import { ScaleManager } from "./utils/ScaleManager";
 import { FloatingEntity, OriginCamera } from "./utils/OriginCamera";
 import { PlanetData } from "./utils/PlanetData";
-import { AtmosphericScatteringPostProcess } from "./celestial/AtmosphericScatteringPostProcess";
+//import { AtmosphericScatteringPostProcess } from "./celestial/AtmosphericScatteringPostProcess";
 import { Face, QuadTree } from "./celestial/quadtree/QuadTree";
 
 /**
@@ -70,10 +70,10 @@ export class FloatingCameraScene {
         camera.keysDownward.push(65); // E
         camera.minZ = 0.001;
         camera.maxZ = 1_000_000_0;
-        camera.fov = 1.8;
+        camera.fov = 0.65;
         camera.checkCollisions = true;
         camera.applyGravity = false;
-        camera.ellipsoid = new Vector3(0.1, 0.1, 0.1);
+        camera.ellipsoid = new Vector3(0.01, 0.01, 0.01);
         camera.attachControl(canvas, true);
 
         // Adjust camera speed with mouse wheel
@@ -82,7 +82,7 @@ export class FloatingCameraScene {
             function (e) {
                 camera.speed = Math.min(
                     50,
-                    Math.max(1, (camera.speed -= e.deltaY * 0.02))
+                    Math.max(0.1, (camera.speed -= e.deltaY * 0.02))
                 );
             },
             { passive: true }
@@ -271,10 +271,10 @@ export class FloatingCameraScene {
         //     );
         // });
 
-        // Asynchronous LOD update loop for QuadTree nodes (here, for Mercury)
+        // Asynchronous LOD update loop for QuadTree
         async function updateLODs() {
             while (true) {
-                // Update LOD for each QuadTree node (Mercury)
+                // Update LOD for QuadTree node
                 mercury.forEach((node) => {
                     node.updateLOD(camera, false).catch((err) =>
                         console.error(err)
