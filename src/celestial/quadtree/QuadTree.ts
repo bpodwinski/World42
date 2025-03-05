@@ -172,6 +172,7 @@ export class QuadTree {
                     /// Reset cache and record current LOD level
                     this.meshPromise = null;
                     this.mesh = terrainMesh;
+                    this.mesh.alwaysSelectAsActiveMesh = true; // TODO: Bug due to heightmap GPU bounding box for frustum culling being too low
                     this.currentLODLevel = this.level;
 
                     resolve(terrainMesh);
@@ -318,7 +319,7 @@ export class QuadTree {
                 ),
             ];
             const minDistance = Math.min(...distances);
-            const lodRange = this.radius * Math.pow(0.6, this.level);
+            const lodRange = this.radius * 2 * Math.pow(0.55, this.level);
 
             if (minDistance < lodRange && this.level < this.maxLevel) {
                 // If chunk is close and can be subdivided, process children

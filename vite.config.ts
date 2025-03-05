@@ -13,5 +13,15 @@ export default defineConfig(({ command, mode }) => {
                         : "babylonjs",
             },
         },
+        server: {
+            proxy: {
+                "/BabylonAssets": {
+                    target: "https://benoitpodwinski.com",
+                    changeOrigin: true,
+                    rewrite: (path) =>
+                        path.replace(/^\/BabylonAssets/, "/BabylonAssets"),
+                },
+            },
+        },
     };
 });

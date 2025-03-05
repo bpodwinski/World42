@@ -104,7 +104,7 @@ export class FloatingCameraScene {
         skybox.material = skyboxMaterial;
         skybox.infiniteDistance = true;
         skyboxMaterial.reflectionTexture = new CubeTexture(
-            "textures/skybox",
+            "/BabylonAssets/skybox",
             scene
         );
         skyboxMaterial.reflectionTexture.coordinatesMode = Texture.SKYBOX_MODE;
@@ -171,7 +171,7 @@ export class FloatingCameraScene {
             scene
         );
         sunMaterial.emissiveTexture = new Texture(
-            "sun/sun_surface_albedo.ktx2",
+            "/BabylonAssets/sun_surface_albedo.ktx2",
             scene
         );
         sunMaterial.emissiveColor = new Color3(1, 1, 1);
@@ -199,11 +199,11 @@ export class FloatingCameraScene {
             "top",
             "bottom",
         ];
-        const maxLevel: number = 8;
+        const maxLevel: number = 9;
         const radius: number =
             ScaleManager.toSimulationUnits(PlanetData.get("Mercury").diameter) /
             2;
-        const resolution: number = 64;
+        const resolution: number = 32;
 
         const mercury = faces.map(
             (face) =>
