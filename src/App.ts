@@ -131,38 +131,38 @@ export class FloatingCameraScene {
             diameter: PlanetData.get("Sun").diameter,
         });
 
-        const starGlare = StarGlare.create(
-            scene,
-            sun,
-            ScaleManager.toSimulationUnits(696340 * 2)
-        );
-        starGlare.start();
+        // const starGlare = StarGlare.create(
+        //     scene,
+        //     sun,
+        //     ScaleManager.toSimulationUnits(696340 * 2)
+        // );
+        // starGlare.start();
 
-        const glowLayer = new GlowLayer("sunGlow", scene);
-        glowLayer.addIncludedOnlyMesh(sun);
+        // const glowLayer = new GlowLayer("sunGlow", scene);
+        // glowLayer.addIncludedOnlyMesh(sun);
 
         /**
          * Updates the intensity of the sun's glow based on camera distance.
          */
-        function updateGlowIntensity() {
-            let cameraDistance = Vector3.Distance(
-                camera.doublepos,
-                PlanetData.get("Sun").position
-            );
+        // function updateGlowIntensity() {
+        //     let cameraDistance = Vector3.Distance(
+        //         camera.doublepos,
+        //         PlanetData.get("Sun").position
+        //     );
 
-            glowLayer.intensity = Math.max(
-                0.65,
-                Math.min(1.2, cameraDistance / 15000)
-            );
+        //     glowLayer.intensity = Math.max(
+        //         0.65,
+        //         Math.min(1.2, cameraDistance / 15000)
+        //     );
 
-            glowLayer.blurKernelSize = Math.min(
-                64,
-                Math.max(
-                    32,
-                    32 + 32 * (1 - Math.min(1, cameraDistance / 20000))
-                )
-            );
-        }
+        //     glowLayer.blurKernelSize = Math.min(
+        //         64,
+        //         Math.max(
+        //             32,
+        //             32 + 32 * (1 - Math.min(1, cameraDistance / 20000))
+        //         )
+        //     );
+        // }
 
         let sunMaterial = new PBRMetallicRoughnessMaterial(
             "sunMaterial",
@@ -263,16 +263,13 @@ export class FloatingCameraScene {
         const planetMeshes = new Map<string, Mesh>();
 
         // Update loop before rendering
-        scene.onBeforeRenderObservable.add(() => {
-            updateGlowIntensity();
-            StarGlare.updateParticleSize(
-                camera.doublepos,
-                PlanetData.get("Sun").position
-            );
-
-            sun.rotation.y += PlanetData.planets.Sun.rotationSpeed;
-            // For Mercury, you could update rotation here if needed
-        });
+        // scene.onBeforeRenderObservable.add(() => {
+        //     updateGlowIntensity();
+        //     StarGlare.updateParticleSize(
+        //         camera.doublepos,
+        //         PlanetData.get("Sun").position
+        //     );
+        // });
 
         // Asynchronous LOD update loop for QuadTree nodes (here, for Mercury)
         async function updateLODs() {
