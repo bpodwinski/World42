@@ -18,8 +18,6 @@ export default defineConfig(({ command, mode }) => {
                 "/BabylonAssets": {
                     target: "https://benoitpodwinski.com",
                     changeOrigin: true,
-                    rewrite: (path) =>
-                        path.replace(/^\/BabylonAssets/, "/BabylonAssets"),
                 },
             },
         },
