@@ -1,9 +1,9 @@
 import { Engine, WebGPUEngine } from "@babylonjs/core";
 
 /**
- * EngineSetup centralizes the initialization and global configuration of the Babylon.js engine
+ * EngineManager centralizes the initialization and global configuration of the Babylon.js engine
  */
-export class EngineSetup {
+export class EngineManager {
     public engine: Engine | WebGPUEngine;
 
     private constructor(engine: Engine | WebGPUEngine) {
@@ -11,16 +11,16 @@ export class EngineSetup {
     }
 
     /**
-     * Creates a new EngineSetup instance by initializing the engine
+     * Creates a new EngineManager instance by initializing the engine
      *
      * @param canvas - HTMLCanvasElement used for rendering
      * @param useWebGPU - Whether to use WebGPU (default false)
-     * @returns Promise resolving to an EngineSetup instance with the engine initialized
+     * @returns Promise resolving to an EngineManager instance with the engine initialized
      */
     public static async Create(
         canvas: HTMLCanvasElement,
         useWebGPU: boolean = false
-    ): Promise<EngineSetup> {
+    ): Promise<EngineManager> {
         let engine: Engine | WebGPUEngine;
         if (useWebGPU) {
             engine = new WebGPUEngine(canvas, {
@@ -35,6 +35,6 @@ export class EngineSetup {
                 stencil: true,
             });
         }
-        return new EngineSetup(engine);
+        return new EngineManager(engine);
     }
 }
