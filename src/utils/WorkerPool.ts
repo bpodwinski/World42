@@ -167,7 +167,7 @@ export class WorkerPool {
             const busyCount = this.busyWorkers.size;
             const total = this.workers.length;
             const pendingTasks = this.taskQueue.length;
-            const info = `Workers busy: ${busyCount} / ${total}, Active tasks: ${this.activeTaskCount}, Tasks pending: ${pendingTasks}`;
+            const info = `Workers: ${busyCount}/${total} | Active: ${this.activeTaskCount} | Chunks pending: ${pendingTasks}`;
             const statusDiv = document.getElementById("worker-status");
 
             if (statusDiv) {
@@ -175,7 +175,7 @@ export class WorkerPool {
             }
 
             this.workerStatusTimeout = null;
-        }, 500);
+        }, 250);
     }
 
     /**
