@@ -104,7 +104,7 @@ export class FloatingCameraScene {
         skybox.material = skyboxMaterial;
         skybox.infiniteDistance = true;
         skyboxMaterial.reflectionTexture = new CubeTexture(
-            "/BabylonAssets/skybox",
+            "https://benoitpodwinski.com/BabylonAssets/skybox",
             scene
         );
         skyboxMaterial.reflectionTexture.coordinatesMode = Texture.SKYBOX_MODE;
