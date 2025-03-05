@@ -1,1 +1,7 @@
-faire heightmap via cpu
+Créer un pool de node pour éviter trop de dispose
+Compute la heightmap côté CPU sur un web worker
+Génération des chunks sur GPU via les computes shaders avec webgpu ?
+Streaming texture via cloud
+Shader UV equirectangular projection
+Shader UV triplanar
+Générer les chunks en fonction de la vitesse de la camera, ajouter un timeout afin d'éviter de charger les chunks au moindre mouvement
