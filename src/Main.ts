@@ -2,17 +2,15 @@ import "@babylonjs/core/Debug/debugLayer";
 import "@babylonjs/inspector";
 import { Engine } from "@babylonjs/core";
 import { FloatingCameraScene } from "./App";
-import { EngineSetup } from "./core/EngineSetup";
+import { EngineManager } from "./core/EngineManager";
 
 window.addEventListener("DOMContentLoaded", async () => {
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
-    const useWebGPU = false;
 
-    // Create and initialize the engine using EngineSetup
-    const engineSetup = await EngineSetup.Create(canvas, useWebGPU);
-    const engine: Engine = engineSetup.engine as Engine;
+    // Create engine
+    const engine = EngineManager.CreateWebGL2(canvas);
 
-    // Create the scene using the engine and canvas
+    // Create scene
     const scene = FloatingCameraScene.CreateScene(engine, canvas);
 
     // Toggle the debug layer when the "²" key is pressed
