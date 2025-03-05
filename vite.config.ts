@@ -3,7 +3,7 @@ import glsl from "vite-plugin-glsl";
 
 export default defineConfig(({ command, mode }) => {
     return {
-        base: "/world42/",
+        base: "/World42/",
         plugins: [glsl()],
         resolve: {
             alias: {
