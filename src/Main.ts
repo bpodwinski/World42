@@ -1,38 +1,37 @@
-import { Engine, WebGPUEngine } from "@babylonjs/core";
 import "@babylonjs/core/Debug/debugLayer";
 import "@babylonjs/inspector";
-
+import { Engine } from "@babylonjs/core";
 import { FloatingCameraScene } from "./App";
+import { EngineSetup } from "./core/EngineSetup";
 
 window.addEventListener("DOMContentLoaded", async () => {
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
-
     const useWebGPU = false;
-    let engine;
 
-    if (useWebGPU) {
-        engine = new WebGPUEngine(canvas, {
-            stencil: true,
-            antialias: true,
-            enableAllFeatures: true,
-        });
-        await engine.initAsync();
-    } else {
-        engine = new Engine(canvas, true, {
-            preserveDrawingBuffer: true,
-            stencil: true,
-            // @ts-ignore
-            useLogarithmicDepthBuffer: true,
-        });
-    }
+    // Create and initialize the engine using EngineSetup
+    const engineSetup = await EngineSetup.Create(canvas, useWebGPU);
+    const engine: Engine = engineSetup.engine as Engine;
 
-    const scene = FloatingCameraScene.CreateScene(engine as Engine, canvas);
-    //scene.debugLayer.show();
+    // Create the scene using the engine and canvas
+    const scene = FloatingCameraScene.CreateScene(engine, canvas);
 
+    // Toggle the debug layer when the "²" key is pressed
+    window.addEventListener("keydown", (evt) => {
+        if (evt.key === "²") {
+            if (scene.debugLayer.isVisible()) {
+                scene.debugLayer.hide();
+            } else {
+                scene.debugLayer.show();
+            }
+        }
+    });
+
+    // Run the render loop
     engine.runRenderLoop(() => {
         scene.render();
     });
 
+    // Resize the engine on window resize
     window.addEventListener("resize", () => {
         engine.resize();
     });
