@@ -22,12 +22,24 @@ import { PlanetData } from "./utils/PlanetData";
 import { AtmosphericScatteringPostProcess } from "./celestial/AtmosphericScatteringPostProcess";
 import { Face, QuadTree } from "./celestial/quadtree/QuadTree";
 
+/**
+ * FloatingCameraScene creates and configures the scene with a floating-origin camera,
+ * skybox, sun, and a CDLOD-based terrain system.
+ */
 export class FloatingCameraScene {
+    /**
+     * Creates a new Babylon.js scene configured with a floating-origin camera,
+     * skybox, lighting, and terrain using a QuadTree system.
+     *
+     * @param engine - Babylon.js Engine instance
+     * @param canvas - HTMLCanvasElement used for rendering
+     * @returns The configured Scene instance
+     */
     public static CreateScene(
         engine: Engine,
         canvas: HTMLCanvasElement
     ): Scene {
-        // Scene Init
+        // Initialize scene
         let scene = new Scene(engine);
         scene.clearColor.set(0, 0, 0, 1);
         scene.collisionsEnabled = true;
@@ -35,13 +47,12 @@ export class FloatingCameraScene {
             texture.anisotropicFilteringLevel = 16;
         });
 
-        // Create an OriginCamera, which is a special floating-origin UniversalCamera
-        // It works much like UniversalCamera, but we use its doublepos and doubletgt
-        // properties instead of position and target
+        // Create an OriginCamera (a floating-origin UniversalCamera)
+        // Uses double precision properties (doublepos and doubletgt) instead of standard position and target
         let planetTarget = PlanetData.get("Mercury").position.clone();
-        planetTarget.x += ScaleManager.toSimulationUnits(-5_000);
-        planetTarget.y += ScaleManager.toSimulationUnits(2_500);
-        planetTarget.z += ScaleManager.toSimulationUnits(1_000);
+        planetTarget.x += ScaleManager.toSimulationUnits(-5000);
+        planetTarget.y += ScaleManager.toSimulationUnits(2500);
+        planetTarget.z += ScaleManager.toSimulationUnits(1000);
 
         let camera = new OriginCamera("camera", planetTarget, scene);
         camera.debugMode = false;
@@ -79,10 +90,10 @@ export class FloatingCameraScene {
 
         new PostProcess("Pipeline", scene, camera);
 
-        // Skybox
+        // Create skybox with cube texture
         const skybox = MeshBuilder.CreateBox(
             "skyBox",
-            { size: 9_000_000_00 },
+            { size: 1_000_000_0 },
             scene
         );
         const skyboxMaterial = new StandardMaterial("skyBox", scene);
@@ -96,20 +107,19 @@ export class FloatingCameraScene {
         );
         skyboxMaterial.reflectionTexture.coordinatesMode = Texture.SKYBOX_MODE;
 
-        // Sun
+        // Create sun and associated lighting
         let entSunLight = new FloatingEntity("entSunLight", scene);
         entSunLight.doublepos.set(0, 0, 0);
         camera.add(entSunLight);
 
         let sunLight = new PointLight("sunLight", new Vector3(0, 0, 0), scene);
-
         sunLight.intensityMode = PointLight.INTENSITYMODE_LUMINOUSPOWER;
-        sunLight.intensity = 3.75e1;
+        sunLight.intensity = 37.5;
         sunLight.falloffType = PointLight.FALLOFF_STANDARD;
         sunLight.range = ScaleManager.toSimulationUnits(7e9);
         sunLight.diffuse = new Color3(1, 1, 1);
         sunLight.specular = new Color3(1, 1, 1);
-        sunLight.radius = ScaleManager.toSimulationUnits(696_340);
+        sunLight.radius = ScaleManager.toSimulationUnits(696340);
         sunLight.parent = entSunLight;
 
         const entSun = new FloatingEntity("entSun", scene);
@@ -117,20 +127,23 @@ export class FloatingCameraScene {
         camera.add(entSun);
 
         const sun = MeshBuilder.CreateSphere("sun", {
-            segments: 128,
+            segments: 64,
             diameter: PlanetData.get("Sun").diameter,
         });
 
         const starGlare = StarGlare.create(
             scene,
             sun,
-            ScaleManager.toSimulationUnits(696_340 * 2)
+            ScaleManager.toSimulationUnits(696340 * 2)
         );
         starGlare.start();
 
         const glowLayer = new GlowLayer("sunGlow", scene);
         glowLayer.addIncludedOnlyMesh(sun);
 
+        /**
+         * Updates the intensity of the sun's glow based on camera distance.
+         */
         function updateGlowIntensity() {
             let cameraDistance = Vector3.Distance(
                 camera.doublepos,
@@ -139,14 +152,14 @@ export class FloatingCameraScene {
 
             glowLayer.intensity = Math.max(
                 0.65,
-                Math.min(1.2, cameraDistance / 15_000)
+                Math.min(1.2, cameraDistance / 15000)
             );
 
             glowLayer.blurKernelSize = Math.min(
                 64,
                 Math.max(
                     32,
-                    32 + 32 * (1 - Math.min(1, cameraDistance / 20_000))
+                    32 + 32 * (1 - Math.min(1, cameraDistance / 20000))
                 )
             );
         }
@@ -155,7 +168,6 @@ export class FloatingCameraScene {
             "sunMaterial",
             scene
         );
-
         sunMaterial.emissiveTexture = new Texture(
             "sun/sun_surface_albedo.ktx2",
             scene
@@ -164,11 +176,10 @@ export class FloatingCameraScene {
         sunMaterial.metallic = 0.0;
         sunMaterial.roughness = 0.0;
         sun.material = sunMaterial;
-
         sun.checkCollisions = true;
         sun.parent = entSun;
 
-        // Mercury
+        // Create Mercury entity and attach it to the camera's hierarchy
         const entMercury = new FloatingEntity("entMercury", scene);
         entMercury.doublepos.set(
             PlanetData.get("Mercury").position._x,
@@ -177,6 +188,7 @@ export class FloatingCameraScene {
         );
         camera.add(entMercury);
 
+        // Create QuadTree for Mercury on each cube face
         const faces: Face[] = [
             "front",
             "back",
@@ -185,13 +197,12 @@ export class FloatingCameraScene {
             "top",
             "bottom",
         ];
-        const maxLevel: number = 7;
+        const maxLevel: number = 6;
         const radius: number =
             ScaleManager.toSimulationUnits(PlanetData.get("Mercury").diameter) /
             2;
-        const resolution: number = 128;
+        const resolution: number = 64;
 
-        //const quadTreePool = new QuadTreePool(100);
         const mercury = faces.map(
             (face) =>
                 new QuadTree(
@@ -204,7 +215,6 @@ export class FloatingCameraScene {
                     PlanetData.get("Mercury").position,
                     resolution,
                     face,
-                    //quadTreePool,
                     entMercury
                 )
         );
@@ -249,9 +259,10 @@ export class FloatingCameraScene {
         //     atmosphereSettings
         // );
 
-        // Créer une Map pour stocker les Meshes des planètes
+        // Map to store planet meshes (unused in current version)
         const planetMeshes = new Map<string, Mesh>();
 
+        // Update loop before rendering
         scene.onBeforeRenderObservable.add(() => {
             updateGlowIntensity();
             StarGlare.updateParticleSize(
@@ -260,29 +271,29 @@ export class FloatingCameraScene {
             );
 
             sun.rotation.y += PlanetData.planets.Sun.rotationSpeed;
-            //mercury.rotation.y += PlanetData.planets.Mercury.rotationSpeed;
+            // For Mercury, you could update rotation here if needed
         });
 
-        // Fonction asynchrone pour mettre à jour les LOD en boucle
+        // Asynchronous LOD update loop for QuadTree nodes (here, for Mercury)
         async function updateLODs() {
             while (true) {
-                // Mettre à jour les LOD pour chaque node (ici, 'mercury')
+                // Update LOD for each QuadTree node (Mercury)
                 mercury.forEach((node) => {
                     node.updateLOD(camera, false).catch((err) =>
                         console.error(err)
                     );
                 });
-                // Attendre la prochaine frame pour ne pas saturer le CPU
+                // Wait for next frame to avoid saturating the CPU
                 await new Promise<void>((resolve) =>
-                    requestAnimationFrame(resolve)
+                    requestAnimationFrame(() => resolve())
                 );
             }
         }
 
-        // Lancer la boucle d'update dédiée
+        // Start LOD update loop
         updateLODs();
 
-        // Boucle de rendu principale
+        // Main render loop
         engine.runRenderLoop(() => {
             scene.render();
         });
