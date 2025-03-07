@@ -61,7 +61,7 @@ export class FloatingCameraScene {
         camera.touchAngularSensibility = 300000;
         camera.inertia = 0.4;
 
-        camera.speed = ScaleManager.toSimulationUnits(10);
+        camera.speed = ScaleManager.toSimulationUnits(30);
         camera.keysUp.push(90); // Z
         camera.keysDown.push(83); // S
         camera.keysLeft.push(81); // Q
@@ -70,7 +70,7 @@ export class FloatingCameraScene {
         camera.keysDownward.push(65); // E
         camera.minZ = 0.001;
         camera.maxZ = 1_000_000_0;
-        camera.fov = 0.6;
+        camera.fov = 0.9;
         camera.checkCollisions = true;
         camera.applyGravity = false;
         camera.ellipsoid = new Vector3(0.01, 0.01, 0.01);
@@ -81,7 +81,7 @@ export class FloatingCameraScene {
             "wheel",
             function (e) {
                 camera.speed = Math.min(
-                    ScaleManager.toSimulationUnits(10),
+                    ScaleManager.toSimulationUnits(30),
                     Math.max(
                         ScaleManager.toSimulationUnits(0.1),
                         (camera.speed -= e.deltaY * 0.0025)
@@ -200,7 +200,7 @@ export class FloatingCameraScene {
             "top",
             "bottom",
         ];
-        const maxLevel: number = 9;
+        const maxLevel: number = 8;
         const radius: number =
             ScaleManager.toSimulationUnits(PlanetData.get("Mercury").diameter) /
             2;
