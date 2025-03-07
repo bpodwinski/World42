@@ -1,3 +1,5 @@
+#extension GL_OES_standard_derivatives : enable
+
 /*
  * Planetary Terrain Shader with Normal Mapping
  *
@@ -45,17 +47,17 @@ void main(void) {
     gl_FragColor = showUV();
   } else {
     // Échantillonner la texture diffuse avec une projection équirectangulaire
-    vec4 diffuseColor = equirectangularProjection(diffuseTexture, vPosition, normalize(vNormal), textureScale, vec2(0.0), false);
+    vec4 diffuseColor = equirectangularProjection(vPosition, normalize(vNormal), textureScale, vec2(0.0));
 
     // Échantillonner la texture de détail via triplanar mapping
     vec2 detailOffset = vec2(0.5, 0.5);
-    vec4 detailColor = triplanar(detailTexture, vPosition, normalize(vNormal), detailScale, detailOffset, true);
+    vec4 detailColor = triplanar(vPosition, normalize(vNormal), detailScale, detailOffset, true);
 
     // Combiner diffuse et détail
     vec4 combinedColor = mix(diffuseColor, diffuseColor * detailColor, detailBlend);
 
     // Échantillonner la normal map avec les UV (générées dans le vertex shader)
-    vec3 normalSample = texture2D(normalMap, vUV).rgb;
+    vec3 normalSample = texture(normalMap, vUV).rgb;
     // Convertir de [0, 1] à [-1, 1]
     normalSample = normalize(normalSample * 2.0 - 1.0);
 

@@ -24,11 +24,11 @@ vec4 hash4(ivec2 p) {
  * @param uv The UV coordinates.
  * @return The blended texture color.
  */
-vec4 textureNoTile(sampler2D samp, in vec2 uv) {
+vec4 textureNoTile(in vec2 uv) {
     ivec2 iuv = ivec2(floor(uv));
     vec2 fuv = fract(uv);
 
-    // Generate per-tile transform using the hash function.
+    // Génération d'une transformation aléatoire par tuile
     vec4 ofa = hash4(iuv + ivec2(0, 0));
     vec4 ofb = hash4(iuv + ivec2(1, 0));
     vec4 ofc = hash4(iuv + ivec2(0, 1));
@@ -37,13 +37,13 @@ vec4 textureNoTile(sampler2D samp, in vec2 uv) {
     vec2 ddx = dFdx(uv);
     vec2 ddy = dFdy(uv);
 
-    // Transform per-tile UVs: mirror the UVs based on the hash result.
+    // Transformation des UVs par miroitement selon le résultat du hash
     ofa.zw = sign(ofa.zw - 0.5);
     ofb.zw = sign(ofb.zw - 0.5);
     ofc.zw = sign(ofc.zw - 0.5);
     ofd.zw = sign(ofd.zw - 0.5);
 
-    // Compute modified UVs and corresponding derivatives for proper mipmapping.
+    // Calcul des UVs modifiés et de leurs dérivées pour le mipmapping
     vec2 uva = uv * ofa.zw + ofa.xy;
     vec2 ddxa = ddx * ofa.zw;
     vec2 ddya = ddy * ofa.zw;
@@ -60,8 +60,9 @@ vec4 textureNoTile(sampler2D samp, in vec2 uv) {
     vec2 ddxd = ddx * ofd.zw;
     vec2 ddyd = ddy * ofd.zw;
 
-    // Compute blend weights using smoothstep.
+    // Calcul des poids de mélange avec smoothstep
     vec2 b = smoothstep(0.25, 0.75, fuv);
 
-    return mix(mix(textureGrad(samp, uva, ddxa, ddya), textureGrad(samp, uvb, ddxb, ddyb), b.x), mix(textureGrad(samp, uvc, ddxc, ddyc), textureGrad(samp, uvd, ddxd, ddyd), b.x), b.y);
+    // Mélange des résultats avec textureGrad en utilisant le sampler global
+    return mix(mix(textureGrad(detailTexture, uva, ddxa, ddya), textureGrad(detailTexture, uvb, ddxb, ddyb), b.x), mix(textureGrad(detailTexture, uvc, ddxc, ddyc), textureGrad(detailTexture, uvd, ddxd, ddyd), b.x), b.y);
 }

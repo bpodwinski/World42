@@ -48,15 +48,15 @@ varying float vHeight;
 //------------------------------------------------------------------------------
 // Fonction d'échantillonnage par projection équirectangulaire (utilise le centre du patch)
 //------------------------------------------------------------------------------
-vec4 equirectangularProjection(sampler2D tex, vec3 pos, vec3 center, float scale) {
-    // Utiliser le centre du patch pour obtenir des variations locales
+vec4 equirectangularProjection(vec3 pos, vec3 center, float scale) {
   vec3 dir = normalize(pos - center);
   float longitude = atan(dir.z, dir.x); // Valeur entre -pi et pi
   float latitude = asin(dir.y);         // Valeur entre -pi/2 et pi/2
   float u = (longitude + 3.14159) / (2.0 * 3.14159);
   float v = (latitude + 1.5708) / 3.14159;
   vec2 uvProj = vec2(u, v) * scale;
-  return texture2D(tex, uvProj);
+
+  return texture(heightMap, uvProj);
 }
 
 //------------------------------------------------------------------------------
@@ -67,7 +67,8 @@ void main(void) {
   vec3 displacedPosition = computeDisplacedPosition(position, normal, amplitude, cameraPosition);
 
     // Échantillonner la height map en utilisant une projection équirectangulaire basée sur le centre du patch.
-  vec4 heightSample = equirectangularProjection(heightMap, displacedPosition, uPatchCenter, textureScale);
+  vec4 heightSample = equirectangularProjection(displacedPosition, uPatchCenter, textureScale);
+
   float height = heightSample.r;
   vHeight = height;
 
