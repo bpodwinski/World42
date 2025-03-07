@@ -1,4 +1,4 @@
-import { Engine, WebGPUEngine } from "@babylonjs/core";
+import { Engine, WebGPUEngine, WebGPUEngineOptions } from "@babylonjs/core";
 
 /**
  * EngineManager centralizes the initialization and global configuration of the Babylon.js engine
@@ -29,8 +29,13 @@ export class EngineManager {
         const engine = new WebGPUEngine(canvas, {
             stencil: true,
             antialias: true,
-            enableAllFeatures: true,
-        });
+            deviceDescriptor: {
+                requiredLimits: {
+                    maxTextureDimension2D: 16384,
+                    maxBufferSize: 2147483648,
+                },
+            },
+        } as WebGPUEngineOptions);
         await engine.initAsync();
 
         return engine;
