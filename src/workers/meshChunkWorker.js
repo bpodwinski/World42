@@ -177,7 +177,12 @@ function mapUVtoCube(u, v, face) {
  * @param {MessageEvent} event - The message event containing the mesh parameters
  */
 self.onmessage = (event) => {
+    const start = performance.now();
+
     const { bounds, resolution, radius, face } = event.data;
     const meshData = computeChunkMeshData(bounds, resolution, radius, face);
+
     self.postMessage(meshData);
+
+    console.log("Chunk created at: " + (performance.now() - start) + "ms");
 };
