@@ -11,6 +11,7 @@ import {
     Mesh,
     StandardMaterial,
     CubeTexture,
+    WebGPUEngine,
 } from "@babylonjs/core";
 import "@babylonjs/core/Materials/Textures/Loaders/ktxTextureLoader";
 
@@ -37,7 +38,7 @@ export class FloatingCameraScene {
      * @returns The configured Scene instance
      */
     public static CreateScene(
-        engine: Engine,
+        engine: Engine | WebGPUEngine,
         canvas: HTMLCanvasElement
     ): Scene {
         // Initialize scene

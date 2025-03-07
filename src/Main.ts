@@ -8,7 +8,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
 
     // Create engine
-    const engine = EngineManager.CreateWebGL2(canvas);
+    const engine = await EngineManager.CreateWebGPU(canvas);
 
     // Create scene
     const scene = FloatingCameraScene.CreateScene(engine, canvas);
