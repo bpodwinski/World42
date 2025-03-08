@@ -23,8 +23,8 @@ import { PlanetData } from "./utils/PlanetData";
 //import { AtmosphericScatteringPostProcess } from "./celestial/AtmosphericScatteringPostProcess";
 import {
     Face,
-    QuadTree,
-} from "./celestial/planets/rocky_planet/chunks/quadTree";
+    ChunkTree,
+} from "./celestial/planets/rocky_planet/chunks/chunkTree";
 import { TextureManager } from "./core/TextureManager";
 
 /**
@@ -212,7 +212,7 @@ export class FloatingCameraScene {
 
         const mercury = faces.map(
             (face) =>
-                new QuadTree(
+                new ChunkTree(
                     scene,
                     camera,
                     { uMin: -1, uMax: 1, vMin: -1, vMax: 1 },
@@ -236,11 +236,11 @@ export class FloatingCameraScene {
         // Toggle the debug layer and debugLOD via keyboard
         window.addEventListener("keydown", (evt) => {
             if (evt.key.toLowerCase() === "l") {
-                QuadTree.debugLODEnabled = !QuadTree.debugLODEnabled;
+                ChunkTree.debugLODEnabled = !ChunkTree.debugLODEnabled;
 
                 mercury.forEach((node) => {
-                    node.debugLOD = QuadTree.debugLODEnabled;
-                    node.updateDebugLOD(QuadTree.debugLODEnabled);
+                    node.debugLOD = ChunkTree.debugLODEnabled;
+                    node.updateDebugLOD(ChunkTree.debugLODEnabled);
                 });
             }
         });

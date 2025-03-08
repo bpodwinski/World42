@@ -37,11 +37,11 @@ export const globalWorkerPool = new WorkerPool(
 );
 
 /**
- * QuadTree class represents a terrain chunk and manages its hierarchical subdivision
+ * ChunkTree class represents a terrain chunk and manages its hierarchical subdivision
  *
  * Stores spatial information and holds reference to the generated mesh if available
  */
-export class QuadTree {
+export class ChunkTree {
     scene: Scene;
     camera: OriginCamera;
     bounds: Bounds;
@@ -50,7 +50,7 @@ export class QuadTree {
     radius: number;
     center: Vector3;
     resolution: number;
-    children: QuadTree[] | null;
+    children: ChunkTree[] | null;
     mesh: Mesh | null;
     face: Face;
     parentEntity: FloatingEntityInterface;
@@ -115,81 +115,18 @@ export class QuadTree {
     }
 
     /**
-     * Asynchronously creates and returns the mesh for the chunk using a worker
-     *
-     * Uses caching to avoid duplicate mesh creation
-     *
-     * @returns {Promise<Mesh>} Promise resolving to the generated Mesh
-     */
-    // async createMeshAsync(): Promise<Mesh> {
-    //     if (this.meshPromise) {
-    //         return this.meshPromise;
-    //     }
-
-    //     this.meshPromise = new Promise<any>((resolve) => {
-    //         const taskData = {
-    //             bounds: this.bounds,
-    //             resolution: this.resolution,
-    //             radius: this.radius,
-    //             face: this.face,
-    //             level: this.level,
-    //             maxLevel: this.maxLevel,
-    //         };
-
-    //         const center = this.getCenter();
-    //         const priority = Vector3.Distance(center, this.camera.doublepos);
-
-    //         globalWorkerPool.enqueueTask({
-    //             data: taskData,
-    //             priority: priority,
-    //             callback: (meshData: any) => {
-    //                 const terrainMesh = Terrain.createMeshFromWorker(
-    //                     this.scene,
-    //                     meshData,
-    //                     this.face,
-    //                     this.level
-    //                 );
-
-    //                 terrainMesh.parent = this.parentEntity;
-    //                 terrainMesh.checkCollisions = true;
-
-    //                 terrainMesh.material = new TerrainShader(this.scene).create(
-    //                     taskData.resolution,
-    //                     this.level,
-    //                     taskData.maxLevel,
-    //                     this.camera.doublepos,
-    //                     this.radius,
-    //                     this.center,
-    //                     false,
-    //                     QuadTree.debugLODEnabled
-    //                 );
-
-    //                 /// Reset cache and record current LOD level
-    //                 this.meshPromise = null;
-    //                 this.mesh = terrainMesh;
-    //                 this.mesh.alwaysSelectAsActiveMesh = true; // TODO: Bug due to heightmap GPU bounding box for frustum culling being too low
-    //                 this.currentLODLevel = this.level;
-
-    //                 resolve(terrainMesh);
-    //             },
-    //         });
-    //     });
-
-    //     return this.meshPromise;
-    // }
-
-    /**
      * Returns the center position of the chunk in world space
      *
      * Uses bounds and parent's double position for calculation
      *
      * @returns {Vector3} Center position of the chunk
      */
-    getCenter(): Vector3 {
+    private getCenterChunk(): Vector3 {
         const { uMin, uMax, vMin, vMax } = this.bounds;
         const uCenter = (uMin + uMax) / 2;
         const vCenter = (vMin + vMax) / 2;
         const posCube = Terrain.mapUVtoCube(uCenter, vCenter, this.face);
+
         return this.parentEntity.doublepos.add(
             posCube.normalize().scale(this.radius)
         );
@@ -201,8 +138,8 @@ export class QuadTree {
      * @param {Bounds} bounds - New bounds for the child node
      * @returns {QuadTree} New child QuadTree node
      */
-    private createChild(bounds: Bounds): QuadTree {
-        return new QuadTree(
+    private createChild(bounds: Bounds): ChunkTree {
+        return new ChunkTree(
             this.scene,
             this.camera,
             bounds,
@@ -293,7 +230,7 @@ export class QuadTree {
 
         try {
             const { uMin, uMax, vMin, vMax } = this.bounds;
-            const center = this.getCenter();
+            const center = this.getCenterChunk();
             const cornersUV = [
                 { u: uMin, v: vMin },
                 { u: uMin, v: vMax },
@@ -337,7 +274,7 @@ export class QuadTree {
                                 },
                                 this.camera.doublepos,
                                 child.parentEntity,
-                                child.getCenter()
+                                child.getCenterChunk()
                             );
                         })
                     );

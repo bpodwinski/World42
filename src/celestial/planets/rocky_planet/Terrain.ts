@@ -1,5 +1,5 @@
 import { Scene, Mesh, Vector3, VertexData } from "@babylonjs/core";
-import { Face } from "./chunks/quadTree";
+import { Face } from "./chunks/chunkTree";
 
 /**
  * Terrain handles geometry creation for terrain chunks

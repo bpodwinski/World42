@@ -2,7 +2,7 @@ import { Scene, Mesh, Vector3 } from "@babylonjs/core";
 import { WorkerPool } from "./workerPool";
 import { Terrain } from "../terrain";
 import { TerrainShader } from "../terrainShader";
-import { Face, QuadTree } from "./quadTree";
+import { Face, ChunkTree } from "./chunkTree";
 
 /**
  * Class dedicated to forging chunk meshes using a worker
@@ -71,7 +71,7 @@ export class ChunkForge {
                         taskData.radius,
                         center,
                         true,
-                        QuadTree.debugLODEnabled
+                        ChunkTree.debugLODEnabled
                     );
 
                     terrainMesh.alwaysSelectAsActiveMesh = true;
