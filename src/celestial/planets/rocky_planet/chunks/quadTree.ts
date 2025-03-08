@@ -1,19 +1,16 @@
 import { Scene, Mesh, Vector3, ShaderMaterial } from "@babylonjs/core";
+
+import { ChunkForge } from "./chunkForge";
 import { WorkerPool } from "./workerPool";
 import {
     FloatingEntityInterface,
     OriginCamera,
 } from "../../../../utils/OriginCamera";
 import { Terrain } from "../terrain";
-import { TerrainShader } from "../terrainShader";
 import { DeleteSemaphore } from "./deleteSemaphore";
 
 /**
  * Type defining the UV bounds of a terrain chunk
- *
- * Contains minimum and maximum u and v values
- *
- * @typedef {Bounds}
  */
 export type Bounds = {
     uMin: number;
@@ -24,8 +21,6 @@ export type Bounds = {
 
 /**
  * Type defining the possible cube faces
- *
- * @typedef {Face}
  */
 export type Face = "front" | "back" | "left" | "right" | "top" | "bottom";
 
@@ -60,7 +55,7 @@ export class QuadTree {
     face: Face;
     parentEntity: FloatingEntityInterface;
 
-    //private quadTreePool: QuadTreePool;
+    private chunkForge: ChunkForge;
 
     // Cache for asynchronous mesh creation to avoid duplicate generation
     private meshPromise: Promise<Mesh> | null = null;
@@ -100,7 +95,6 @@ export class QuadTree {
         center: Vector3,
         resolution: number,
         face: Face,
-        //quadTreePool: QuadTreePool = new QuadTreePool() || null,
         parentEntity: FloatingEntityInterface,
         debugLOD: boolean = false
     ) {
@@ -114,10 +108,10 @@ export class QuadTree {
         this.resolution = resolution;
         this.face = face;
         this.children = null;
-        //this.quadTreePool = quadTreePool;
         this.mesh = null;
         this.parentEntity = parentEntity;
         this.debugLOD = debugLOD;
+        this.chunkForge = new ChunkForge(this.scene, globalWorkerPool);
     }
 
     /**
@@ -127,62 +121,62 @@ export class QuadTree {
      *
      * @returns {Promise<Mesh>} Promise resolving to the generated Mesh
      */
-    async createMeshAsync(): Promise<Mesh> {
-        if (this.meshPromise) {
-            return this.meshPromise;
-        }
+    // async createMeshAsync(): Promise<Mesh> {
+    //     if (this.meshPromise) {
+    //         return this.meshPromise;
+    //     }
 
-        this.meshPromise = new Promise<any>((resolve) => {
-            const taskData = {
-                bounds: this.bounds,
-                resolution: this.resolution,
-                radius: this.radius,
-                face: this.face,
-                level: this.level,
-                maxLevel: this.maxLevel,
-            };
+    //     this.meshPromise = new Promise<any>((resolve) => {
+    //         const taskData = {
+    //             bounds: this.bounds,
+    //             resolution: this.resolution,
+    //             radius: this.radius,
+    //             face: this.face,
+    //             level: this.level,
+    //             maxLevel: this.maxLevel,
+    //         };
 
-            const center = this.getCenter();
-            const priority = Vector3.Distance(center, this.camera.doublepos);
+    //         const center = this.getCenter();
+    //         const priority = Vector3.Distance(center, this.camera.doublepos);
 
-            globalWorkerPool.enqueueTask({
-                data: taskData,
-                priority: priority,
-                callback: (meshData: any) => {
-                    const terrainMesh = Terrain.createMeshFromWorker(
-                        this.scene,
-                        meshData,
-                        this.face,
-                        this.level
-                    );
+    //         globalWorkerPool.enqueueTask({
+    //             data: taskData,
+    //             priority: priority,
+    //             callback: (meshData: any) => {
+    //                 const terrainMesh = Terrain.createMeshFromWorker(
+    //                     this.scene,
+    //                     meshData,
+    //                     this.face,
+    //                     this.level
+    //                 );
 
-                    terrainMesh.parent = this.parentEntity;
-                    terrainMesh.checkCollisions = true;
+    //                 terrainMesh.parent = this.parentEntity;
+    //                 terrainMesh.checkCollisions = true;
 
-                    terrainMesh.material = new TerrainShader(this.scene).create(
-                        taskData.resolution,
-                        this.level,
-                        taskData.maxLevel,
-                        this.camera.doublepos,
-                        this.radius,
-                        this.center,
-                        false,
-                        QuadTree.debugLODEnabled
-                    );
+    //                 terrainMesh.material = new TerrainShader(this.scene).create(
+    //                     taskData.resolution,
+    //                     this.level,
+    //                     taskData.maxLevel,
+    //                     this.camera.doublepos,
+    //                     this.radius,
+    //                     this.center,
+    //                     false,
+    //                     QuadTree.debugLODEnabled
+    //                 );
 
-                    /// Reset cache and record current LOD level
-                    this.meshPromise = null;
-                    this.mesh = terrainMesh;
-                    this.mesh.alwaysSelectAsActiveMesh = true; // TODO: Bug due to heightmap GPU bounding box for frustum culling being too low
-                    this.currentLODLevel = this.level;
+    //                 /// Reset cache and record current LOD level
+    //                 this.meshPromise = null;
+    //                 this.mesh = terrainMesh;
+    //                 this.mesh.alwaysSelectAsActiveMesh = true; // TODO: Bug due to heightmap GPU bounding box for frustum culling being too low
+    //                 this.currentLODLevel = this.level;
 
-                    resolve(terrainMesh);
-                },
-            });
-        });
+    //                 resolve(terrainMesh);
+    //             },
+    //         });
+    //     });
 
-        return this.meshPromise;
-    }
+    //     return this.meshPromise;
+    // }
 
     /**
      * Returns the center position of the chunk in world space
@@ -218,7 +212,6 @@ export class QuadTree {
             this.center,
             this.resolution,
             this.face,
-            //this.quadTreePool,
             this.parentEntity,
             this.debugLOD
         );
@@ -323,16 +316,30 @@ export class QuadTree {
             ];
 
             const minDistance = Math.min(...distances);
-            const lodRange = this.radius * 2 * Math.pow(0.65, this.level);
+            const lodRange = this.radius * 2 * Math.pow(0.6, this.level);
 
             if (minDistance < lodRange && this.level < this.maxLevel) {
                 // If chunk is close and can be subdivided, process children
                 if (!this.children) {
                     this.subdivide();
 
-                    // Children are guaranteed to exist after subdivision
+                    // Forge meshes for all children
                     await Promise.all(
-                        this.children!.map((child) => child.createMeshAsync())
+                        this.children!.map(async (child) => {
+                            child.mesh = await child.chunkForge.forge(
+                                {
+                                    bounds: child.bounds,
+                                    resolution: child.resolution,
+                                    radius: child.radius,
+                                    face: child.face,
+                                    level: child.level,
+                                    maxLevel: child.maxLevel,
+                                },
+                                this.camera.doublepos,
+                                child.parentEntity,
+                                child.getCenter()
+                            );
+                        })
                     );
 
                     for (const child of this.children!) {
@@ -345,10 +352,10 @@ export class QuadTree {
                         this.mesh.setEnabled(false);
                     }
 
-                    const semaphore = new DeleteSemaphore(this.children!, [
-                        this,
-                    ]);
-                    semaphore.update();
+                    // const semaphore = new DeleteSemaphore(this.children!, [
+                    //     this,
+                    // ]);
+                    // semaphore.update();
                 }
 
                 // Disable current mesh to prevent overlap with children
@@ -365,7 +372,21 @@ export class QuadTree {
                 if (this.mesh && this.currentLODLevel === this.level) {
                     // Mesh is already up to date for this level
                 } else if (!this.mesh) {
-                    this.mesh = await this.createMeshAsync();
+                    this.mesh = await this.chunkForge.forge(
+                        {
+                            bounds: this.bounds,
+                            resolution: this.resolution,
+                            radius: this.radius,
+                            face: this.face,
+                            level: this.level,
+                            maxLevel: this.maxLevel,
+                        },
+                        this.camera.doublepos,
+                        this.parentEntity,
+                        center
+                    );
+
+                    this.currentLODLevel = this.level;
                 } else {
                     // LOD level has changed: create new mesh immediately,
                     // wait for it to render then dispose the old mesh
@@ -373,9 +394,21 @@ export class QuadTree {
 
                     this.meshPromise = null; // Reset cache to force new mesh creation
 
-                    const newMesh = await this.createMeshAsync();
-                    newMesh.setEnabled(true);
-                    this.mesh = newMesh;
+                    this.mesh = await this.chunkForge.forge(
+                        {
+                            bounds: this.bounds,
+                            resolution: this.resolution,
+                            radius: this.radius,
+                            face: this.face,
+                            level: this.level,
+                            maxLevel: this.maxLevel,
+                        },
+                        this.camera.doublepos,
+                        this.parentEntity,
+                        center
+                    );
+
+                    this.mesh.setEnabled(true);
 
                     // Wait for new mesh to render
                     await new Promise<void>((resolve) => {
@@ -391,6 +424,7 @@ export class QuadTree {
 
                     // Once new mesh is rendered, dispose the old mesh
                     oldMesh.dispose();
+                    this.currentLODLevel = this.level;
                 }
 
                 if (this.children) {
@@ -407,8 +441,7 @@ export class QuadTree {
     }
 
     /**
-     * Updates the debugLOD uniform on the shader material of this chunk
-     * and recursively for all child chunks.
+     * Updates the debugLOD uniform on the shader material of this chunk and its children
      *
      * @param debugLOD - New value for debugLOD (true: enabled, false: disabled)
      */
@@ -419,7 +452,6 @@ export class QuadTree {
                 debugLOD ? 1 : 0
             );
         }
-
         if (this.children) {
             this.children.forEach((child) => child.updateDebugLOD(debugLOD));
         }
