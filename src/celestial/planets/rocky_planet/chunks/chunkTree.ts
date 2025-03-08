@@ -10,7 +10,7 @@ import { Terrain } from "../terrain";
 import { DeleteSemaphore } from "./deleteSemaphore";
 import { io, Socket } from "socket.io-client";
 
-const socket: Socket = io("http://37.187.129.163:8888");
+const socket: Socket = io("***:8888");
 
 /**
  * Type defining the UV bounds of a terrain chunk
