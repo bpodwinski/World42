@@ -1,11 +1,11 @@
 import { Scene, Mesh, Vector3, ShaderMaterial, Texture } from "@babylonjs/core";
-import { WorkerPool } from "../WorkerPool";
+import { WorkerPool } from "./workerPool";
 import {
     FloatingEntityInterface,
     OriginCamera,
 } from "../../../../utils/OriginCamera";
-import { Terrain } from "../Terrain";
-import { TerrainShader } from "../TerrainShader";
+import { Terrain } from "../terrain";
+import { TerrainShader } from "../terrainShader";
 
 /**
  * Type defining the UV bounds of a terrain chunk

@@ -24,7 +24,7 @@ import { PlanetData } from "./utils/PlanetData";
 import {
     Face,
     QuadTree,
-} from "./celestial/planets/rocky_planet/quadtree/QuadTree";
+} from "./celestial/planets/rocky_planet/chunks/quadTree";
 import { TextureManager } from "./core/TextureManager";
 
 /**
