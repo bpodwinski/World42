@@ -1,4 +1,4 @@
-import { Scene, Mesh, Vector3, ShaderMaterial, Texture } from "@babylonjs/core";
+import { Scene, Mesh, Vector3, ShaderMaterial } from "@babylonjs/core";
 import { WorkerPool } from "./workerPool";
 import {
     FloatingEntityInterface,
@@ -6,6 +6,7 @@ import {
 } from "../../../../utils/OriginCamera";
 import { Terrain } from "../terrain";
 import { TerrainShader } from "../terrainShader";
+import { DeleteSemaphore } from "./deleteSemaphore";
 
 /**
  * Type defining the UV bounds of a terrain chunk
@@ -306,20 +307,23 @@ export class QuadTree {
                 { u: uMax, v: vMin },
                 { u: uMax, v: vMax },
             ];
+
             const corners = cornersUV.map(({ u, v }) => {
                 const posCube = Terrain.mapUVtoCube(u, v, this.face);
                 return this.parentEntity.doublepos.add(
                     posCube.normalize().scale(this.radius)
                 );
             });
+
             const distances = [
                 Vector3.Distance(center, camera.doublepos),
                 ...corners.map((corner) =>
                     Vector3.Distance(corner, camera.doublepos)
                 ),
             ];
+
             const minDistance = Math.min(...distances);
-            const lodRange = this.radius * 2 * Math.pow(0.6, this.level);
+            const lodRange = this.radius * 2 * Math.pow(0.65, this.level);
 
             if (minDistance < lodRange && this.level < this.maxLevel) {
                 // If chunk is close and can be subdivided, process children
@@ -340,12 +344,18 @@ export class QuadTree {
                     if (this.mesh) {
                         this.mesh.setEnabled(false);
                     }
+
+                    const semaphore = new DeleteSemaphore(this.children!, [
+                        this,
+                    ]);
+                    semaphore.update();
                 }
 
                 // Disable current mesh to prevent overlap with children
                 if (this.mesh) {
                     this.mesh.setEnabled(false);
                 }
+
                 await Promise.all(
                     this.children!.map((child) =>
                         child.updateLOD(camera, debugMode)
@@ -382,9 +392,11 @@ export class QuadTree {
                     // Once new mesh is rendered, dispose the old mesh
                     oldMesh.dispose();
                 }
+
                 if (this.children) {
                     this.disposeChildren();
                 }
+
                 if (this.mesh) {
                     this.mesh.setEnabled(true);
                 }
@@ -407,6 +419,7 @@ export class QuadTree {
                 debugLOD ? 1 : 0
             );
         }
+
         if (this.children) {
             this.children.forEach((child) => child.updateDebugLOD(debugLOD));
         }
