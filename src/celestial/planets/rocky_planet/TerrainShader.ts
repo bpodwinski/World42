@@ -5,17 +5,17 @@ import {
     Texture,
     Vector3,
 } from "@babylonjs/core";
-import { ScaleManager } from "../utils/ScaleManager";
+import { ScaleManager } from "../../../utils/ScaleManager";
 
-import textureNoTileShader from "../shaders/terrain/_textureNoTile.glsl?raw";
-import terrainTriplanarShader from "../shaders/terrain/_terrainTriplanar.glsl?raw";
-import terrainMorphingShader from "../shaders/terrain/_terrainMorphing.glsl?raw";
-import terrainNoiseShader from "../shaders/terrain/_terrainNoiseShader.glsl?raw";
-import terrainDebugLODShader from "../shaders/terrain/_terrainDebugLOD.glsl?raw";
+import textureNoTileShader from "../../../shaders/terrain/_textureNoTile.glsl?raw";
+import terrainTriplanarShader from "../../../shaders/terrain/_terrainTriplanar.glsl?raw";
+import terrainMorphingShader from "../../../shaders/terrain/_terrainMorphing.glsl?raw";
+import terrainNoiseShader from "../../../shaders/terrain/_terrainNoiseShader.glsl?raw";
+import terrainDebugLODShader from "../../../shaders/terrain/_terrainDebugLOD.glsl?raw";
 
-import terrainVertexShader from "../shaders/terrain/terrainVertexShader.glsl?raw";
-import terrainFragmentShader from "../shaders/terrain/terrainFragmentShader.glsl?raw";
-import { TextureManager } from "../core/TextureManager";
+import terrainVertexShader from "../../../shaders/terrain/terrainVertexShader.glsl?raw";
+import terrainFragmentShader from "../../../shaders/terrain/terrainFragmentShader.glsl?raw";
+import { TextureManager } from "../../../core/TextureManager";
 
 Effect.IncludesShadersStore["textureNoTile"] = textureNoTileShader;
 Effect.IncludesShadersStore["triplanar"] = terrainTriplanarShader;

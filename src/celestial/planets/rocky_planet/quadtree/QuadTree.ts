@@ -1,9 +1,9 @@
 import { Scene, Mesh, Vector3, ShaderMaterial, Texture } from "@babylonjs/core";
-import { WorkerPool } from "../../utils/WorkerPool";
+import { WorkerPool } from "../WorkerPool";
 import {
     FloatingEntityInterface,
     OriginCamera,
-} from "../../utils/OriginCamera";
+} from "../../../../utils/OriginCamera";
 import { Terrain } from "../Terrain";
 import { TerrainShader } from "../TerrainShader";
 
@@ -34,7 +34,7 @@ export type Face = "front" | "back" | "left" | "right" | "top" | "bottom";
  * Instantiated with the worker script URL and using hardware concurrency for both workers and concurrent tasks
  */
 export const globalWorkerPool = new WorkerPool(
-    new URL("../../workers/meshChunkWorker", import.meta.url).href,
+    new URL("../workers/meshChunkWorker", import.meta.url).href,
     navigator.hardwareConcurrency - 1,
     navigator.hardwareConcurrency - 1,
     true

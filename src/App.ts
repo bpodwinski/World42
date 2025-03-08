@@ -21,7 +21,10 @@ import { ScaleManager } from "./utils/ScaleManager";
 import { FloatingEntity, OriginCamera } from "./utils/OriginCamera";
 import { PlanetData } from "./utils/PlanetData";
 //import { AtmosphericScatteringPostProcess } from "./celestial/AtmosphericScatteringPostProcess";
-import { Face, QuadTree } from "./celestial/quadtree/QuadTree";
+import {
+    Face,
+    QuadTree,
+} from "./celestial/planets/rocky_planet/quadtree/QuadTree";
 import { TextureManager } from "./core/TextureManager";
 
 /**
