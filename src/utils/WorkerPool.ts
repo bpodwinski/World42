@@ -39,7 +39,7 @@ interface WorkerWithTask extends Worker {
  */
 export class WorkerPool {
     private workers: Worker[] = [];
-    private maxWorkers: number = navigator.hardwareConcurrency || 1;
+    private maxWorkers: number = navigator.hardwareConcurrency - 1 || 1;
     private busyWorkers: Set<Worker> = new Set();
     private workerStatusTimeout: number | null = null;
     private taskQueue: WorkerTask[] = [];

@@ -35,8 +35,8 @@ export type Face = "front" | "back" | "left" | "right" | "top" | "bottom";
  */
 export const globalWorkerPool = new WorkerPool(
     new URL("../../workers/meshChunkWorker", import.meta.url).href,
-    navigator.hardwareConcurrency,
-    navigator.hardwareConcurrency,
+    navigator.hardwareConcurrency - 1,
+    navigator.hardwareConcurrency - 1,
     true
 );
 
