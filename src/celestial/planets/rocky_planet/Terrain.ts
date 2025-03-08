@@ -48,7 +48,7 @@ export class Terrain {
      * @param level - Current level of detail
      * @returns Mesh built from vertex data
      */
-    static createMeshFromWorker(
+    static createMesh(
         scene: Scene,
         meshData: {
             positions: number[];

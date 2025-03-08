@@ -26,6 +26,7 @@ import {
     ChunkTree,
 } from "./celestial/planets/rocky_planet/chunks/chunkTree";
 import { TextureManager } from "./core/TextureManager";
+import { io } from "socket.io-client";
 
 /**
  * FloatingCameraScene creates and configures the scene with a floating-origin camera,
@@ -204,11 +205,11 @@ export class FloatingCameraScene {
             "top",
             "bottom",
         ];
-        const maxLevel: number = 8;
+        const maxLevel: number = 6;
         const radius: number =
             ScaleManager.toSimulationUnits(PlanetData.get("Mercury").diameter) /
             2;
-        const resolution: number = 8;
+        const resolution: number = 4;
 
         const mercury = faces.map(
             (face) =>

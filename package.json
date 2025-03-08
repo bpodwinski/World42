@@ -22,6 +22,8 @@
     "@babylonjs/inspector": "^7.52.2",
     "@babylonjs/ktx2decoder": "^7.52.2",
     "@babylonjs/loaders": "^7.52.2",
-    "@babylonjs/materials": "^7.52.2"
+    "@babylonjs/materials": "^7.52.2",
+    "cors": "^2.8.5",
+    "socket.io-client": "^4.8.1"
   }
 }

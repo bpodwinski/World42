@@ -8,6 +8,9 @@ import {
 } from "../../../../utils/OriginCamera";
 import { Terrain } from "../terrain";
 import { DeleteSemaphore } from "./deleteSemaphore";
+import { io, Socket } from "socket.io-client";
+
+const socket: Socket = io("http://37.187.129.163:8888");
 
 /**
  * Type defining the UV bounds of a terrain chunk
@@ -111,7 +114,7 @@ export class ChunkTree {
         this.mesh = null;
         this.parentEntity = parentEntity;
         this.debugLOD = debugLOD;
-        this.chunkForge = new ChunkForge(this.scene, globalWorkerPool);
+        this.chunkForge = new ChunkForge(this.scene, globalWorkerPool, socket);
     }
 
     /**
@@ -263,7 +266,7 @@ export class ChunkTree {
                     // Forge meshes for all children
                     await Promise.all(
                         this.children!.map(async (child) => {
-                            child.mesh = await child.chunkForge.forge(
+                            child.mesh = await child.chunkForge.worker(
                                 {
                                     bounds: child.bounds,
                                     resolution: child.resolution,
@@ -309,7 +312,7 @@ export class ChunkTree {
                 if (this.mesh && this.currentLODLevel === this.level) {
                     // Mesh is already up to date for this level
                 } else if (!this.mesh) {
-                    this.mesh = await this.chunkForge.forge(
+                    this.mesh = await this.chunkForge.worker(
                         {
                             bounds: this.bounds,
                             resolution: this.resolution,
@@ -331,7 +334,7 @@ export class ChunkTree {
 
                     this.meshPromise = null; // Reset cache to force new mesh creation
 
-                    this.mesh = await this.chunkForge.forge(
+                    this.mesh = await this.chunkForge.worker(
                         {
                             bounds: this.bounds,
                             resolution: this.resolution,
