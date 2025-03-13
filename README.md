@@ -1,3 +1,5 @@
+![planet-quadtree-js-web-web-worker](https://github.com/user-attachments/assets/bbbdd36f-db09-4105-9a1c-66f747aadccc)
+
 # World42
 
 World42 is a high-performance, multithreaded planet rendering engine that leverages a quadtree structure to dynamically manage Levels of Detail (LOD) for planetary surfaces. The project uses Web Workers for heavy geometry calculations and a floating-origin system to maintain precision even at vast distances.
