@@ -5,34 +5,25 @@
 World42 is a high-performance, multithreaded planet rendering engine that leverages a quadtree structure to dynamically manage Levels of Detail (LOD) for planetary surfaces. The project uses Web Workers for heavy geometry calculations and a floating-origin system to maintain precision even at vast distances. World42 is designed to render detailed, textured planetary surfaces with efficient LOD management. It uses a custom quadtree structure to subdivide the planet's surface and dynamically update patches based on the camera's distance and movement. By offloading geometry calculations to Web Workers, the engine maintains a smooth, responsive user experience.
 
 ## Features
-
-- **Dynamic LOD Management:**  
-  Efficiently subdivides and replaces patches based on camera proximity to ensure high detail where needed.
-
-- **Multithreading with Web Workers:**  
-  Offloads intensive geometry computations to separate threads for improved performance.
-
-- **Floating-Origin System:**  
-  Uses a floating-origin camera system to maintain precision over large distances.
-
-- **Optimized Quadtree Structure:**  
-  Organizes planetary patches in a hierarchical quadtree, allowing for fast LOD updates and rendering.
-
-- **Custom Shader Materials:**  
-  Applies shader-based materials to patches for realistic texturing and lighting effects.
+- Floating origin camera
+- Real-scale planet (1:1)
+- Quadsphere with a uniform mesh
+- Asynchronous CDLOD/Quadtree using Web Workers
+- Volumetric Atmospheric Scattering Shader
 
 ## Demo
 [https://bpodwinski.github.io/World42/](https://bpodwinski.github.io/World42/)
+- Press L to display LODs
+- Press ² to display BabylonJS debug layer
 
+## Installation
 ### Prerequisites
 
 - [Node.js](https://nodejs.org/)
 - [npm](https://www.npmjs.com/)
 - [Vite](https://vitejs.dev/)
 
-## Installation
-
-1. **Clone the repository:**
+**Clone the repository:**
 
    ```bash
    git clone https://github.com/bpodwinski/World42.git
