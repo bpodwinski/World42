@@ -9,7 +9,6 @@ World42 is a high-performance, multithreaded planet rendering engine that levera
 - Real-scale planet (1:1)
 - Quadsphere with a uniform mesh
 - Asynchronous CDLOD/Quadtree using Web Workers
-- Volumetric Atmospheric Scattering Shader
 
 ## Demo
 [https://bpodwinski.github.io/World42/](https://bpodwinski.github.io/World42/)
