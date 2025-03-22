@@ -95,7 +95,7 @@ export class ChunkForge implements IChunkForge {
             cameraPosition,
             params.radius,
             center,
-            true,
+            false,
             ChunkTree.debugLODEnabled
         );
         terrainMesh.alwaysSelectAsActiveMesh = true;

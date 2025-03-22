@@ -17,12 +17,12 @@
     "vite-plugin-glsl": "^1.3.3"
   },
   "dependencies": {
-    "@babylonjs/core": "^7.52.2",
-    "@babylonjs/gui": "^7.52.2",
-    "@babylonjs/inspector": "^7.52.2",
-    "@babylonjs/ktx2decoder": "^7.52.2",
-    "@babylonjs/loaders": "^7.52.2",
-    "@babylonjs/materials": "^7.52.2",
+    "@babylonjs/core": "^7.54.0",
+    "@babylonjs/gui": "^7.54.0",
+    "@babylonjs/inspector": "^7.54.0",
+    "@babylonjs/ktx2decoder": "^7.54.0",
+    "@babylonjs/loaders": "^7.54.0",
+    "@babylonjs/materials": "^7.54.0",
     "cors": "^2.8.5",
     "socket.io-client": "^4.8.1"
   }

@@ -209,7 +209,7 @@ export class FloatingCameraScene {
         const radius: number =
             ScaleManager.toSimulationUnits(PlanetData.get("Mercury").diameter) /
             2;
-        const resolution: number = 4;
+        const resolution: number = 64;
 
         const mercury = faces.map(
             (face) =>
