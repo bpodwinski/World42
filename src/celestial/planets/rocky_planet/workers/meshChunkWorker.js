@@ -60,6 +60,52 @@ class Vector3 {
     }
 }
 
+/**
+ * Calcule un bruit fractal multi-octaves à partir d'un générateur de bruit 3D (SimplexNoise)
+ * @param {SimplexNoise} noise - Instance du générateur SimplexNoise
+ * @param {number} x - Coordonnée X
+ * @param {number} y - Coordonnée Y
+ * @param {number} z - Coordonnée Z
+ * @param {number} octaves - Nombre d'octaves (4, 5, 6, ...)
+ * @param {number} baseFrequency - Fréquence de départ
+ * @param {number} baseAmplitude - Amplitude de départ
+ * @param {number} lacunarity - Facteur de multiplication de la fréquence à chaque octave (souvent ~2.0)
+ * @param {number} persistence - Facteur de multiplication de l'amplitude à chaque octave (souvent ~0.5)
+ * @returns {number} Valeur normalisée du bruit fractal (≈ entre -1 et 1)
+ */
+function fractalNoise(
+    noise,
+    x,
+    y,
+    z,
+    octaves = 4,
+    baseFrequency = 1,
+    baseAmplitude = 1,
+    lacunarity = 2.0,
+    persistence = 0.5
+) {
+    let sum = 0;
+    let maxPossible = 0; // pour normaliser le résultat final
+    let frequency = baseFrequency;
+    let amplitude = baseAmplitude;
+
+    for (let i = 0; i < octaves; i++) {
+        // Pour chaque octave, on calcule le bruit, puis on l'ajoute au sum
+        const value = noise.noise(x * frequency, y * frequency, z * frequency);
+        sum += value * amplitude;
+
+        // On additionne l'amplitude de l'octave courante pour la normalisation
+        maxPossible += amplitude;
+
+        // On passe à l'octave suivante
+        frequency *= lacunarity;
+        amplitude *= persistence;
+    }
+
+    // Normalise pour garder le résultat final dans ~[-1..1]
+    return sum / maxPossible;
+}
+
 // Simplex Noise 3D (adapté pour le worker)
 class SimplexNoise {
     constructor(seed = 0) {
@@ -87,9 +133,18 @@ class SimplexNoise {
 
     noise(xin, yin, zin) {
         const grad3 = [
-            [1, 1, 0], [-1, 1, 0], [1, -1, 0], [-1, -1, 0],
-            [1, 0, 1], [-1, 0, 1], [1, 0, -1], [-1, 0, -1],
-            [0, 1, 1], [0, -1, 1], [0, 1, -1], [0, -1, -1],
+            [1, 1, 0],
+            [-1, 1, 0],
+            [1, -1, 0],
+            [-1, -1, 0],
+            [1, 0, 1],
+            [-1, 0, 1],
+            [1, 0, -1],
+            [-1, 0, -1],
+            [0, 1, 1],
+            [0, -1, 1],
+            [0, 1, -1],
+            [0, -1, -1]
         ];
 
         const F3 = 1 / 3;
@@ -112,25 +167,49 @@ class SimplexNoise {
         let i2, j2, k2;
         if (x0 >= y0) {
             if (y0 >= z0) {
-                i1 = 1; j1 = 0; k1 = 0;
-                i2 = 1; j2 = 1; k2 = 0;
+                i1 = 1;
+                j1 = 0;
+                k1 = 0;
+                i2 = 1;
+                j2 = 1;
+                k2 = 0;
             } else if (x0 >= z0) {
-                i1 = 1; j1 = 0; k1 = 0;
-                i2 = 1; j2 = 0; k2 = 1;
+                i1 = 1;
+                j1 = 0;
+                k1 = 0;
+                i2 = 1;
+                j2 = 0;
+                k2 = 1;
             } else {
-                i1 = 0; j1 = 0; k1 = 1;
-                i2 = 1; j2 = 0; k2 = 1;
+                i1 = 0;
+                j1 = 0;
+                k1 = 1;
+                i2 = 1;
+                j2 = 0;
+                k2 = 1;
             }
         } else {
             if (y0 < z0) {
-                i1 = 0; j1 = 0; k1 = 1;
-                i2 = 0; j2 = 1; k2 = 1;
+                i1 = 0;
+                j1 = 0;
+                k1 = 1;
+                i2 = 0;
+                j2 = 1;
+                k2 = 1;
             } else if (x0 < z0) {
-                i1 = 0; j1 = 1; k1 = 0;
-                i2 = 0; j2 = 1; k2 = 1;
+                i1 = 0;
+                j1 = 1;
+                k1 = 0;
+                i2 = 0;
+                j2 = 1;
+                k2 = 1;
             } else {
-                i1 = 0; j1 = 1; k1 = 0;
-                i2 = 1; j2 = 1; k2 = 0;
+                i1 = 0;
+                j1 = 1;
+                k1 = 0;
+                i2 = 1;
+                j2 = 1;
+                k2 = 0;
             }
         }
 
@@ -148,21 +227,27 @@ class SimplexNoise {
         j &= 255;
         k &= 255;
         const gi0 = this.perm[i + this.perm[j + this.perm[k]]] % 12;
-        const gi1 = this.perm[i + i1 + this.perm[j + j1 + this.perm[k + k1]]] % 12;
-        const gi2 = this.perm[i + i2 + this.perm[j + j2 + this.perm[k + k2]]] % 12;
+        const gi1 =
+            this.perm[i + i1 + this.perm[j + j1 + this.perm[k + k1]]] % 12;
+        const gi2 =
+            this.perm[i + i2 + this.perm[j + j2 + this.perm[k + k2]]] % 12;
         const gi3 = this.perm[i + 1 + this.perm[j + 1 + this.perm[k + 1]]] % 12;
 
         const t0 = 0.6 - x0 * x0 - y0 * y0 - z0 * z0;
-        n0 = t0 < 0 ? 0 : (t0 * t0) * (t0 * t0) * this.dot(grad3[gi0], x0, y0, z0);
+        n0 =
+            t0 < 0 ? 0 : t0 * t0 * (t0 * t0) * this.dot(grad3[gi0], x0, y0, z0);
 
         const t1 = 0.6 - x1 * x1 - y1 * y1 - z1 * z1;
-        n1 = t1 < 0 ? 0 : (t1 * t1) * (t1 * t1) * this.dot(grad3[gi1], x1, y1, z1);
+        n1 =
+            t1 < 0 ? 0 : t1 * t1 * (t1 * t1) * this.dot(grad3[gi1], x1, y1, z1);
 
         const t2 = 0.6 - x2 * x2 - y2 * y2 - z2 * z2;
-        n2 = t2 < 0 ? 0 : (t2 * t2) * (t2 * t2) * this.dot(grad3[gi2], x2, y2, z2);
+        n2 =
+            t2 < 0 ? 0 : t2 * t2 * (t2 * t2) * this.dot(grad3[gi2], x2, y2, z2);
 
         const t3 = 0.6 - x3 * x3 - y3 * y3 - z3 * z3;
-        n3 = t3 < 0 ? 0 : (t3 * t3) * (t3 * t3) * this.dot(grad3[gi3], x3, y3, z3);
+        n3 =
+            t3 < 0 ? 0 : t3 * t3 * (t3 * t3) * this.dot(grad3[gi3], x3, y3, z3);
 
         return 32 * (n0 + n1 + n2 + n3); // valeur entre -1 et 1
     }
@@ -176,7 +261,6 @@ function seedrandom(seed) {
         return x - Math.floor(x);
     };
 }
-
 
 /**
  * Computes mesh data for terrain chunk
@@ -195,17 +279,27 @@ function computeChunkMeshData(bounds, resolution, radius, face) {
     const normals = [];
     const uvs = [];
     const res = resolution;
-    const noise = new SimplexNoise(1);
-    const freq = 100.0;
-    const amp = 6.0;
 
-    // Calculate boundary angles from UV bounds
+    // On peut créer l'instance de SimplexNoise
+    const noise = new SimplexNoise(1);
+
+    // Paramètres que vous ajusterez à votre convenance
+    // ex : multiplier la fréquence de base pour mieux visualiser la différence
+    const octaves = 6; // Nombre d'octaves
+    const baseFrequency = 10.0; // Fréquence de base (on peut monter plus haut)
+    const baseAmplitude = 0.1; // Amplitude de base
+    const lacunarity = 2.5; // Multiplie la fréquence d'octave en octave
+    const persistence = 0.5; // Multiplie l'amplitude d'octave en octave
+
+    // Pour "scaler" le résultat final (cf. amplitude globale du relief)
+    const globalTerrainAmplitude = 15.0;
+
+    // Calcul des angles U et V
     const angleUMin = Math.atan(bounds.uMin);
     const angleUMax = Math.atan(bounds.uMax);
     const angleVMin = Math.atan(bounds.vMin);
     const angleVMax = Math.atan(bounds.vMax);
 
-    // Temporary array to store vertices
     const verts = [];
 
     for (let i = 0; i <= res; i++) {
@@ -214,36 +308,54 @@ function computeChunkMeshData(bounds, resolution, radius, face) {
         for (let j = 0; j <= res; j++) {
             const angleU = angleUMin + (angleUMax - angleUMin) * (j / res);
 
-            // Transform based on the face
+            // Transform en coordonnées "cube" pour la face donnée
             const posCube = mapUVtoCube(
                 Math.tan(angleU),
                 Math.tan(angleV),
                 face
             );
 
-            let posSphere = posCube.normalize(); // vecteur normalisé
-            const elevation = noise.noise(
-                posSphere.x * freq,
-                posSphere.y * freq,
-                posSphere.z * freq
+            // Normalise => vecteur unitaire
+            let posSphere = posCube.normalize();
+
+            // --- NOUVEL APPEL AU BRUIT FRACTAL ---
+            // On applique fractalNoise() pour obtenir une valeur entre ~-1 et +1
+            const fractalValue = fractalNoise(
+                noise,
+                posSphere.x,
+                posSphere.y,
+                posSphere.z,
+                octaves,
+                baseFrequency,
+                baseAmplitude,
+                lacunarity,
+                persistence
             );
-            posSphere = posSphere.scale(radius + elevation * amp);
+
+            // On multiplie par l'amplitude globale pour moduler la hauteur.
+            // ex. fractalValue ~ [-1..+1], donc "elevation" ~ [-6..+6] si globalTerrainAmplitude=6
+            const elevation = fractalValue * globalTerrainAmplitude;
+
+            // On "scale" le rayon de la planète par cette élévation
+            posSphere = posSphere.scale(radius + elevation);
 
             verts.push(posSphere);
             positions.push(posSphere.x, posSphere.y, posSphere.z);
 
-            const adjustedRadius = radius + elevation * amp;
+            // Calcul de la normale (on repart du centre de la sphère vers l'extérieur).
+            const adjustedRadius = radius + elevation;
             normals.push(
                 posSphere.x / adjustedRadius,
                 posSphere.y / adjustedRadius,
                 posSphere.z / adjustedRadius
             );
 
+            // UVs : vous pouvez laisser comme avant
             uvs.push(j / res, i / res);
         }
     }
 
-    // Build indices for triangles
+    // Construction des indices (inchangé)
     for (let i = 0; i < res; i++) {
         for (let j = 0; j < res; j++) {
             const index0 = i * (res + 1) + j;
@@ -268,6 +380,7 @@ function computeChunkMeshData(bounds, resolution, radius, face) {
             }
         }
     }
+
     return { positions, indices, normals, uvs };
 }
 
@@ -281,17 +394,17 @@ function computeChunkMeshData(bounds, resolution, radius, face) {
  */
 function mapUVtoCube(u, v, face) {
     switch (face) {
-        case "front":
+        case 'front':
             return new Vector3(u, v, 1);
-        case "back":
+        case 'back':
             return new Vector3(-u, v, -1);
-        case "left":
+        case 'left':
             return new Vector3(-1, v, u);
-        case "right":
+        case 'right':
             return new Vector3(1, v, -u);
-        case "top":
+        case 'top':
             return new Vector3(u, 1, -v);
-        case "bottom":
+        case 'bottom':
             return new Vector3(u, -1, v);
         default:
             return new Vector3(u, v, 1);
@@ -313,5 +426,5 @@ self.onmessage = (event) => {
 
     self.postMessage(meshData);
 
-    console.log("Chunk created at: " + (performance.now() - start) + "ms");
+    console.log('Chunk created at: ' + (performance.now() - start) + 'ms');
 };
