@@ -11,6 +11,7 @@ import terrainDebugLODShader from "../../../shaders/terrain/_terrainDebugLOD.gls
 import terrainVertexShader from "../../../shaders/terrain/terrainVertexShader.glsl?raw";
 import terrainFragmentShader from "../../../shaders/terrain/terrainFragmentShader.glsl?raw";
 import { TextureManager } from "../../../core/TextureManager";
+import { PlanetData } from "../../../utils/PlanetData";
 
 Effect.IncludesShadersStore["debugLOD"] = terrainDebugLODShader;
 
@@ -76,6 +77,8 @@ export class TerrainShader {
                     "uPlanetCenter",
                     "showUV",
                     "debugUV",
+                    // Ajout de l'uniform lightDirection :
+                    "lightDirection"
                 ],
                 samplers: [
                     "diffuseTexture",
@@ -117,6 +120,11 @@ export class TerrainShader {
         );
         shader.setFloat("detailScale", 2.0);
         shader.setFloat("detailBlend", 1.2);
+
+        // Light
+        shader.setVector3("lightDirection", PlanetData.get("Sun").position
+            .subtract(planetCenter).normalize());
+        shader.setFloat("lightIntensity", 1.0);
 
         shader.wireframe = wireframe;
 

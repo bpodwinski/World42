@@ -5,6 +5,8 @@
  *
  * This fragment shader samples only the diffuse texture using an equirectangular projection.
  * Vertex normals are used directly for lighting.
+ * A uniform 'lightDirection' is used to control the direction of the light,
+ * and 'lightIntensity' to adjust the brightness.
  */
 precision highp float;
 
@@ -20,6 +22,10 @@ uniform bool debugUV;             // Toggle UV debug visualization
 uniform bool debugLOD;            // Toggle LOD debug visualization
 uniform float lodLevel;           // Current LOD level
 uniform float lodMaxLevel;        // Maximum LOD level
+
+// Uniforms for lighting
+uniform vec3 lightDirection;      // Direction of the light (normalized)
+uniform float lightIntensity;     // Intensity multiplier for the light
 
 #include<debugLOD>
 
@@ -45,7 +51,9 @@ void main(void) {
 
     // Use the vertex normal directly for lighting.
     vec3 finalNormal = normalize(vNormal);
-    float lighting = clamp(dot(finalNormal, vec3(0.0, 1.0, 0.0)), 0.0, 1.0);
+
+    // Compute lighting with the custom light direction and apply light intensity.
+    float lighting = clamp(dot(finalNormal, normalize(lightDirection)), 0.0, 1.0) * lightIntensity;
 
     gl_FragColor = vec4(diffuseColor.rgb * lighting, diffuseColor.a);
   }
