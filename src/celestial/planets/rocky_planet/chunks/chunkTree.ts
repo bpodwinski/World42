@@ -1,14 +1,14 @@
-import { Scene, Mesh, Vector3, ShaderMaterial } from "@babylonjs/core";
+import { Scene, Mesh, Vector3, ShaderMaterial } from '@babylonjs/core';
 
-import { ChunkForge } from "./chunkForge";
-import { WorkerPool } from "./workerPool";
+import { ChunkForge } from './chunkForge';
+import { WorkerPool } from './workerPool';
 import {
     FloatingEntityInterface,
-    OriginCamera,
-} from "../../../../utils/OriginCamera";
-import { Terrain } from "../terrain";
-import { DeleteSemaphore } from "./deleteSemaphore";
-import { io, Socket } from "socket.io-client";
+    OriginCamera
+} from '../../../../utils/OriginCamera';
+import { Terrain } from '../terrain';
+import { DeleteSemaphore } from './deleteSemaphore';
+import { io, Socket } from 'socket.io-client';
 
 //const socket: Socket = io("***:8888");
 
@@ -25,7 +25,7 @@ export type Bounds = {
 /**
  * Type defining the possible cube faces
  */
-export type Face = "front" | "back" | "left" | "right" | "top" | "bottom";
+export type Face = 'front' | 'back' | 'left' | 'right' | 'top' | 'bottom';
 
 /**
  * Global worker pool for mesh chunk computation
@@ -33,7 +33,7 @@ export type Face = "front" | "back" | "left" | "right" | "top" | "bottom";
  * Instantiated with the worker script URL and using hardware concurrency for both workers and concurrent tasks
  */
 export const globalWorkerPool = new WorkerPool(
-    new URL("../workers/meshChunkWorker", import.meta.url).href,
+    new URL('../workers/meshChunkWorker', import.meta.url).href,
     navigator.hardwareConcurrency - 1,
     navigator.hardwareConcurrency - 1,
     true
@@ -238,7 +238,7 @@ export class ChunkTree {
                 { u: uMin, v: vMin },
                 { u: uMin, v: vMax },
                 { u: uMax, v: vMin },
-                { u: uMax, v: vMax },
+                { u: uMax, v: vMax }
             ];
 
             const corners = cornersUV.map(({ u, v }) => {
@@ -252,11 +252,11 @@ export class ChunkTree {
                 Vector3.Distance(center, camera.doublepos),
                 ...corners.map((corner) =>
                     Vector3.Distance(corner, camera.doublepos)
-                ),
+                )
             ];
 
             const minDistance = Math.min(...distances);
-            const lodRange = this.radius * 2 * Math.pow(0.5, this.level);
+            const lodRange = this.radius * 2 * Math.pow(0.55, this.level);
 
             if (minDistance < lodRange && this.level < this.maxLevel) {
                 // If chunk is close and can be subdivided, process children
@@ -273,7 +273,7 @@ export class ChunkTree {
                                     radius: child.radius,
                                     face: child.face,
                                     level: child.level,
-                                    maxLevel: child.maxLevel,
+                                    maxLevel: child.maxLevel
                                 },
                                 this.camera.doublepos,
                                 child.parentEntity,
@@ -319,7 +319,7 @@ export class ChunkTree {
                             radius: this.radius,
                             face: this.face,
                             level: this.level,
-                            maxLevel: this.maxLevel,
+                            maxLevel: this.maxLevel
                         },
                         this.camera.doublepos,
                         this.parentEntity,
@@ -341,7 +341,7 @@ export class ChunkTree {
                             radius: this.radius,
                             face: this.face,
                             level: this.level,
-                            maxLevel: this.maxLevel,
+                            maxLevel: this.maxLevel
                         },
                         this.camera.doublepos,
                         this.parentEntity,
@@ -388,7 +388,7 @@ export class ChunkTree {
     public updateDebugLOD(debugLOD: boolean): void {
         if (this.mesh && this.mesh.material) {
             (this.mesh.material as ShaderMaterial).setInt(
-                "debugLOD",
+                'debugLOD',
                 debugLOD ? 1 : 0
             );
         }

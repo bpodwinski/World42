@@ -1,4 +1,4 @@
-#define NUM_LOD_LEVELS 7
+#define NUM_LOD_LEVELS 8
 
 /*
  * Planetary Terrain Vertex Shader

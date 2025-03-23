@@ -21,7 +21,10 @@ import { ScaleManager } from './utils/ScaleManager';
 import { FloatingEntity, OriginCamera } from './utils/OriginCamera';
 import { PlanetData } from './utils/PlanetData';
 //import { AtmosphericScatteringPostProcess } from "./celestial/AtmosphericScatteringPostProcess";
-import { Face, ChunkTree } from './celestial/planets/rocky_planet/chunks/chunkTree';
+import {
+    Face,
+    ChunkTree
+} from './celestial/planets/rocky_planet/chunks/chunkTree';
 import { TextureManager } from './core/TextureManager';
 import { io } from 'socket.io-client';
 
@@ -38,7 +41,10 @@ export class FloatingCameraScene {
      * @param canvas - HTMLCanvasElement used for rendering
      * @returns The configured Scene instance
      */
-    public static CreateScene(engine: Engine | WebGPUEngine, canvas: HTMLCanvasElement): Scene {
+    public static CreateScene(
+        engine: Engine | WebGPUEngine,
+        canvas: HTMLCanvasElement
+    ): Scene {
         // Initialize scene
         let scene = new Scene(engine);
         scene.clearColor.set(0, 0, 0, 1);
@@ -81,7 +87,10 @@ export class FloatingCameraScene {
             function (e) {
                 camera.speed = Math.min(
                     ScaleManager.toSimulationUnits(30),
-                    Math.max(ScaleManager.toSimulationUnits(0.1), (camera.speed -= e.deltaY * 0.0025))
+                    Math.max(
+                        ScaleManager.toSimulationUnits(0.1),
+                        (camera.speed -= e.deltaY * 0.0025)
+                    )
                 );
             },
             { passive: true }
@@ -90,13 +99,20 @@ export class FloatingCameraScene {
         new PostProcess('Pipeline', scene, camera);
 
         // Create skybox with cube texture
-        const skybox = MeshBuilder.CreateBox('skyBox', { size: 1_000_000_0 }, scene);
+        const skybox = MeshBuilder.CreateBox(
+            'skyBox',
+            { size: 1_000_000_0 },
+            scene
+        );
         const skyboxMaterial = new StandardMaterial('skyBox', scene);
         skyboxMaterial.backFaceCulling = false;
         skyboxMaterial.disableLighting = true;
         skybox.material = skyboxMaterial;
         skybox.infiniteDistance = true;
-        skyboxMaterial.reflectionTexture = new CubeTexture(`${import.meta.env.VITE_ASSETS_URL}/skybox`, scene);
+        skyboxMaterial.reflectionTexture = new CubeTexture(
+            `${import.meta.env.VITE_ASSETS_URL}/skybox`,
+            scene
+        );
         skyboxMaterial.reflectionTexture.coordinatesMode = Texture.SKYBOX_MODE;
 
         // Create sun and associated lighting
@@ -156,8 +172,14 @@ export class FloatingCameraScene {
         //     );
         // }
 
-        let sunMaterial = new PBRMetallicRoughnessMaterial('sunMaterial', scene);
-        sunMaterial.emissiveTexture = new TextureManager('sun_surface_albedo.ktx2', scene);
+        let sunMaterial = new PBRMetallicRoughnessMaterial(
+            'sunMaterial',
+            scene
+        );
+        sunMaterial.emissiveTexture = new TextureManager(
+            'sun_surface_albedo.ktx2',
+            scene
+        );
         sunMaterial.emissiveColor = new Color3(1, 1, 1);
         sunMaterial.metallic = 0.0;
         sunMaterial.roughness = 0.0;
@@ -175,10 +197,19 @@ export class FloatingCameraScene {
         camera.add(entMercury);
 
         // Create QuadTree for Mercury on each cube face
-        const faces: Face[] = ['front', 'back', 'left', 'right', 'top', 'bottom'];
-        const maxLevel: number = 7;
-        const radius: number = ScaleManager.toSimulationUnits(PlanetData.get('Mercury').diameter) / 2;
-        const resolution: number = 64;
+        const faces: Face[] = [
+            'front',
+            'back',
+            'left',
+            'right',
+            'top',
+            'bottom'
+        ];
+        const maxLevel: number = 5;
+        const radius: number =
+            ScaleManager.toSimulationUnits(PlanetData.get('Mercury').diameter) /
+            2;
+        const resolution: number = 128;
 
         const mercury = faces.map(
             (face) =>
@@ -266,10 +297,14 @@ export class FloatingCameraScene {
             while (true) {
                 // Update LOD for QuadTree node
                 mercury.forEach((node) => {
-                    node.updateLOD(camera, false).catch((err) => console.error(err));
+                    node.updateLOD(camera, false).catch((err) =>
+                        console.error(err)
+                    );
                 });
                 // Wait for next frame to avoid saturating the CPU
-                await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+                await new Promise<void>((resolve) =>
+                    requestAnimationFrame(() => resolve())
+                );
             }
         }
 

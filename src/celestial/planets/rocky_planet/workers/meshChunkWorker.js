@@ -58,6 +58,28 @@ class Vector3 {
     scale(s) {
         return new Vector3(this.x * s, this.y * s, this.z * s);
     }
+
+    /**
+     * Computes the cross product of two vectors
+     * @param {Vector3} v - The other vector
+     * @returns {Vector3} The resulting cross product vector
+     */
+    cross(v) {
+        return new Vector3(
+            this.y * v.z - this.z * v.y,
+            this.z * v.x - this.x * v.z,
+            this.x * v.y - this.y * v.x
+        );
+    }
+
+    /**
+     * Adds another vector to this one
+     * @param {Vector3} v - The vector to add
+     * @returns {Vector3} The resulting vector
+     */
+    add(v) {
+        return new Vector3(this.x + v.x, this.y + v.y, this.z + v.z);
+    }
 }
 
 /**
@@ -282,14 +304,12 @@ function computeChunkMeshData(bounds, resolution, radius, face, noise) {
 
     // Paramètres que vous ajusterez à votre convenance
     // ex : multiplier la fréquence de base pour mieux visualiser la différence
-    const octaves = 6; // Nombre d'octaves
-    const baseFrequency = 10.0; // Fréquence de base (on peut monter plus haut)
-    const baseAmplitude = 0.1; // Amplitude de base
-    const lacunarity = 2.5; // Multiplie la fréquence d'octave en octave
+    const octaves = 8; // Nombre d'octaves
+    const baseFrequency = 20.0; // Fréquence de base (on peut monter plus haut)
+    const baseAmplitude = 10.0; // Amplitude de base
+    const lacunarity = 1.6; // Multiplie la fréquence d'octave en octave
     const persistence = 0.5; // Multiplie l'amplitude d'octave en octave
-
-    // Pour "scaler" le résultat final (cf. amplitude globale du relief)
-    const globalTerrainAmplitude = 15.0;
+    const globalTerrainAmplitude = 15.0; // Amplitude globale du relief
 
     // Calcul des angles U et V
     const angleUMin = Math.atan(bounds.uMin);
@@ -299,6 +319,7 @@ function computeChunkMeshData(bounds, resolution, radius, face, noise) {
 
     const verts = [];
 
+    // Étape 1 : Générer les positions et UVs
     for (let i = 0; i <= res; i++) {
         const angleV = angleVMin + (angleVMax - angleVMin) * (i / res);
 
@@ -357,7 +378,13 @@ function computeChunkMeshData(bounds, resolution, radius, face, noise) {
         }
     }
 
-    // Construction des indices (inchangé)
+    // Étape 2 : Tableau pour accumuler les normales et compter les contributions
+    const normalAccum = new Array(verts.length)
+        .fill(null)
+        .map(() => new Vector3(0, 0, 0));
+    const normalCount = new Array(verts.length).fill(0);
+
+    // Étape 3 : Générer les indices et calculer les normales des triangles
     for (let i = 0; i < res; i++) {
         for (let j = 0; j < res; j++) {
             const index0 = i * (res + 1) + j;
@@ -373,17 +400,68 @@ function computeChunkMeshData(bounds, resolution, radius, face, noise) {
             const d1 = Vector3.Distance(v0, v3);
             const d2 = Vector3.Distance(v1, v2);
 
+            let tri1Indices, tri2Indices;
             if (d1 < d2) {
-                indices.push(index0, index3, index1);
-                indices.push(index0, index2, index3);
+                tri1Indices = [index0, index3, index1];
+                tri2Indices = [index0, index2, index3];
+                indices.push(index0, index3, index1, index0, index2, index3);
             } else {
-                indices.push(index0, index2, index1);
-                indices.push(index1, index2, index3);
+                tri1Indices = [index0, index2, index1];
+                tri2Indices = [index1, index2, index3];
+                indices.push(index0, index2, index1, index1, index2, index3);
             }
+
+            // Calculer les normales des deux triangles
+            const tri1Normal = computeTriangleNormal(
+                v0,
+                verts[tri1Indices[1]],
+                verts[tri1Indices[2]]
+            );
+            const tri2Normal = computeTriangleNormal(
+                v0,
+                verts[tri2Indices[1]],
+                verts[tri2Indices[2]]
+            );
+
+            // Ajouter les normales aux vertices concernés
+            tri1Indices.forEach((idx) => {
+                normalAccum[idx] = normalAccum[idx].add(tri1Normal);
+                normalCount[idx]++;
+            });
+            tri2Indices.forEach((idx) => {
+                normalAccum[idx] = normalAccum[idx].add(tri2Normal);
+                normalCount[idx]++;
+            });
+        }
+    }
+
+    // Étape 4 : Normaliser et remplir le tableau des normales
+    for (let i = 0; i < verts.length; i++) {
+        if (normalCount[i] > 0) {
+            const avgNormal = normalAccum[i]
+                .scale(1 / normalCount[i])
+                .normalize();
+            const idx = i * 3;
+            normals[idx] = avgNormal.x;
+            normals[idx + 1] = avgNormal.y;
+            normals[idx + 2] = avgNormal.z;
         }
     }
 
     return { positions, indices, normals, uvs };
+}
+
+/**
+ * Computes the normal of a triangle given three vertices
+ * @param {Vector3} v0 - First vertex
+ * @param {Vector3} v1 - Second vertex
+ * @param {Vector3} v2 - Third vertex
+ * @returns {Vector3} The normalized normal vector of the triangle
+ */
+function computeTriangleNormal(v0, v1, v2) {
+    const edge1 = new Vector3(v1.x - v0.x, v1.y - v0.y, v1.z - v0.z);
+    const edge2 = new Vector3(v2.x - v0.x, v2.y - v0.y, v2.z - v0.z);
+    return edge2.cross(edge1).normalize();
 }
 
 /**
