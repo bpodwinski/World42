@@ -1,22 +1,17 @@
-import {
-    Effect,
-    Scene,
-    ShaderMaterial,
-    Vector3,
-} from "@babylonjs/core";
-import { ScaleManager } from "../../../utils/ScaleManager";
+import { Effect, Scene, ShaderMaterial, Vector3 } from '@babylonjs/core';
+import { ScaleManager } from '../../../utils/ScaleManager';
 
-import terrainDebugLODShader from "../../../shaders/terrain/_terrainDebugLOD.glsl?raw";
+import terrainDebugLODShader from '../../../shaders/terrain/_terrainDebugLOD.glsl?raw';
 
-import terrainVertexShader from "../../../shaders/terrain/terrainVertexShader.glsl?raw";
-import terrainFragmentShader from "../../../shaders/terrain/terrainFragmentShader.glsl?raw";
-import { TextureManager } from "../../../core/TextureManager";
-import { PlanetData } from "../../../utils/PlanetData";
+import terrainVertexShader from '../../../shaders/terrain/terrainVertexShader.glsl?raw';
+import terrainFragmentShader from '../../../shaders/terrain/terrainFragmentShader.glsl?raw';
+import { TextureManager } from '../../../core/TextureManager';
+import { PlanetData } from '../../../utils/PlanetData';
 
-Effect.IncludesShadersStore["debugLOD"] = terrainDebugLODShader;
+Effect.IncludesShadersStore['debugLOD'] = terrainDebugLODShader;
 
-Effect.ShadersStore["terrainVertexShader"] = terrainVertexShader;
-Effect.ShadersStore["terrainFragmentShader"] = terrainFragmentShader;
+Effect.ShadersStore['terrainVertexShader'] = terrainVertexShader;
+Effect.ShadersStore['terrainFragmentShader'] = terrainFragmentShader;
 
 /**
  * TerrainShader creates and configures ShaderMaterial for terrain rendering
@@ -59,72 +54,71 @@ export class TerrainShader {
         debugLOD: boolean = false
     ): ShaderMaterial {
         const shader = new ShaderMaterial(
-            "terrainShader",
+            'terrainShader',
             this.scene,
-            { vertex: "terrain", fragment: "terrain" },
+            { vertex: 'terrain', fragment: 'terrain' },
             {
-                attributes: ["position", "normal", "uv"],
+                attributes: ['position', 'normal', 'uv'],
                 uniforms: [
-                    "worldViewProjection",
-                    "world",
-                    "time",
-                    "amplitude",
-                    "frequency",
-                    "mesh_dim",
-                    "lodLevel",
-                    "lodRangesLUT",
-                    "cameraPosition",
-                    "uPlanetCenter",
-                    "showUV",
-                    "debugUV",
+                    'worldViewProjection',
+                    'world',
+                    'time',
+                    'amplitude',
+                    'frequency',
+                    'mesh_dim',
+                    'lodLevel',
+                    'lodRangesLUT',
+                    'cameraPosition',
+                    'uPlanetCenter',
+                    'showUV',
+                    'debugUV',
                     // Ajout de l'uniform lightDirection :
-                    "lightDirection"
+                    'lightDirection'
                 ],
-                samplers: [
-                    "diffuseTexture",
-                    "detailTexture",
-                ],
+                samplers: ['diffuseTexture', 'detailTexture']
             }
         );
 
-        shader.setInt("debugLOD", debugLOD ? 1 : 0);
-        shader.setInt("debugUV", 0);
+        shader.setInt('debugLOD', debugLOD ? 1 : 0);
+        shader.setInt('debugUV', 0);
 
-        shader.setFloat("time", 0.0);
-        shader.setFloat("amplitude", 0.0);
-        shader.setFloat("frequency", 0.0);
-        shader.setFloat("mesh_dim", resolution);
-        shader.setFloat("lodLevel", lodLevel);
-        shader.setFloat("lodMaxLevel", maxLevel);
-        shader.setVector3("cameraPosition", cameraPosition);
+        shader.setFloat('time', 0.0);
+        shader.setFloat('amplitude', 0.0);
+        shader.setFloat('frequency', 0.0);
+        shader.setFloat('mesh_dim', resolution);
+        shader.setFloat('lodLevel', lodLevel);
+        shader.setFloat('lodMaxLevel', maxLevel);
+        shader.setVector3('cameraPosition', cameraPosition);
 
         const lodRanges: number[] = [];
         for (let i = 0; i < maxLevel; i++) {
             lodRanges[i] =
                 ScaleManager.toSimulationUnits(planetRadius) * Math.pow(2, i);
         }
-        shader.setFloats("lodRangesLUT", lodRanges);
-        shader.setVector3("uPlanetCenter", planetCenter);
+        shader.setFloats('lodRangesLUT', lodRanges);
+        shader.setVector3('uPlanetCenter', planetCenter);
 
         // Diffuse
         shader.setTexture(
-            "diffuseTexture",
-            new TextureManager("moon_diffuse.ktx2", this.scene)
+            'diffuseTexture',
+            new TextureManager('moon_diffuse.ktx2', this.scene)
         );
-        shader.setFloat("textureScale", 1.0);
+        shader.setFloat('textureScale', 1.0);
 
         // Detail
         shader.setTexture(
-            "detailTexture",
-            new TextureManager("moon_detail.ktx2", this.scene)
+            'detailTexture',
+            new TextureManager('moon_detail.ktx2', this.scene)
         );
-        shader.setFloat("detailScale", 2.0);
-        shader.setFloat("detailBlend", 1.2);
+        shader.setFloat('detailScale', 2.0);
+        shader.setFloat('detailBlend', 1.2);
 
         // Light
-        shader.setVector3("lightDirection", PlanetData.get("Sun").position
-            .subtract(planetCenter).normalize());
-        shader.setFloat("lightIntensity", 1.0);
+        shader.setVector3(
+            'lightDirection',
+            PlanetData.get('Sun').position.subtract(planetCenter).normalize()
+        );
+        shader.setFloat('lightIntensity', 1.0);
 
         shader.wireframe = wireframe;
 

@@ -11,22 +11,19 @@ import {
     Mesh,
     StandardMaterial,
     CubeTexture,
-    WebGPUEngine,
-} from "@babylonjs/core";
-import "@babylonjs/core/Materials/Textures/Loaders/ktxTextureLoader";
+    WebGPUEngine
+} from '@babylonjs/core';
+import '@babylonjs/core/Materials/Textures/Loaders/ktxTextureLoader';
 
-import { PostProcess } from "./utils/PostProcess";
+import { PostProcess } from './utils/PostProcess';
 //import { StarGlare } from "./utils/SunGlare";
-import { ScaleManager } from "./utils/ScaleManager";
-import { FloatingEntity, OriginCamera } from "./utils/OriginCamera";
-import { PlanetData } from "./utils/PlanetData";
+import { ScaleManager } from './utils/ScaleManager';
+import { FloatingEntity, OriginCamera } from './utils/OriginCamera';
+import { PlanetData } from './utils/PlanetData';
 //import { AtmosphericScatteringPostProcess } from "./celestial/AtmosphericScatteringPostProcess";
-import {
-    Face,
-    ChunkTree,
-} from "./celestial/planets/rocky_planet/chunks/chunkTree";
-import { TextureManager } from "./core/TextureManager";
-import { io } from "socket.io-client";
+import { Face, ChunkTree } from './celestial/planets/rocky_planet/chunks/chunkTree';
+import { TextureManager } from './core/TextureManager';
+import { io } from 'socket.io-client';
 
 /**
  * FloatingCameraScene creates and configures the scene with a floating-origin camera,
@@ -41,10 +38,7 @@ export class FloatingCameraScene {
      * @param canvas - HTMLCanvasElement used for rendering
      * @returns The configured Scene instance
      */
-    public static CreateScene(
-        engine: Engine | WebGPUEngine,
-        canvas: HTMLCanvasElement
-    ): Scene {
+    public static CreateScene(engine: Engine | WebGPUEngine, canvas: HTMLCanvasElement): Scene {
         // Initialize scene
         let scene = new Scene(engine);
         scene.clearColor.set(0, 0, 0, 1);
@@ -54,14 +48,14 @@ export class FloatingCameraScene {
         });
 
         // Create OriginCamera
-        let planetTarget = PlanetData.get("Mercury").position.clone();
+        let planetTarget = PlanetData.get('Mercury').position.clone();
         planetTarget.x += ScaleManager.toSimulationUnits(0);
         planetTarget.y += ScaleManager.toSimulationUnits(2475);
         planetTarget.z += ScaleManager.toSimulationUnits(0);
 
-        let camera = new OriginCamera("camera", planetTarget, scene);
+        let camera = new OriginCamera('camera', planetTarget, scene);
         camera.debugMode = false;
-        camera.doubletgt = PlanetData.get("Sun").position;
+        camera.doubletgt = PlanetData.get('Sun').position;
 
         camera.touchAngularSensibility = 300000;
         camera.inertia = 0.4;
@@ -83,44 +77,34 @@ export class FloatingCameraScene {
 
         // Adjust camera speed with mouse wheel
         canvas.addEventListener(
-            "wheel",
+            'wheel',
             function (e) {
                 camera.speed = Math.min(
                     ScaleManager.toSimulationUnits(30),
-                    Math.max(
-                        ScaleManager.toSimulationUnits(0.1),
-                        (camera.speed -= e.deltaY * 0.0025)
-                    )
+                    Math.max(ScaleManager.toSimulationUnits(0.1), (camera.speed -= e.deltaY * 0.0025))
                 );
             },
             { passive: true }
         );
 
-        new PostProcess("Pipeline", scene, camera);
+        new PostProcess('Pipeline', scene, camera);
 
         // Create skybox with cube texture
-        const skybox = MeshBuilder.CreateBox(
-            "skyBox",
-            { size: 1_000_000_0 },
-            scene
-        );
-        const skyboxMaterial = new StandardMaterial("skyBox", scene);
+        const skybox = MeshBuilder.CreateBox('skyBox', { size: 1_000_000_0 }, scene);
+        const skyboxMaterial = new StandardMaterial('skyBox', scene);
         skyboxMaterial.backFaceCulling = false;
         skyboxMaterial.disableLighting = true;
         skybox.material = skyboxMaterial;
         skybox.infiniteDistance = true;
-        skyboxMaterial.reflectionTexture = new CubeTexture(
-            `${import.meta.env.VITE_ASSETS_URL}/skybox`,
-            scene
-        );
+        skyboxMaterial.reflectionTexture = new CubeTexture(`${import.meta.env.VITE_ASSETS_URL}/skybox`, scene);
         skyboxMaterial.reflectionTexture.coordinatesMode = Texture.SKYBOX_MODE;
 
         // Create sun and associated lighting
-        let entSunLight = new FloatingEntity("entSunLight", scene);
+        let entSunLight = new FloatingEntity('entSunLight', scene);
         entSunLight.doublepos.set(0, 0, 0);
         camera.add(entSunLight);
 
-        let sunLight = new PointLight("sunLight", new Vector3(0, 0, 0), scene);
+        let sunLight = new PointLight('sunLight', new Vector3(0, 0, 0), scene);
         sunLight.intensityMode = PointLight.INTENSITYMODE_LUMINOUSPOWER;
         sunLight.intensity = 37.5;
         sunLight.falloffType = PointLight.FALLOFF_STANDARD;
@@ -130,13 +114,13 @@ export class FloatingCameraScene {
         sunLight.radius = ScaleManager.toSimulationUnits(696340);
         sunLight.parent = entSunLight;
 
-        const entSun = new FloatingEntity("entSun", scene);
+        const entSun = new FloatingEntity('entSun', scene);
         entSun.doublepos.set(0, 0, 0);
         camera.add(entSun);
 
-        const sun = MeshBuilder.CreateSphere("sun", {
+        const sun = MeshBuilder.CreateSphere('sun', {
             segments: 64,
-            diameter: PlanetData.get("Sun").diameter,
+            diameter: PlanetData.get('Sun').diameter
         });
 
         // const starGlare = StarGlare.create(
@@ -172,14 +156,8 @@ export class FloatingCameraScene {
         //     );
         // }
 
-        let sunMaterial = new PBRMetallicRoughnessMaterial(
-            "sunMaterial",
-            scene
-        );
-        sunMaterial.emissiveTexture = new TextureManager(
-            "sun_surface_albedo.ktx2",
-            scene
-        );
+        let sunMaterial = new PBRMetallicRoughnessMaterial('sunMaterial', scene);
+        sunMaterial.emissiveTexture = new TextureManager('sun_surface_albedo.ktx2', scene);
         sunMaterial.emissiveColor = new Color3(1, 1, 1);
         sunMaterial.metallic = 0.0;
         sunMaterial.roughness = 0.0;
@@ -188,27 +166,18 @@ export class FloatingCameraScene {
         sun.parent = entSun;
 
         // Create Mercury entity and attach it to the camera's hierarchy
-        const entMercury = new FloatingEntity("entMercury", scene);
+        const entMercury = new FloatingEntity('entMercury', scene);
         entMercury.doublepos.set(
-            PlanetData.get("Mercury").position._x,
-            PlanetData.get("Mercury").position._y,
-            PlanetData.get("Mercury").position._z
+            PlanetData.get('Mercury').position._x,
+            PlanetData.get('Mercury').position._y,
+            PlanetData.get('Mercury').position._z
         );
         camera.add(entMercury);
 
         // Create QuadTree for Mercury on each cube face
-        const faces: Face[] = [
-            "front",
-            "back",
-            "left",
-            "right",
-            "top",
-            "bottom",
-        ];
+        const faces: Face[] = ['front', 'back', 'left', 'right', 'top', 'bottom'];
         const maxLevel: number = 7;
-        const radius: number =
-            ScaleManager.toSimulationUnits(PlanetData.get("Mercury").diameter) /
-            2;
+        const radius: number = ScaleManager.toSimulationUnits(PlanetData.get('Mercury').diameter) / 2;
         const resolution: number = 64;
 
         const mercury = faces.map(
@@ -220,7 +189,7 @@ export class FloatingCameraScene {
                     0,
                     maxLevel,
                     radius,
-                    PlanetData.get("Mercury").position,
+                    PlanetData.get('Mercury').position,
                     resolution,
                     face,
                     entMercury,
@@ -235,8 +204,8 @@ export class FloatingCameraScene {
         // });
 
         // Toggle the debug layer and debugLOD via keyboard
-        window.addEventListener("keydown", (evt) => {
-            if (evt.key.toLowerCase() === "l") {
+        window.addEventListener('keydown', (evt) => {
+            if (evt.key.toLowerCase() === 'l') {
                 ChunkTree.debugLODEnabled = !ChunkTree.debugLODEnabled;
 
                 mercury.forEach((node) => {
@@ -297,14 +266,10 @@ export class FloatingCameraScene {
             while (true) {
                 // Update LOD for QuadTree node
                 mercury.forEach((node) => {
-                    node.updateLOD(camera, false).catch((err) =>
-                        console.error(err)
-                    );
+                    node.updateLOD(camera, false).catch((err) => console.error(err));
                 });
                 // Wait for next frame to avoid saturating the CPU
-                await new Promise<void>((resolve) =>
-                    requestAnimationFrame(() => resolve())
-                );
+                await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
             }
         }
 
