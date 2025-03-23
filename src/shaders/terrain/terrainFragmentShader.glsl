@@ -8,9 +8,6 @@
  */
 precision highp float;
 
-//------------------------------------------------------------------------------
-// Varyings and Uniforms
-//------------------------------------------------------------------------------
 varying vec3 vPosition;    // World-space position from the vertex shader
 varying vec3 vNormal;      // World-space normal from the vertex shader
 varying vec2 vUV;          // UV coordinates generated in the vertex shader
@@ -24,24 +21,8 @@ uniform bool debugLOD;            // Toggle LOD debug visualization
 uniform float lodLevel;           // Current LOD level
 uniform float lodMaxLevel;        // Maximum LOD level
 
-//------------------------------------------------------------------------------
-// Includes
-//------------------------------------------------------------------------------
 #include<debugLOD>
 
-/**
- * Computes an equirectangular projection UV and samples the diffuse texture.
- *
- * The function converts the world-space position relative to a given center into spherical coordinates,
- * maps these coordinates to UV space using an equirectangular projection, applies a scale and offset,
- * and then samples the diffuse texture.
- *
- * @param pos World-space position.
- * @param center The center used for the projection.
- * @param scale UV scaling factor.
- * @param offset Additional UV offset.
- * @return The color obtained from the diffuse texture.
- */
 vec4 equirectangularProjection(vec3 pos, vec3 center, float scale, vec2 offset) {
   vec3 dir = normalize(pos - center);
   float longitude = atan(dir.z, dir.x);

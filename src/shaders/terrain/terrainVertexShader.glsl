@@ -1,5 +1,7 @@
+#define NUM_LOD_LEVELS 7
+
 /*
- * Planetary Terrain Vertex Shader (Sans Heightmap)
+ * Planetary Terrain Vertex Shader
  *
  * Ce shader déplace les vertex d'un terrain planétaire via du bruit et morphing, 
  * sans échantillonner de heightmap pour modifier l'altitude.
@@ -11,11 +13,8 @@ precision highp float;
 //------------------------------------------------------------------------------
 attribute vec3 position;
 attribute vec3 normal;
-attribute vec2 uv; // éventuellement non utilisé
+attribute vec2 uv;
 
-//------------------------------------------------------------------------------
-// Uniformes
-//------------------------------------------------------------------------------
 uniform mat4 worldViewProjection;
 uniform float time;
 uniform float amplitude;
@@ -26,24 +25,13 @@ uniform vec3 cameraPosition;
 uniform vec3 uPlanetCenter;       // Centre global de la planète
 uniform vec3 uPatchCenter;        // Centre du patch (calculé sur le CPU)
 
-//------------------------------------------------------------------------------
-// Varyings pour le Fragment Shader
-//------------------------------------------------------------------------------
 varying vec2 vUV;
 varying vec3 vNormal;
 varying vec3 vPosition;
 
-//------------------------------------------------------------------------------
-// Includes (Noise et Morphing)
-//------------------------------------------------------------------------------
-#include<morphing>
-
-//------------------------------------------------------------------------------
-// Fonction principale
-//------------------------------------------------------------------------------
 void main(void) {
-  // Calculer la position déplacée via les fonctions de bruit et morphing.
-  vec3 displacedPosition = computeDisplacedPosition(position, normal, amplitude, cameraPosition);
+  // Calculer la position déplacée en déplaçant simplement le vertex le long de sa normale
+  vec3 displacedPosition = position + normal * amplitude;
 
   // Générer des coordonnées UV basées sur le centre du patch
   vec3 diff = normalize(displacedPosition - uPatchCenter);
@@ -55,5 +43,6 @@ void main(void) {
 
   vPosition = displacedPosition;
   vNormal = normalize(normal);
+
   gl_Position = worldViewProjection * vec4(displacedPosition, 1.0);
 }
