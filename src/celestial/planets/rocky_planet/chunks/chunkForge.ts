@@ -1,10 +1,10 @@
-import { Scene, Mesh, Vector3 } from "@babylonjs/core";
+import { Scene, Mesh, Vector3 } from '@babylonjs/core';
 
-import { WorkerPool } from "./workerPool";
-import { Terrain } from "../terrain";
-import { TerrainShader } from "../terrainShader";
-import { Face, ChunkTree, Bounds } from "./chunkTree";
-import { Socket } from "socket.io-client";
+import { WorkerPool } from './workerPool';
+import { Terrain } from '../terrain';
+import { TerrainShader } from '../TerrainShader';
+import { Face, ChunkTree, Bounds } from './chunkTree';
+import { Socket } from 'socket.io-client';
 
 /**
  * Interface for chunk generation parameters shared by local and server generation
@@ -131,7 +131,7 @@ export class ChunkForge implements IChunkForge {
                         center
                     );
                     resolve(mesh);
-                },
+                }
             });
         });
     }
@@ -153,11 +153,11 @@ export class ChunkForge implements IChunkForge {
     ): Promise<Mesh> {
         return new Promise<Mesh>((resolve, reject) => {
             if (!this.socket) {
-                reject(new Error("Socket instance not available"));
+                reject(new Error('Socket instance not available'));
                 return;
             }
-            this.socket.emit("generateChunk", params);
-            this.socket.once("chunkData", (meshData: any) => {
+            this.socket.emit('generateChunk', params);
+            this.socket.once('chunkData', (meshData: any) => {
                 try {
                     const mesh = this.buildMesh(
                         meshData,
@@ -171,9 +171,9 @@ export class ChunkForge implements IChunkForge {
                     reject(error);
                 }
             });
-            this.socket.once("chunkError", (error: any) => {
+            this.socket.once('chunkError', (error: any) => {
                 reject(
-                    new Error(error.message || "Server chunk generation failed")
+                    new Error(error.message || 'Server chunk generation failed')
                 );
             });
         });

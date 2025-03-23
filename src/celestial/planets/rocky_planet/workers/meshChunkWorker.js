@@ -273,15 +273,12 @@ function seedrandom(seed) {
  * @param {number} maxLevel - The maximum level of detail
  * @returns {{ positions: number[]; indices: number[]; normals: number[]; uvs: number[] }} The computed mesh data
  */
-function computeChunkMeshData(bounds, resolution, radius, face) {
+function computeChunkMeshData(bounds, resolution, radius, face, noise) {
     const positions = [];
     const indices = [];
     const normals = [];
     const uvs = [];
     const res = resolution;
-
-    // On peut créer l'instance de SimplexNoise
-    const noise = new SimplexNoise(1);
 
     // Paramètres que vous ajusterez à votre convenance
     // ex : multiplier la fréquence de base pour mieux visualiser la différence
@@ -350,8 +347,13 @@ function computeChunkMeshData(bounds, resolution, radius, face) {
                 posSphere.z / adjustedRadius
             );
 
-            // UVs : vous pouvez laisser comme avant
-            uvs.push(j / res, i / res);
+            // UVs
+            const u =
+                (Math.atan2(posSphere.x, posSphere.z) + Math.PI) /
+                (2 * Math.PI);
+            const v = Math.acos(posSphere.y / (radius + elevation)) / Math.PI;
+
+            uvs.push(u, v);
         }
     }
 
@@ -421,8 +423,16 @@ function mapUVtoCube(u, v, face) {
 self.onmessage = (event) => {
     const start = performance.now();
 
-    const { bounds, resolution, radius, face } = event.data;
-    const meshData = computeChunkMeshData(bounds, resolution, radius, face);
+    const { bounds, resolution, radius, face, seed } = event.data;
+    const noiseInstance = new SimplexNoise(seed || 1);
+
+    const meshData = computeChunkMeshData(
+        bounds,
+        resolution,
+        radius,
+        face,
+        noiseInstance
+    );
 
     self.postMessage(meshData);
 
