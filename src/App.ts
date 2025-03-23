@@ -205,7 +205,7 @@ export class FloatingCameraScene {
             "top",
             "bottom",
         ];
-        const maxLevel: number = 6;
+        const maxLevel: number = 5;
         const radius: number =
             ScaleManager.toSimulationUnits(PlanetData.get("Mercury").diameter) /
             2;

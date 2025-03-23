@@ -60,6 +60,124 @@ class Vector3 {
     }
 }
 
+// Simplex Noise 3D (adapté pour le worker)
+class SimplexNoise {
+    constructor(seed = 0) {
+        this.p = new Uint8Array(512);
+        this.perm = new Uint8Array(512);
+        for (let i = 0; i < 256; i++) {
+            this.p[i] = i;
+        }
+
+        // Fisher-Yates shuffle
+        let rng = seedrandom(seed);
+        for (let i = 255; i > 0; i--) {
+            const n = Math.floor(rng() * (i + 1));
+            [this.p[i], this.p[n]] = [this.p[n], this.p[i]];
+        }
+
+        for (let i = 0; i < 512; i++) {
+            this.perm[i] = this.p[i & 255];
+        }
+    }
+
+    dot(g, x, y, z) {
+        return g[0] * x + g[1] * y + g[2] * z;
+    }
+
+    noise(xin, yin, zin) {
+        const grad3 = [
+            [1, 1, 0], [-1, 1, 0], [1, -1, 0], [-1, -1, 0],
+            [1, 0, 1], [-1, 0, 1], [1, 0, -1], [-1, 0, -1],
+            [0, 1, 1], [0, -1, 1], [0, 1, -1], [0, -1, -1],
+        ];
+
+        const F3 = 1 / 3;
+        const G3 = 1 / 6;
+
+        let n0, n1, n2, n3;
+        let s = (xin + yin + zin) * F3;
+        let i = Math.floor(xin + s);
+        let j = Math.floor(yin + s);
+        let k = Math.floor(zin + s);
+        let t = (i + j + k) * G3;
+        let X0 = i - t;
+        let Y0 = j - t;
+        let Z0 = k - t;
+        let x0 = xin - X0;
+        let y0 = yin - Y0;
+        let z0 = zin - Z0;
+
+        let i1, j1, k1;
+        let i2, j2, k2;
+        if (x0 >= y0) {
+            if (y0 >= z0) {
+                i1 = 1; j1 = 0; k1 = 0;
+                i2 = 1; j2 = 1; k2 = 0;
+            } else if (x0 >= z0) {
+                i1 = 1; j1 = 0; k1 = 0;
+                i2 = 1; j2 = 0; k2 = 1;
+            } else {
+                i1 = 0; j1 = 0; k1 = 1;
+                i2 = 1; j2 = 0; k2 = 1;
+            }
+        } else {
+            if (y0 < z0) {
+                i1 = 0; j1 = 0; k1 = 1;
+                i2 = 0; j2 = 1; k2 = 1;
+            } else if (x0 < z0) {
+                i1 = 0; j1 = 1; k1 = 0;
+                i2 = 0; j2 = 1; k2 = 1;
+            } else {
+                i1 = 0; j1 = 1; k1 = 0;
+                i2 = 1; j2 = 1; k2 = 0;
+            }
+        }
+
+        let x1 = x0 - i1 + G3;
+        let y1 = y0 - j1 + G3;
+        let z1 = z0 - k1 + G3;
+        let x2 = x0 - i2 + 2 * G3;
+        let y2 = y0 - j2 + 2 * G3;
+        let z2 = z0 - k2 + 2 * G3;
+        let x3 = x0 - 1 + 3 * G3;
+        let y3 = y0 - 1 + 3 * G3;
+        let z3 = z0 - 1 + 3 * G3;
+
+        i &= 255;
+        j &= 255;
+        k &= 255;
+        const gi0 = this.perm[i + this.perm[j + this.perm[k]]] % 12;
+        const gi1 = this.perm[i + i1 + this.perm[j + j1 + this.perm[k + k1]]] % 12;
+        const gi2 = this.perm[i + i2 + this.perm[j + j2 + this.perm[k + k2]]] % 12;
+        const gi3 = this.perm[i + 1 + this.perm[j + 1 + this.perm[k + 1]]] % 12;
+
+        const t0 = 0.6 - x0 * x0 - y0 * y0 - z0 * z0;
+        n0 = t0 < 0 ? 0 : (t0 * t0) * (t0 * t0) * this.dot(grad3[gi0], x0, y0, z0);
+
+        const t1 = 0.6 - x1 * x1 - y1 * y1 - z1 * z1;
+        n1 = t1 < 0 ? 0 : (t1 * t1) * (t1 * t1) * this.dot(grad3[gi1], x1, y1, z1);
+
+        const t2 = 0.6 - x2 * x2 - y2 * y2 - z2 * z2;
+        n2 = t2 < 0 ? 0 : (t2 * t2) * (t2 * t2) * this.dot(grad3[gi2], x2, y2, z2);
+
+        const t3 = 0.6 - x3 * x3 - y3 * y3 - z3 * z3;
+        n3 = t3 < 0 ? 0 : (t3 * t3) * (t3 * t3) * this.dot(grad3[gi3], x3, y3, z3);
+
+        return 32 * (n0 + n1 + n2 + n3); // valeur entre -1 et 1
+    }
+}
+
+// Seedable RNG
+function seedrandom(seed) {
+    let x = Math.sin(seed) * 10000;
+    return () => {
+        x = Math.sin(x) * 10000;
+        return x - Math.floor(x);
+    };
+}
+
+
 /**
  * Computes mesh data for terrain chunk
  *
@@ -77,6 +195,9 @@ function computeChunkMeshData(bounds, resolution, radius, face) {
     const normals = [];
     const uvs = [];
     const res = resolution;
+    const noise = new SimplexNoise(1);
+    const freq = 100.0;
+    const amp = 6.0;
 
     // Calculate boundary angles from UV bounds
     const angleUMin = Math.atan(bounds.uMin);
@@ -100,16 +221,24 @@ function computeChunkMeshData(bounds, resolution, radius, face) {
                 face
             );
 
-            // Project on sphere
-            const posSphere = posCube.normalize().scale(radius);
+            let posSphere = posCube.normalize(); // vecteur normalisé
+            const elevation = noise.noise(
+                posSphere.x * freq,
+                posSphere.y * freq,
+                posSphere.z * freq
+            );
+            posSphere = posSphere.scale(radius + elevation * amp);
 
             verts.push(posSphere);
             positions.push(posSphere.x, posSphere.y, posSphere.z);
+
+            const adjustedRadius = radius + elevation * amp;
             normals.push(
-                posSphere.x / radius,
-                posSphere.y / radius,
-                posSphere.z / radius
+                posSphere.x / adjustedRadius,
+                posSphere.y / adjustedRadius,
+                posSphere.z / adjustedRadius
             );
+
             uvs.push(j / res, i / res);
         }
     }

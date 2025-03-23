@@ -89,8 +89,6 @@ export class TerrainShader {
                 samplers: [
                     "diffuseTexture",
                     "detailTexture",
-                    "normalMap",
-                    "heightMap",
                 ],
             }
         );
@@ -114,27 +112,12 @@ export class TerrainShader {
         shader.setFloats("lodRangesLUT", lodRanges);
         shader.setVector3("uPlanetCenter", planetCenter);
 
-        // Height
-        shader.setTexture(
-            "heightMap",
-            new TextureManager("moon_heightmap.ktx2", this.scene)
-        );
-
-        shader.setFloat("heightFactor", 60.0);
-
         // Diffuse
         shader.setTexture(
             "diffuseTexture",
             new TextureManager("moon_diffuse.ktx2", this.scene)
         );
         shader.setFloat("textureScale", 1.0);
-
-        // Normal
-        shader.setTexture(
-            "normalMap",
-            new TextureManager("moon_normal.ktx2", this.scene)
-        );
-        shader.setFloat("normalScale", 1.0);
 
         // Detail
         shader.setTexture(
