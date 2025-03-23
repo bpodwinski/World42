@@ -101,17 +101,17 @@ export class TerrainShader {
         // Diffuse
         shader.setTexture(
             'diffuseTexture',
-            new TextureManager('moon_diffuse.ktx2', this.scene)
+            new TextureManager('terrain_diffuse.ktx2', this.scene)
         );
-        shader.setFloat('textureScale', 1.0);
+        shader.setFloat('textureScale', 0.0001);
 
         // Detail
-        shader.setTexture(
-            'detailTexture',
-            new TextureManager('moon_detail.ktx2', this.scene)
-        );
-        shader.setFloat('detailScale', 2.0);
-        shader.setFloat('detailBlend', 1.2);
+        // shader.setTexture(
+        //     'detailTexture',
+        //     new TextureManager('moon_detail.ktx2', this.scene)
+        // );
+        // shader.setFloat('detailScale', 2.0);
+        // shader.setFloat('detailBlend', 1.2);
 
         // Light
         shader.setVector3(

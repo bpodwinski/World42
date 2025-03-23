@@ -3,7 +3,7 @@
 /*
  * Planetary Terrain Shader without Normal Mapping, Detail Mapping, or Detail Texture
  *
- * This fragment shader samples only the diffuse texture using an equirectangular projection.
+ * This fragment shader samples the diffuse texture using triplanar mapping.
  * Vertex normals are used directly for lighting.
  * A uniform 'lightDirection' is used to control the direction of the light,
  * and 'lightIntensity' to adjust the brightness.
@@ -29,15 +29,25 @@ uniform float lightIntensity;     // Intensity multiplier for the light
 
 #include<debugLOD>
 
-vec4 equirectangularProjection(vec3 pos, vec3 center, float scale, vec2 offset) {
-  vec3 dir = normalize(pos - center);
-  float longitude = atan(dir.z, dir.x);
-  float latitude = asin(dir.y);
-  float u = (longitude + 3.14159) / (2.0 * 3.14159);
-  float v = (latitude + 1.5708) / 3.14159;
-  vec2 uv = vec2(u, v);
-  uv = uv * scale + offset;
-  return texture(diffuseTexture, uv);
+// Triplanar texture sampling function
+vec4 triplanarMapping(vec3 pos, vec3 normal) {
+  vec3 blending = abs(normal);
+  blending = normalize(max(blending, 0.00001)); // Avoid division by zero
+  float bSum = blending.x + blending.y + blending.z;
+  blending /= bSum;
+
+  // Scale world position for texture tiling
+  vec3 scaledPos = pos * textureScale;
+
+  vec2 xUV = scaledPos.yz;
+  vec2 yUV = scaledPos.xz;
+  vec2 zUV = scaledPos.xy;
+
+  vec4 xTex = texture(diffuseTexture, xUV);
+  vec4 yTex = texture(diffuseTexture, yUV);
+  vec4 zTex = texture(diffuseTexture, zUV);
+
+  return xTex * blending.x + yTex * blending.y + zTex * blending.z;
 }
 
 void main(void) {
@@ -46,8 +56,8 @@ void main(void) {
   } else if(debugUV) {
     gl_FragColor = showUV();
   } else {
-    // Sample the diffuse texture using an equirectangular projection.
-    vec4 diffuseColor = equirectangularProjection(vPosition, normalize(vNormal), textureScale, vec2(0.0));
+    // Sample the diffuse texture using triplanar mapping.
+    vec4 diffuseColor = triplanarMapping(vPosition, normalize(vNormal));
 
     // Use the vertex normal directly for lighting.
     vec3 finalNormal = normalize(vNormal);
