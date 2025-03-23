@@ -36,14 +36,13 @@ varying vec3 vPosition;
 //------------------------------------------------------------------------------
 // Includes (Noise et Morphing)
 //------------------------------------------------------------------------------
-#include<noise>
 #include<morphing>
 
 //------------------------------------------------------------------------------
 // Fonction principale
 //------------------------------------------------------------------------------
 void main(void) {
-    // Calculer la position déplacée via les fonctions de bruit et morphing.
+  // Calculer la position déplacée via les fonctions de bruit et morphing.
   vec3 displacedPosition = computeDisplacedPosition(position, normal, amplitude, cameraPosition);
 
   // Générer des coordonnées UV basées sur le centre du patch

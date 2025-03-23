@@ -1,11 +1,10 @@
 #extension GL_OES_standard_derivatives : enable
 
 /*
- * Planetary Terrain Shader without Normal Mapping
+ * Planetary Terrain Shader without Normal Mapping, Detail Mapping, or Detail Texture
  *
- * This fragment shader samples the diffuse texture using an equirectangular projection,
- * and the detail texture using triplanar mapping.
- * It no longer samples a normal map, so vertex normals are used directly for lighting.
+ * This fragment shader samples only the diffuse texture using an equirectangular projection.
+ * Vertex normals are used directly for lighting.
  */
 precision highp float;
 
@@ -19,10 +18,6 @@ varying vec2 vUV;          // UV coordinates generated in the vertex shader
 uniform sampler2D diffuseTexture; // Diffuse texture sampler
 uniform float textureScale;       // Scale factor for the diffuse texture
 
-uniform sampler2D detailTexture;  // Detail texture sampler
-uniform float detailScale;        // Scale factor for the detail texture
-uniform float detailBlend;        // Blend factor between diffuse and detail textures
-
 // Debug mode uniforms
 uniform bool debugUV;             // Toggle UV debug visualization
 uniform bool debugLOD;            // Toggle LOD debug visualization
@@ -32,9 +27,31 @@ uniform float lodMaxLevel;        // Maximum LOD level
 //------------------------------------------------------------------------------
 // Includes
 //------------------------------------------------------------------------------
-#include<textureNoTile>
-#include<triplanar>
 #include<debugLOD>
+
+/**
+ * Computes an equirectangular projection UV and samples the diffuse texture.
+ *
+ * The function converts the world-space position relative to a given center into spherical coordinates,
+ * maps these coordinates to UV space using an equirectangular projection, applies a scale and offset,
+ * and then samples the diffuse texture.
+ *
+ * @param pos World-space position.
+ * @param center The center used for the projection.
+ * @param scale UV scaling factor.
+ * @param offset Additional UV offset.
+ * @return The color obtained from the diffuse texture.
+ */
+vec4 equirectangularProjection(vec3 pos, vec3 center, float scale, vec2 offset) {
+  vec3 dir = normalize(pos - center);
+  float longitude = atan(dir.z, dir.x);
+  float latitude = asin(dir.y);
+  float u = (longitude + 3.14159) / (2.0 * 3.14159);
+  float v = (latitude + 1.5708) / 3.14159;
+  vec2 uv = vec2(u, v);
+  uv = uv * scale + offset;
+  return texture(diffuseTexture, uv);
+}
 
 void main(void) {
   if(debugLOD) {
@@ -45,19 +62,10 @@ void main(void) {
     // Sample the diffuse texture using an equirectangular projection.
     vec4 diffuseColor = equirectangularProjection(vPosition, normalize(vNormal), textureScale, vec2(0.0));
 
-    // Sample the detail texture using triplanar mapping.
-    vec2 detailOffset = vec2(0.5, 0.5);
-    vec4 detailColor = triplanar(vPosition, normalize(vNormal), detailScale, detailOffset, true);
-
-    // Combine diffuse and detail textures.
-    vec4 combinedColor = mix(diffuseColor, diffuseColor * detailColor, detailBlend);
-
     // Use the vertex normal directly for lighting.
     vec3 finalNormal = normalize(vNormal);
-
-    // Simple lighting calculation (dot product with the vertical vector).
     float lighting = clamp(dot(finalNormal, vec3(0.0, 1.0, 0.0)), 0.0, 1.0);
 
-    gl_FragColor = vec4(combinedColor.rgb * lighting, combinedColor.a);
+    gl_FragColor = vec4(diffuseColor.rgb * lighting, diffuseColor.a);
   }
 }
