@@ -305,11 +305,11 @@ function computeChunkMeshData(bounds, resolution, radius, face, noise) {
     // Paramètres que vous ajusterez à votre convenance
     // ex : multiplier la fréquence de base pour mieux visualiser la différence
     const octaves = 8; // Nombre d'octaves
-    const baseFrequency = 20.0; // Fréquence de base (on peut monter plus haut)
-    const baseAmplitude = 10.0; // Amplitude de base
-    const lacunarity = 1.6; // Multiplie la fréquence d'octave en octave
+    const baseFrequency = 2.0; // Fréquence de base (on peut monter plus haut)
+    const baseAmplitude = 4.0; // Amplitude de base
+    const lacunarity = 2.5; // Multiplie la fréquence d'octave en octave
     const persistence = 0.5; // Multiplie l'amplitude d'octave en octave
-    const globalTerrainAmplitude = 15.0; // Amplitude globale du relief
+    const globalTerrainAmplitude = 40.0; // Amplitude globale du relief
 
     // Calcul des angles U et V
     const angleUMin = Math.atan(bounds.uMin);

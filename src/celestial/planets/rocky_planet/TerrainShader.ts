@@ -107,10 +107,10 @@ export class TerrainShader {
         // Detail
         shader.setTexture(
             'detailTexture',
-            new TextureManager('terrain_diffuse.ktx2', this.scene)
+            new TextureManager('terrain_detail.ktx2', this.scene)
         );
-        shader.setFloat('detailScale', 2.0);
-        shader.setFloat('detailBlend', 1.2);
+        shader.setFloat('detailScale', 1.0);
+        shader.setFloat('detailBlend', 0.5);
 
         // Light
         shader.setVector3(

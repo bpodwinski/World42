@@ -1,44 +1,44 @@
 #extension GL_OES_standard_derivatives : enable
 
 /*
- * Planetary Terrain Shader without Normal Mapping, Detail Mapping, or Detail Texture
+ * Planetary Terrain Shader with Detail Mapping
  *
- * This fragment shader samples the diffuse texture using triplanar mapping.
- * Vertex normals are used directly for lighting.
- * A uniform 'lightDirection' is used to control the direction of the light,
- * and 'lightIntensity' to adjust the brightness.
+ * Ce shader utilise le triplanar mapping pour échantillonner la texture diffuse
+ * et une texture de détail afin d'ajouter des variations locales.
  */
 precision highp float;
 
-varying vec3 vPosition;    // World-space position from the vertex shader
-varying vec3 vNormal;      // World-space normal from the vertex shader
-varying vec2 vUV;          // UV coordinates generated in the vertex shader
+varying vec3 vPosition;    // Position en espace monde
+varying vec3 vNormal;      // Normale en espace monde
+varying vec2 vUV;          // Coordonnées UV (pour debug éventuellement)
 
-uniform sampler2D diffuseTexture; // Diffuse texture sampler
-uniform float textureScale;       // Scale factor for the diffuse texture
+uniform sampler2D diffuseTexture; // Texture diffuse
+uniform sampler2D detailTexture;  // Texture de détail
 
-// Debug mode uniforms
-uniform bool debugUV;             // Toggle UV debug visualization
-uniform bool debugLOD;            // Toggle LOD debug visualization
-uniform float lodLevel;           // Current LOD level
-uniform float lodMaxLevel;        // Maximum LOD level
+uniform float textureScale;       // Échelle pour la texture diffuse
+uniform float detailScale; // Échelle pour la texture de détail
+uniform float detailBlend;    // Intensité du détail
 
-// Uniforms for lighting
-uniform vec3 lightDirection;      // Direction of the light (normalized)
-uniform float lightIntensity;     // Intensity multiplier for the light
+// Uniforms pour le debug
+uniform bool debugUV;             // Affichage des UV pour debug
+uniform bool debugLOD;            // Affichage du LOD pour debug
+uniform float lodLevel;           // LOD actuel
+uniform float lodMaxLevel;        // LOD maximum
+
+// Uniforms pour l'éclairage
+uniform vec3 lightDirection;      // Direction de la lumière (normalisée)
+uniform float lightIntensity;     // Intensité de la lumière
 
 #include<debugLOD>
 
-// Triplanar texture sampling function
-vec4 triplanarMapping(vec3 pos, vec3 normal) {
+// Fonction de triplanar mapping pour la texture diffuse
+vec4 sampleTriplanarDiffuse(vec3 pos, vec3 normal, float scale) {
   vec3 blending = abs(normal);
-  blending = normalize(max(blending, 0.00001)); // Avoid division by zero
+  blending = normalize(max(blending, 0.00001)); // Évite la division par zéro
   float bSum = blending.x + blending.y + blending.z;
   blending /= bSum;
 
-  // Scale world position for texture tiling
-  vec3 scaledPos = pos * textureScale;
-
+  vec3 scaledPos = pos * scale;
   vec2 xUV = scaledPos.yz;
   vec2 yUV = scaledPos.xz;
   vec2 zUV = scaledPos.xy;
@@ -50,21 +50,44 @@ vec4 triplanarMapping(vec3 pos, vec3 normal) {
   return xTex * blending.x + yTex * blending.y + zTex * blending.z;
 }
 
+// Fonction de triplanar mapping pour la texture de détail
+vec4 sampleTriplanarDetail(vec3 pos, vec3 normal, float scale) {
+  vec3 blending = abs(normal);
+  blending = normalize(max(blending, 0.00001)); // Évite la division par zéro
+  float bSum = blending.x + blending.y + blending.z;
+  blending /= bSum;
+
+  vec3 scaledPos = pos * scale;
+  vec2 xUV = scaledPos.yz;
+  vec2 yUV = scaledPos.xz;
+  vec2 zUV = scaledPos.xy;
+
+  vec4 xTex = texture(detailTexture, xUV);
+  vec4 yTex = texture(detailTexture, yUV);
+  vec4 zTex = texture(detailTexture, zUV);
+
+  return xTex * blending.x + yTex * blending.y + zTex * blending.z;
+}
+
 void main(void) {
   if(debugLOD) {
     gl_FragColor = lodToColor(lodLevel, lodMaxLevel);
   } else if(debugUV) {
     gl_FragColor = showUV();
   } else {
-    // Sample the diffuse texture using triplanar mapping.
-    vec4 diffuseColor = triplanarMapping(vPosition, normalize(vNormal));
+        // Normalisation de la normale interpolée
+    vec3 normal = normalize(vNormal);
 
-    // Use the vertex normal directly for lighting.
-    vec3 finalNormal = normalize(vNormal);
+        // Échantillonnage des textures diffuse et de détail par triplanar mapping
+    vec4 baseColor = sampleTriplanarDiffuse(vPosition, normal, textureScale);
+    vec4 detailColor = sampleTriplanarDetail(vPosition, normal, detailScale);
 
-    // Compute lighting with the custom light direction and apply light intensity.
-    float lighting = clamp(dot(finalNormal, normalize(lightDirection)), 0.0, 1.0) * lightIntensity;
+        // Combinaison des textures avec le détail modulé par detailIntensity
+    //vec4 combinedColor = vec4(baseColor.rgb * (1.0 + detailColor.rgb * detailIntensity), baseColor.a);
+    vec4 combinedColor = mix(baseColor, baseColor * detailColor, detailBlend);
 
-    gl_FragColor = vec4(diffuseColor.rgb * lighting, diffuseColor.a);
+        // Calcul de l'éclairage
+    float lighting = clamp(dot(normal, normalize(lightDirection)), 0.0, 1.0) * lightIntensity;
+    gl_FragColor = vec4(combinedColor.rgb * lighting, combinedColor.a);
   }
 }
