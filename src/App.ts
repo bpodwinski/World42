@@ -66,7 +66,7 @@ export class FloatingCameraScene {
         camera.touchAngularSensibility = 300000;
         camera.inertia = 0.4;
 
-        camera.speed = ScaleManager.toSimulationUnits(30);
+        camera.speed = ScaleManager.toSimulationUnits(10);
         camera.keysUp.push(90); // Z
         camera.keysDown.push(83); // S
         camera.keysLeft.push(81); // Q
@@ -75,7 +75,7 @@ export class FloatingCameraScene {
         camera.keysDownward.push(65); // E
         camera.minZ = 0.001;
         camera.maxZ = 1_000_000_0;
-        camera.fov = 0.9;
+        camera.fov = 0.6;
         camera.checkCollisions = true;
         camera.applyGravity = false;
         camera.ellipsoid = new Vector3(0.01, 0.01, 0.01);
@@ -86,7 +86,7 @@ export class FloatingCameraScene {
             'wheel',
             function (e) {
                 camera.speed = Math.min(
-                    ScaleManager.toSimulationUnits(30),
+                    ScaleManager.toSimulationUnits(10),
                     Math.max(
                         ScaleManager.toSimulationUnits(0.1),
                         (camera.speed -= e.deltaY * 0.0025)
@@ -205,11 +205,11 @@ export class FloatingCameraScene {
             'top',
             'bottom'
         ];
-        const maxLevel: number = 7;
+        const maxLevel: number = 8;
         const radius: number =
             ScaleManager.toSimulationUnits(PlanetData.get('Mercury').diameter) /
             2;
-        const resolution: number = 128;
+        const resolution: number = 96;
 
         const mercury = faces.map(
             (face) =>
@@ -224,6 +224,7 @@ export class FloatingCameraScene {
                     resolution,
                     face,
                     entMercury,
+                    false,
                     false
                 )
         );
@@ -301,6 +302,7 @@ export class FloatingCameraScene {
                         console.error(err)
                     );
                 });
+
                 // Wait for next frame to avoid saturating the CPU
                 await new Promise<void>((resolve) =>
                     requestAnimationFrame(() => resolve())
@@ -309,7 +311,17 @@ export class FloatingCameraScene {
         }
 
         // Start LOD update loop
-        updateLODs();
+        //updateLODs();
+
+        Promise.all(mercury.map((chunk) => chunk.precomputeMesh()))
+            .then(() => {
+                // Tu peux ensuite lancer la boucle d'update LOD ou d'autres actions
+                updateLODs();
+                console.log('Tous les chunks ont été pré-calculés !');
+            })
+            .catch((err) =>
+                console.error('Erreur lors du pré-calcul des chunks:', err)
+            );
 
         // Main render loop
         engine.runRenderLoop(() => {

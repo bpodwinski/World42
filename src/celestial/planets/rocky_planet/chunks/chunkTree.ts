@@ -40,6 +40,11 @@ export const globalWorkerPool = new WorkerPool(
 );
 
 /**
+ * Global cache to store precomputed meshes
+ */
+const precomputedChunkCache = new Map<string, Promise<Mesh>>();
+
+/**
  * ChunkTree class represents a terrain chunk and manages its hierarchical subdivision
  *
  * Stores spatial information and holds reference to the generated mesh if available
@@ -69,6 +74,9 @@ export class ChunkTree {
     // Keeps track of the LOD level for which the mesh was generated
     private currentLODLevel: number | null = null;
 
+    // Nouveau flag pour activer le pré-calcul
+    private precomputeEnabled: boolean = false;
+
     // Flag to enable or disable debug mode for LOD (passed to the shader)
     public debugLOD: boolean;
     public static debugLODEnabled: boolean = false;
@@ -86,6 +94,7 @@ export class ChunkTree {
      * @param {number} resolution - Grid resolution for the chunk
      * @param {Face} face - Cube face for the terrain chunk
      * @param {FloatingEntityInterface} parentEntity - Entity to which the mesh is attached
+     * @param {boolean} [precomputeEnabled=false] - Active ou non le pré-calcul du mesh
      * @param {boolean} [debugLOD=false] - Whether to enable LOD debug mode
      */
     constructor(
@@ -99,6 +108,7 @@ export class ChunkTree {
         resolution: number,
         face: Face,
         parentEntity: FloatingEntityInterface,
+        precomputeEnabled: boolean,
         debugLOD: boolean = false
     ) {
         this.scene = scene;
@@ -114,6 +124,7 @@ export class ChunkTree {
         this.mesh = null;
         this.parentEntity = parentEntity;
         this.debugLOD = debugLOD;
+        this.precomputeEnabled = precomputeEnabled;
         this.chunkForge = new ChunkForge(this.scene, globalWorkerPool);
     }
 
@@ -136,6 +147,53 @@ export class ChunkTree {
     }
 
     /**
+     * Returns a unique key for caching this chunk mesh
+     */
+    private getChunkCacheKey(): string {
+        const { uMin, uMax, vMin, vMax } = this.bounds;
+        return `${this.face}_${this.level}_${uMin}_${uMax}_${vMin}_${vMax}`;
+    }
+
+    /**
+     * Méthode optionnelle pour pré-calculer et stocker le mesh de ce chunk en RAM
+     * Si 'precomputeEnabled' est true, le mesh sera généré et stocké dans le cache global.
+     */
+    public async precomputeMesh(): Promise<void> {
+        if (!this.precomputeEnabled) return;
+
+        const key = this.getChunkCacheKey();
+        if (precomputedChunkCache.has(key)) {
+            console.log(`Chunk ${key} déjà pré-calculé`);
+            return;
+        }
+
+        const center = this.getCenterChunk();
+        console.log(`Pré-calcul du chunk ${key}...`);
+        const meshPromise = this.chunkForge.worker(
+            {
+                bounds: this.bounds,
+                resolution: this.resolution,
+                radius: this.radius,
+                face: this.face,
+                level: this.level,
+                maxLevel: this.maxLevel
+            },
+            this.camera.doublepos,
+            this.parentEntity,
+            center
+        );
+
+        precomputedChunkCache.set(key, meshPromise);
+
+        try {
+            await meshPromise;
+            console.log(`Chunk ${key} pré-calculé avec succès`);
+        } catch (e) {
+            console.error(`Erreur lors du pré-calcul du chunk ${key}:`, e);
+        }
+    }
+
+    /**
      * Creates a new child QuadTree node with given bounds
      *
      * @param {Bounds} bounds - New bounds for the child node
@@ -153,6 +211,7 @@ export class ChunkTree {
             this.resolution,
             this.face,
             this.parentEntity,
+            this.precomputeEnabled,
             this.debugLOD
         );
     }
@@ -256,7 +315,7 @@ export class ChunkTree {
             ];
 
             const minDistance = Math.min(...distances);
-            const lodRange = this.radius * 2 * Math.pow(0.45, this.level);
+            const lodRange = this.radius * 2 * Math.pow(0.5, this.level);
 
             if (minDistance < lodRange && this.level < this.maxLevel) {
                 // If chunk is close and can be subdivided, process children
@@ -312,19 +371,27 @@ export class ChunkTree {
                 if (this.mesh && this.currentLODLevel === this.level) {
                     // Mesh is already up to date for this level
                 } else if (!this.mesh) {
-                    this.mesh = await this.chunkForge.worker(
-                        {
-                            bounds: this.bounds,
-                            resolution: this.resolution,
-                            radius: this.radius,
-                            face: this.face,
-                            level: this.level,
-                            maxLevel: this.maxLevel
-                        },
-                        this.camera.doublepos,
-                        this.parentEntity,
-                        center
-                    );
+                    const key = this.getChunkCacheKey();
+                    if (
+                        this.precomputeEnabled &&
+                        precomputedChunkCache.has(key)
+                    ) {
+                        this.mesh = await precomputedChunkCache.get(key)!;
+                    } else {
+                        this.mesh = await this.chunkForge.worker(
+                            {
+                                bounds: this.bounds,
+                                resolution: this.resolution,
+                                radius: this.radius,
+                                face: this.face,
+                                level: this.level,
+                                maxLevel: this.maxLevel
+                            },
+                            this.camera.doublepos,
+                            this.parentEntity,
+                            center
+                        );
+                    }
 
                     this.currentLODLevel = this.level;
                 } else {
