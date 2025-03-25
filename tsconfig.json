@@ -15,5 +15,5 @@
     "noUnusedParameters": false,
     "noImplicitReturns": true
   },
-  "include": ["./src", "vite.config.js"]
+  "include": ["src", "types", "rspack.config.js"]
 }

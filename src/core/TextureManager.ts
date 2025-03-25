@@ -1,4 +1,4 @@
-import { Scene, Texture } from "@babylonjs/core";
+import { Scene, Texture } from '@babylonjs/core';
 
 /**
  * TextureManager extends the Babylon.js Texture class
@@ -14,7 +14,7 @@ export class TextureManager extends Texture {
      * @param scene - Babylon.js scene used for texture loading
      */
     constructor(textureName: string, scene: Scene) {
-        const baseURL = import.meta.env.VITE_ASSETS_URL;
+        const baseURL = process.env.ASSETS_URL;
         const textureURL = `${baseURL}/${textureName}`;
 
         super(textureURL, scene);

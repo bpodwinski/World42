@@ -8,39 +8,39 @@ import {
     Mesh,
     Scene,
     Texture,
-    Matrix,
-} from "@babylonjs/core";
+    Matrix
+} from '@babylonjs/core';
 
-import { AtmosphericScatteringSettings } from "../types/AtmosphericScatteringPostProcessTypes";
+import { AtmosphericScatteringSettings } from '../../../types/AtmosphericScatteringPostProcessTypes';
 
-import atmosphereFragmentShader from "../shaders/atmosphericScatteringFragmentShader.glsl?raw";
-import { OriginCamera } from "../utils/OriginCamera";
+import atmosphereFragmentShader from '../shaders/atmosphericScatteringFragmentShader.glsl';
+import { OriginCamera } from '../../../utils/OriginCamera';
 
 const SHADER_UNIFORMS = [
-    "logarithmicDepthConstant",
-    "sunPosition",
-    "cameraPosition",
-    "inverseProjection",
-    "inverseView",
-    "cameraNear",
-    "cameraFar",
-    "planetPosition",
-    "planetRadius",
-    "atmosphereRadius",
-    "rayleighHeight",
-    "rayleighCoeffs",
-    "mieHeight",
-    "mieCoeffs",
-    "mieAsymmetry",
-    "ozoneHeight",
-    "ozoneCoeffs",
-    "ozoneFalloff",
-    "sunIntensity",
+    'logarithmicDepthConstant',
+    'sunPosition',
+    'cameraPosition',
+    'inverseProjection',
+    'inverseView',
+    'cameraNear',
+    'cameraFar',
+    'planetPosition',
+    'planetRadius',
+    'atmosphereRadius',
+    'rayleighHeight',
+    'rayleighCoeffs',
+    'mieHeight',
+    'mieCoeffs',
+    'mieAsymmetry',
+    'ozoneHeight',
+    'ozoneCoeffs',
+    'ozoneFalloff',
+    'sunIntensity'
 ];
 
-const SHADER_SAMPLERS = ["textureSampler", "depthSampler"];
+const SHADER_SAMPLERS = ['textureSampler', 'depthSampler'];
 
-Effect.ShadersStore["atmosphereFragmentShader"] = atmosphereFragmentShader;
+Effect.ShadersStore['atmosphereFragmentShader'] = atmosphereFragmentShader;
 
 export class AtmosphericScatteringPostProcess extends PostProcess {
     settings: AtmosphericScatteringSettings;
@@ -62,7 +62,7 @@ export class AtmosphericScatteringPostProcess extends PostProcess {
     ) {
         super(
             name,
-            "atmosphere",
+            'atmosphere',
             SHADER_UNIFORMS,
             SHADER_SAMPLERS,
             1,
@@ -81,51 +81,51 @@ export class AtmosphericScatteringPostProcess extends PostProcess {
         this.onApplyObservable.add((effect: Effect) => {
             if (this.depthRenderer.getDepthMap()) {
                 effect.setTexture(
-                    "depthSampler",
+                    'depthSampler',
                     this.depthRenderer.getDepthMap()
                 );
             }
 
-            effect.setVector3("sunPosition", this.sun.getAbsolutePosition());
-            effect.setVector3("cameraPosition", this.camera.position);
-            effect.setVector3("planetPosition", this.planet.absolutePosition);
+            effect.setVector3('sunPosition', this.sun.getAbsolutePosition());
+            effect.setVector3('cameraPosition', this.camera.position);
+            effect.setVector3('planetPosition', this.planet.absolutePosition);
 
             effect.setMatrix(
-                "inverseProjection",
+                'inverseProjection',
                 Matrix.Invert(this.camera.getProjectionMatrix())
             );
             effect.setMatrix(
-                "inverseView",
+                'inverseView',
                 Matrix.Invert(this.camera.getViewMatrix())
             );
 
-            effect.setFloat("cameraNear", camera.minZ);
-            effect.setFloat("cameraFar", camera.maxZ);
+            effect.setFloat('cameraNear', camera.minZ);
+            effect.setFloat('cameraFar', camera.maxZ);
 
-            effect.setFloat("planetRadius", planetRadius);
-            effect.setFloat("atmosphereRadius", atmosphereRadius);
+            effect.setFloat('planetRadius', planetRadius);
+            effect.setFloat('atmosphereRadius', atmosphereRadius);
 
-            effect.setFloat("rayleighHeight", this.settings.rayleighHeight);
+            effect.setFloat('rayleighHeight', this.settings.rayleighHeight);
             effect.setVector3(
-                "rayleighCoeffs",
+                'rayleighCoeffs',
                 this.settings.rayleighScatteringCoefficients
             );
 
-            effect.setFloat("mieHeight", this.settings.mieHeight);
+            effect.setFloat('mieHeight', this.settings.mieHeight);
             effect.setVector3(
-                "mieCoeffs",
+                'mieCoeffs',
                 this.settings.mieScatteringCoefficients
             );
-            effect.setFloat("mieAsymmetry", this.settings.mieAsymmetry);
+            effect.setFloat('mieAsymmetry', this.settings.mieAsymmetry);
 
-            effect.setFloat("ozoneHeight", this.settings.ozoneHeight);
+            effect.setFloat('ozoneHeight', this.settings.ozoneHeight);
             effect.setVector3(
-                "ozoneCoeffs",
+                'ozoneCoeffs',
                 this.settings.ozoneAbsorptionCoefficients
             );
-            effect.setFloat("ozoneFalloff", this.settings.ozoneFalloff);
+            effect.setFloat('ozoneFalloff', this.settings.ozoneFalloff);
 
-            effect.setFloat("sunIntensity", this.settings.lightIntensity);
+            effect.setFloat('sunIntensity', this.settings.lightIntensity);
         });
     }
 }

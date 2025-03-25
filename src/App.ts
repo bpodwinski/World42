@@ -110,7 +110,7 @@ export class FloatingCameraScene {
         skybox.material = skyboxMaterial;
         skybox.infiniteDistance = true;
         skyboxMaterial.reflectionTexture = new CubeTexture(
-            `${import.meta.env.VITE_ASSETS_URL}/skybox`,
+            `${process.env.ASSETS_URL}/skybox`,
             scene
         );
         skyboxMaterial.reflectionTexture.coordinatesMode = Texture.SKYBOX_MODE;

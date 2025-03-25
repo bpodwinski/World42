@@ -1,5 +1,8 @@
 node_modules/
 dist/
+
+package-lock.json
+
 *.jpg
 *.png
 *.webp
@@ -8,4 +11,3 @@ dist/
 *.tif
 *.hdr
 *.exr
-package-lock.json
