@@ -17,7 +17,7 @@ const config = {
     },
     devServer: {
         port: 3000,
-        open: true,
+        open: ["/World42/"],
         historyApiFallback: true
     },
     resolve: {
