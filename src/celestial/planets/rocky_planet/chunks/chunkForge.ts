@@ -1,7 +1,7 @@
 import { Scene, Mesh, Vector3 } from '@babylonjs/core';
 
 import { WorkerPool } from './workerPool';
-import { Terrain } from '../terrain';
+import { Terrain } from '../Terrain';
 import { TerrainShader } from '../TerrainShader';
 import { Face, ChunkTree, Bounds } from './chunkTree';
 import { Socket } from 'socket.io-client';

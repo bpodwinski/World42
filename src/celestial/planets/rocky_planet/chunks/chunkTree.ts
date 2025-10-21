@@ -6,7 +6,7 @@ import {
     FloatingEntityInterface,
     OriginCamera
 } from '../../../../utils/OriginCamera';
-import { Terrain } from '../terrain';
+import { Terrain } from '../Terrain';
 import { DeleteSemaphore } from './deleteSemaphore';
 import { io, Socket } from 'socket.io-client';
 
