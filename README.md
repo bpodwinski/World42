@@ -27,3 +27,12 @@ World42 is a high-performance, multithreaded planet rendering engine that levera
    ```bash
    git clone https://github.com/bpodwinski/World42.git
    cd World42
+   npm i
+   ```
+
+**Dev**
+
+   ```bash
+   npm run serve
+   http://localhost:3000/World42/
+   ```
