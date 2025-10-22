@@ -29,13 +29,14 @@ export class EngineManager {
         const engine = new WebGPUEngine(canvas, {
             stencil: true,
             antialias: true,
-            deviceDescriptor: {
-                requiredLimits: {
-                    maxTextureDimension2D: 16384,
-                    maxBufferSize: 2147483648,
-                },
-            },
+            // deviceDescriptor: {
+            //     requiredLimits: {
+            //         maxTextureDimension2D: 16384,
+            //         maxBufferSize: 2147483648,
+            //     },
+            // },
         } as WebGPUEngineOptions);
+
         await engine.initAsync();
 
         return engine;

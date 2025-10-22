@@ -16,6 +16,7 @@ const config = {
         clean: true
     },
     devServer: {
+        host: "localhost",
         port: 3000,
         open: ["/World42/"],
         historyApiFallback: true
