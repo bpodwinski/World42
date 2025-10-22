@@ -20,7 +20,7 @@ World42 is a high-performance, multithreaded planet rendering engine that levera
 
 - [Node.js](https://nodejs.org/)
 - [npm](https://www.npmjs.com/)
-- [Vite](https://vitejs.dev/)
+- [Rspack](https://rspack.rs/)
 
 **Clone the repository:**
 
