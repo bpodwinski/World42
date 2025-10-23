@@ -48,6 +48,7 @@ const config = {
         }),
         new EnvironmentPlugin({
             ENGINE: "auto",
+            SCALE_FACTOR: "1"
         }),
     ],
     experiments: {

@@ -17,7 +17,7 @@ import '@babylonjs/core/Materials/Textures/Loaders/ktxTextureLoader';
 
 import { PostProcess } from './utils/PostProcess';
 //import { StarGlare } from "./utils/SunGlare";
-import { ScaleManager } from './utils/ScaleManager';
+import { ScaleManager } from './core/ScaleManager';
 import { FloatingEntity, OriginCamera } from './utils/OriginCamera';
 import { PlanetData } from './utils/PlanetData';
 //import { AtmosphericScatteringPostProcess } from "./celestial/AtmosphericScatteringPostProcess";
