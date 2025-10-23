@@ -1,0 +1,92 @@
+{
+    "Sun": {
+        "position_km": [
+            0,
+            0,
+            0
+        ],
+        "diameter_km": 1391000,
+        "rotation_period_days": null
+    },
+    "Mercury": {
+        "position_km": [
+            57910000,
+            0,
+            0
+        ],
+        "diameter_km": 4879,
+        "rotation_period_days": 58.6
+    },
+    "Venus": {
+        "position_km": [
+            108200000,
+            0,
+            0
+        ],
+        "diameter_km": 12104,
+        "rotation_period_days": 243
+    },
+    "Earth": {
+        "position_km": [
+            149600000,
+            0,
+            0
+        ],
+        "diameter_km": 12742,
+        "rotation_period_days": 1
+    },
+    "Mars": {
+        "position_km": [
+            227900000,
+            0,
+            0
+        ],
+        "diameter_km": 6779,
+        "rotation_period_days": 1.025
+    },
+    "Jupiter": {
+        "position_km": [
+            778500000,
+            0,
+            0
+        ],
+        "diameter_km": 139820,
+        "rotation_period_days": 0.41
+    },
+    "Saturn": {
+        "position_km": [
+            1429000000,
+            0,
+            0
+        ],
+        "diameter_km": 116460,
+        "rotation_period_days": 0.45
+    },
+    "Uranus": {
+        "position_km": [
+            2870000000,
+            0,
+            0
+        ],
+        "diameter_km": 50724,
+        "rotation_period_days": -0.72
+    },
+    "Neptune": {
+        "position_km": [
+            4500000000,
+            0,
+            0
+        ],
+        "diameter_km": 49244,
+        "rotation_period_days": 0.67
+    },
+    "Pluto": {
+        "position_km": [
+            5906400000,
+            0,
+            0
+        ],
+        "diameter_km": 2377,
+        "rotation_period_days": 6.4
+    }
+}
