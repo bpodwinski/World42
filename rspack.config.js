@@ -1,6 +1,6 @@
 require('dotenv').config();
 
-const { DefinePlugin } = require('@rspack/core');
+const { DefinePlugin, EnvironmentPlugin } = require('@rspack/core');
 const path = require('path');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const { TsCheckerRspackPlugin } = require('ts-checker-rspack-plugin');
@@ -45,7 +45,10 @@ const config = {
         new TsCheckerRspackPlugin(),
         new DefinePlugin({
             'process.env.ASSETS_URL': JSON.stringify(process.env.ASSETS_URL)
-        })
+        }),
+        new EnvironmentPlugin({
+            ENGINE: "auto",
+        }),
     ],
     experiments: {
         css: true,
