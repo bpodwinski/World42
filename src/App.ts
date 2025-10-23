@@ -15,17 +15,17 @@ import {
 } from '@babylonjs/core';
 import '@babylonjs/core/Materials/Textures/Loaders/ktxTextureLoader';
 
-import { PostProcess } from './utils/PostProcess';
+import { PostProcess } from './engine/core/PostProcessManager';
 //import { StarGlare } from "./utils/SunGlare";
-import { ScaleManager } from './core/ScaleManager';
-import { FloatingEntity, OriginCamera } from './utils/OriginCamera';
-import { PlanetData } from './utils/PlanetData';
+import { ScaleManager } from './engine/core/ScaleManager';
+import { FloatingEntity, OriginCamera } from './engine/core/CameraManager';
+import { PlanetData } from './celestial/planets/PlanetData';
 //import { AtmosphericScatteringPostProcess } from "./celestial/AtmosphericScatteringPostProcess";
 import {
     Face,
     ChunkTree
 } from './celestial/planets/rocky_planet/chunks/chunkTree';
-import { TextureManager } from './core/TextureManager';
+import { TextureManager } from './engine/core/TextureManager';
 import { io } from 'socket.io-client';
 
 /**
