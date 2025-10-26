@@ -27,6 +27,7 @@ import {
 } from './celestial/planets/rocky_planet/chunks/chunkTree';
 import { TextureManager } from './engine/core/TextureManager';
 import { io } from 'socket.io-client';
+import { MouseSteerControlManager } from './engine/core/MouseSteerControlManager';
 
 /**
  * FloatingCameraScene creates and configures the scene with a floating-origin camera,
@@ -60,26 +61,19 @@ export class FloatingCameraScene {
         planetTarget.z += ScaleManager.toSimulationUnits(0);
 
         let camera = new OriginCamera('camera', planetTarget, scene);
-        camera.debugMode = false;
+        camera.debugMode = true;
         camera.doubletgt = PlanetData.get('Sun').position;
 
-        camera.touchAngularSensibility = 300000;
-        camera.inertia = 0.4;
-
-        camera.speed = ScaleManager.toSimulationUnits(10);
-        camera.keysUp.push(90); // Z
-        camera.keysDown.push(83); // S
-        camera.keysLeft.push(81); // Q
-        camera.keysRight.push(68); // D
-        camera.keysUpward.push(69); // A
-        camera.keysDownward.push(65); // E
         camera.minZ = 0.001;
         camera.maxZ = 1_000_000_0;
-        camera.fov = 0.6;
+        camera.fov = 0.8;
         camera.checkCollisions = true;
         camera.applyGravity = false;
         camera.ellipsoid = new Vector3(0.01, 0.01, 0.01);
-        camera.attachControl(canvas, true);
+        camera.inertia = 0;
+        camera.inputs.clear();
+
+        new MouseSteerControlManager(camera, scene, engine.getRenderingCanvas()!);
 
         // Adjust camera speed with mouse wheel
         canvas.addEventListener(
@@ -209,7 +203,7 @@ export class FloatingCameraScene {
         const radius: number =
             ScaleManager.toSimulationUnits(PlanetData.get('Mercury').diameter) /
             2;
-        const resolution: number = 96;
+        const resolution: number = 64;
 
         const mercury = faces.map(
             (face) =>
