@@ -7,48 +7,65 @@ import {
     PointLight,
     Texture,
     PBRMetallicRoughnessMaterial,
-    //GlowLayer,
     Mesh,
     StandardMaterial,
     CubeTexture,
     WebGPUEngine
 } from '@babylonjs/core';
 import '@babylonjs/core/Materials/Textures/Loaders/ktxTextureLoader';
+import '@babylonjs/core/Debug/debugLayer';
+import '@babylonjs/inspector';
 
 import { PostProcess } from './engine/core/PostProcessManager';
-//import { StarGlare } from "./utils/SunGlare";
 import { ScaleManager } from './engine/core/ScaleManager';
 import { FloatingEntity, OriginCamera } from './engine/core/CameraManager';
-import { PlanetData } from './celestial/planets/PlanetData';
-//import { AtmosphericScatteringPostProcess } from "./celestial/AtmosphericScatteringPostProcess";
-import {
-    Face,
-    ChunkTree
-} from './celestial/planets/rocky_planet/chunks/chunkTree';
 import { TextureManager } from './engine/core/TextureManager';
 import { io } from 'socket.io-client';
 import { MouseSteerControlManager } from './engine/core/MouseSteerControlManager';
 import { GuiManager } from './engine/core/gui/GuiManager';
 
-/**
- * FloatingCameraScene creates and configures the scene with a floating-origin camera,
- * skybox, sun, and a CDLOD-based terrain system.
- */
+import { createCDLODForAllPlanets, loadSolarSystemFromJSON, precomputeAndRunLODLoop, type SystemJSON } from './SolarSystemLoader';
+import planetsJson from './var/planets.json';
+
+function toSystemJSON(raw: any): SystemJSON {
+    const out: Record<string, {
+        position_km: [number, number, number];
+        diameter_km: number | null;
+        rotation_period_days: number | null;
+    }> = {};
+    for (const [name, v] of Object.entries(raw)) {
+        const arr = Array.isArray((v as any).position_km) ? (v as any).position_km as number[] : [0, 0, 0];
+        const [x = 0, y = 0, z = 0] = arr;
+
+        out[name] = {
+            position_km: [x, y, z],
+            diameter_km: (v as any).diameter_km ?? null,
+            rotation_period_days: (v as any).rotation_period_days ?? null,
+        };
+    }
+    return out;
+}
+
 export class FloatingCameraScene {
-    /**
-     * Creates a new Babylon.js scene configured with a floating-origin camera,
-     * skybox, lighting, and terrain using a QuadTree system.
-     *
-     * @param engine - Babylon.js Engine instance
-     * @param canvas - HTMLCanvasElement used for rendering
-     * @returns The configured Scene instance
-     */
-    public static CreateScene(
+    public static async CreateScene(
         engine: Engine | WebGPUEngine,
         canvas: HTMLCanvasElement
-    ): Scene {
-        // Initialize scene
+    ): Promise<Scene> {
         let scene = new Scene(engine);
+        scene.clearColor.set(0, 0, 0, 1);
+        scene.collisionsEnabled = true;
+
+        const normalized = toSystemJSON(planetsJson);
+        const loadedSystem = await loadSolarSystemFromJSON(scene, normalized);
+        const systemBodies = loadedSystem.bodies;
+
+        const Sun = systemBodies.get('Sun');
+        const Body = systemBodies.get('Mercury');
+
+        if (!Sun || !Body) {
+            throw new Error('Planets JSON must at least contain "Sun" and "Body"');
+        }
+
         scene.clearColor.set(0, 0, 0, 1);
         scene.collisionsEnabled = true;
         scene.textures.forEach((texture) => {
@@ -59,18 +76,15 @@ export class FloatingCameraScene {
         const gui = new GuiManager(scene);
         gui.setMouseCrosshairVisible(true);
 
-        // Create OriginCamera
-        let planetTarget = PlanetData.get('Mercury').position.clone();
-        planetTarget.x += ScaleManager.toSimulationUnits(0);
-        planetTarget.y += ScaleManager.toSimulationUnits(2475);
-        planetTarget.z += ScaleManager.toSimulationUnits(0);
+        let planetTarget = Body.node.position.clone();
+        planetTarget.y += ScaleManager.toSimulationUnits(Body.radiusMeters ?? 0) * 1.02;
 
         let camera = new OriginCamera('camera', planetTarget, scene);
         camera.debugMode = true;
-        camera.doubletgt = PlanetData.get('Sun').position;
+        camera.doubletgt = Sun.node.position.clone();
 
         camera.minZ = 0.001;
-        camera.maxZ = 1_000_000_0;
+        camera.maxZ = 1_000_000;
         camera.fov = 0.9;
         camera.checkCollisions = true;
         camera.applyGravity = false;
@@ -81,29 +95,23 @@ export class FloatingCameraScene {
         const control = new MouseSteerControlManager(camera, scene, canvas);
         control.gui = gui;
 
-        // Adjust camera speed with mouse wheel
-        canvas.addEventListener(
-            'wheel',
-            function (e) {
-                camera.speed = Math.min(
-                    ScaleManager.toSimulationUnits(10),
-                    Math.max(
-                        ScaleManager.toSimulationUnits(0.1),
-                        (camera.speed -= e.deltaY * 0.0025)
-                    )
-                );
-            },
-            { passive: true }
+        const allCDLOD = createCDLODForAllPlanets(
+            scene,
+            camera,
+            loadedSystem,
+            {
+                maxLevel: 8,
+                resolution: 64,
+                skip: (name) => name.toLowerCase() === "sun",
+            }
         );
+
+        precomputeAndRunLODLoop(scene, camera, allCDLOD);
 
         new PostProcess('Pipeline', scene, camera);
 
-        // Create skybox with cube texture
-        const skybox = MeshBuilder.CreateBox(
-            'skyBox',
-            { size: 1_000_000_0 },
-            scene
-        );
+        // Skybox
+        const skybox = MeshBuilder.CreateBox('skyBox', { size: 1_000 }, scene);
         const skyboxMaterial = new StandardMaterial('skyBox', scene);
         skyboxMaterial.backFaceCulling = false;
         skyboxMaterial.disableLighting = true;
@@ -114,72 +122,26 @@ export class FloatingCameraScene {
             scene
         );
         skyboxMaterial.reflectionTexture.coordinatesMode = Texture.SKYBOX_MODE;
+        skyboxMaterial.disableDepthWrite = true;
+        skybox.isPickable = false;
+        skybox.renderingGroupId = 0;
 
-        // Create sun and associated lighting
+        // Sun light entity à la position du Sun du loader
         let entSunLight = new FloatingEntity('entSunLight', scene);
-        entSunLight.doublepos.set(0, 0, 0);
+        entSunLight.doublepos.set(Sun.node.position.x, Sun.node.position.y, Sun.node.position.z);
         camera.add(entSunLight);
 
-        let sunLight = new PointLight('sunLight', new Vector3(0, 0, 0), scene);
-        sunLight.intensityMode = PointLight.INTENSITYMODE_LUMINOUSPOWER;
-        sunLight.intensity = 37.5;
-        sunLight.falloffType = PointLight.FALLOFF_STANDARD;
-        sunLight.range = ScaleManager.toSimulationUnits(7e9);
-        sunLight.diffuse = new Color3(1, 1, 1);
-        sunLight.specular = new Color3(1, 1, 1);
-        sunLight.radius = ScaleManager.toSimulationUnits(696340);
-        sunLight.parent = entSunLight;
-
+        // Sun mesh (le tien), parenté à un FloatingEntity positionné via le loader
         const entSun = new FloatingEntity('entSun', scene);
-        entSun.doublepos.set(0, 0, 0);
+        entSun.doublepos.set(Sun.node.position.x, Sun.node.position.y, Sun.node.position.z);
         camera.add(entSun);
 
         const sun = MeshBuilder.CreateSphere('sun', {
             segments: 64,
-            diameter: PlanetData.get('Sun').diameter
+            diameter: (Sun.radiusMeters ? Sun.radiusMeters * 2 : ScaleManager.toSimulationUnits(1391000))
         });
-
-        // const starGlare = StarGlare.create(
-        //     scene,
-        //     sun,
-        //     ScaleManager.toSimulationUnits(696340 * 2)
-        // );
-        // starGlare.start();
-
-        // const glowLayer = new GlowLayer("sunGlow", scene);
-        // glowLayer.addIncludedOnlyMesh(sun);
-
-        /**
-         * Updates the intensity of the sun's glow based on camera distance.
-         */
-        // function updateGlowIntensity() {
-        //     let cameraDistance = Vector3.Distance(
-        //         camera.doublepos,
-        //         PlanetData.get("Sun").position
-        //     );
-
-        //     glowLayer.intensity = Math.max(
-        //         0.65,
-        //         Math.min(1.2, cameraDistance / 15000)
-        //     );
-
-        //     glowLayer.blurKernelSize = Math.min(
-        //         64,
-        //         Math.max(
-        //             32,
-        //             32 + 32 * (1 - Math.min(1, cameraDistance / 20000))
-        //         )
-        //     );
-        // }
-
-        let sunMaterial = new PBRMetallicRoughnessMaterial(
-            'sunMaterial',
-            scene
-        );
-        sunMaterial.emissiveTexture = new TextureManager(
-            'sun_surface_albedo.ktx2',
-            scene
-        );
+        let sunMaterial = new PBRMetallicRoughnessMaterial('sunMaterial', scene);
+        sunMaterial.emissiveTexture = new TextureManager('sun_surface_albedo.ktx2', scene);
         sunMaterial.emissiveColor = new Color3(1, 1, 1);
         sunMaterial.metallic = 0.0;
         sunMaterial.roughness = 0.0;
@@ -187,165 +149,30 @@ export class FloatingCameraScene {
         sun.checkCollisions = true;
         sun.parent = entSun;
 
-        // Create Mercury entity and attach it to the camera's hierarchy
-        const entMercury = new FloatingEntity('entMercury', scene);
-        entMercury.doublepos.set(
-            PlanetData.get('Mercury').position._x,
-            PlanetData.get('Mercury').position._y,
-            PlanetData.get('Mercury').position._z
-        );
-        camera.add(entMercury);
-
-        // Create QuadTree for Mercury on each cube face
-        const faces: Face[] = [
-            'front',
-            'back',
-            'left',
-            'right',
-            'top',
-            'bottom'
-        ];
-        const maxLevel: number = 8;
-        const radius: number =
-            ScaleManager.toSimulationUnits(PlanetData.get('Mercury').diameter) /
-            2;
-        const resolution: number = 64;
-
-        const mercury = faces.map(
-            (face) =>
-                new ChunkTree(
-                    scene,
-                    camera,
-                    { uMin: -1, uMax: 1, vMin: -1, vMax: 1 },
-                    0,
-                    maxLevel,
-                    radius,
-                    PlanetData.get('Mercury').position,
-                    resolution,
-                    face,
-                    entMercury,
-                    false,
-                    false
-                )
-        );
-
-        // mercury.forEach((node) => {
-        //     if (node.mesh) {
-        //         node.mesh.parent = entMercury;
-        //     }
-        // });
-
-        // Toggle the debug layer and debugLOD via keyboard
-        window.addEventListener('keydown', (evt) => {
-            if (evt.key.toLowerCase() === 'l') {
-                ChunkTree.debugLODEnabled = !ChunkTree.debugLODEnabled;
-
-                mercury.forEach((node) => {
-                    node.debugLOD = ChunkTree.debugLODEnabled;
-                    node.updateDebugLOD(ChunkTree.debugLODEnabled);
-                });
-            }
-        });
-
-        // Athmos
-        // const depthRenderer = scene.enableDepthRenderer(camera);
-        // const atmosphereSettings = {
-        //     rayleighHeight: 50,
-        //     rayleighScatteringCoefficients: new Vector3(0.01, 0.015, 0.024),
-        //     mieHeight: 40.0,
-        //     mieScatteringCoefficients: new Vector3(0.001, 0.001, 0.0011),
-        //     mieAsymmetry: 20.0,
-        //     ozoneHeight: 45.0,
-        //     ozoneAbsorptionCoefficients: new Vector3(0.001, 0.001, 0.0008),
-        //     ozoneFalloff: 20.0,
-        //     lightIntensity: 20.0,
-        // };
-
-        // const mercuryProxy = MeshBuilder.CreateSphere(
-        //     "mercuryAtmosphere",
-        //     { diameter: radius * 2 },
-        //     scene
-        // );
-        // mercuryProxy.isVisible = false;
-        // mercuryProxy.parent = entMercury;
-
-        // const atmosphere = new AtmosphericScatteringPostProcess(
-        //     "atmosphere",
-        //     mercuryProxy,
-        //     radius,
-        //     radius + 500,
-        //     sun,
-        //     camera,
-        //     depthRenderer,
-        //     scene,
-        //     atmosphereSettings
-        // );
-
         // Map to store planet meshes (unused in current version)
         const planetMeshes = new Map<string, Mesh>();
 
         // --- HUD Vitesse (lissé + throttlé) -----------------------------------------
-        let emaMS = 0; // vitesse lissée (m/s)
+        let emaMS = 0;
         let lastHudUpdate = performance.now();
-        const TAU = 0.1;           // constante de temps du filtre (s) -> plus grand = plus lisse
-        const HUD_RATE_MS = 250;   // fréquence d'update HUD (ms) -> 5 Hz
+        const TAU = 0.1;
+        const HUD_RATE_MS = 250;
 
-        // Update loop before rendering
         scene.onBeforeRenderObservable.add(() => {
-            // updateGlowIntensity();
-            // StarGlare.updateParticleSize(
-            //     camera.doublepos,
-            //     PlanetData.get("Sun").position
-            // );
-
-            // vitesse simulée -> m/s
             const speedMS = ScaleManager.simSpeedToMetersPerSec(camera.speedSim);
-
-            // lissage 1er ordre (alpha dépend du dt frame)
-            const dt = scene.getEngine().getDeltaTime() / 1000; // s
+            const dt = scene.getEngine().getDeltaTime() / 1000;
             const alpha = 1 - Math.exp(-dt / TAU);
             emaMS += (speedMS - emaMS) * alpha;
 
-            // throttle HUD à 5 Hz + quantification pour éviter micro-variations
             const now = performance.now();
             if (now - lastHudUpdate >= HUD_RATE_MS) {
-                const displayMS = Math.round(emaMS * 10) / 10; // pas de 0.1 m/s
+                const displayMS = Math.round(emaMS * 10) / 10;
                 gui.setSpeed(displayMS);
                 lastHudUpdate = now;
             }
         });
 
-        // Asynchronous LOD update loop for QuadTree
-        async function updateLODs() {
-            while (true) {
-                // Update LOD for QuadTree node
-                mercury.forEach((node) => {
-                    node.updateLOD(camera, false).catch((err) =>
-                        console.error(err)
-                    );
-                });
-
-                // Wait for next frame to avoid saturating the CPU
-                await new Promise<void>((resolve) =>
-                    requestAnimationFrame(() => resolve())
-                );
-            }
-        }
-
-        // Start LOD update loop
-        //updateLODs();
-
-        Promise.all(mercury.map((chunk) => chunk.precomputeMesh()))
-            .then(() => {
-                // Tu peux ensuite lancer la boucle d'update LOD ou d'autres actions
-                updateLODs();
-                console.log('Tous les chunks ont été pré-calculés !');
-            })
-            .catch((err) =>
-                console.error('Erreur lors du pré-calcul des chunks:', err)
-            );
-
-        // Main render loop
+        // Render loop
         engine.runRenderLoop(() => {
             scene.render();
         });

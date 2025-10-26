@@ -9,29 +9,21 @@ window.addEventListener("DOMContentLoaded", async () => {
     // Create engine
     const engine = await EngineManager.CreateAuto(canvas);
 
-    // Create scene
-    const scene = FloatingCameraScene.CreateScene(engine, canvas);
-
-    // Global flag for debugLOD
-    let debugLODEnabled = false;
+    // Create scene (await, sinon c'est une Promise<Scene>)
+    const scene = await FloatingCameraScene.CreateScene(engine, canvas);
 
     // Toggle the debug layer when the "²" key is pressed
     window.addEventListener("keydown", (evt) => {
-        if (evt.key === "²") {
+        if (evt.key === "p") {
             if (scene.debugLayer.isVisible()) {
                 scene.debugLayer.hide();
             } else {
-                scene.debugLayer.show();
+                scene.debugLayer.show({ overlay: true });
             }
         }
     });
 
-    // Run the render loop
-    engine.runRenderLoop(() => {
-        scene.render();
-    });
-
-    // Resize the engine on window resize
+    // Resize
     window.addEventListener("resize", () => {
         engine.resize();
     });
