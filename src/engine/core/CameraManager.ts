@@ -41,20 +41,22 @@ export class OriginCamera extends UniversalCamera {
         this._doublepos.copyFrom(pos);
     }
 
-    // High-precision target.
+    // High-precision target
     private _doubletgt: Vector3 = new Vector3();
+
     /**
      * Gets the camera's high-precision target
      */
     public get doubletgt(): Vector3 {
         return this._doubletgt;
     }
+
     /**
      * Sets the camera's high-precision target. The actual target is computed as the difference between the high-precision target and the high-precision position
      */
     public set doubletgt(tgt: Vector3) {
         this._doubletgt.copyFrom(tgt);
-        this.setTarget(this._doubletgt.subtract(this._doublepos));
+        //this.setTarget(this._doubletgt.subtract(this._doublepos));
     }
 
     /**
@@ -101,55 +103,27 @@ export class OriginCamera extends UniversalCamera {
 
     private updateDebugVisuals(): void {
         const scene = this.getScene();
-        const dp = this.doublepos.clone();
+
+        // doublepos line: [0, 0, 0] -> doublepos
+        const dp = this.doublepos; // pas de clone, on ne le modifie pas ici
+        const dpPts = [Vector3.Zero(), dp];
 
         if (!this._doubleposLine) {
-            this._doubleposLine = MeshBuilder.CreateLines(
-                "doubleposLine",
-                {
-                    points: [Vector3.Zero(), dp],
-                },
-
-                scene
-            ) as LinesMesh;
+            this._doubleposLine = MeshBuilder.CreateLines("doubleposLine", { points: dpPts }, scene) as LinesMesh;
             this._doubleposLine.color = Color3.Red();
-
         } else {
-            // Pour mettre à jour, on recrée la géométrie (pour la simplicité de l'exemple)
-            this._doubleposLine.dispose();
-            this._doubleposLine = MeshBuilder.CreateLines(
-                "doubleposLine",
-                {
-                    points: [Vector3.Zero(), dp],
-                },
-                scene
-            ) as LinesMesh;
-            this._doubleposLine.color = Color3.Red();
+            MeshBuilder.CreateLines("doubleposLine", { points: dpPts, instance: this._doubleposLine }, scene);
         }
 
-        // Ligne pour doubletgt (affichée comme la direction relative : doubletgt - doublepos)
+        // doubletgt relatif : (doubletgt - doublepos)
         const dt = this.doubletgt.subtract(this.doublepos);
-        if (!this._doubletgtLine) {
-            this._doubletgtLine = MeshBuilder.CreateLines(
-                "doubletgtLine",
-                {
-                    points: [Vector3.Zero(), dt],
-                },
+        const dtPts = [Vector3.Zero(), dt];
 
-                scene
-            ) as LinesMesh;
+        if (!this._doubletgtLine) {
+            this._doubletgtLine = MeshBuilder.CreateLines("doubletgtLine", { points: dtPts }, scene) as LinesMesh;
             this._doubletgtLine.color = Color3.Blue();
         } else {
-            this._doubletgtLine.dispose();
-            this._doubletgtLine = MeshBuilder.CreateLines(
-                "doubletgtLine",
-                {
-                    points: [Vector3.Zero(), dt],
-                },
-
-                scene
-            ) as LinesMesh;
-            this._doubletgtLine.color = Color3.Blue();
+            MeshBuilder.CreateLines("doubletgtLine", { points: dtPts, instance: this._doubletgtLine }, scene);
         }
     }
 }
@@ -160,12 +134,14 @@ export class OriginCamera extends UniversalCamera {
 export class FloatingEntity extends TransformNode {
     // High-precision position.
     private _doublepos: Vector3 = new Vector3();
+
     /**
      * Gets the entity's high-precision position
      */
     public get doublepos(): Vector3 {
         return this._doublepos;
     }
+
     /**
      * Sets the entity's high-precision position
      */
@@ -189,7 +165,6 @@ export class FloatingEntity extends TransformNode {
      * @param cam - The floating-origin camera
      */
     public update(camera: OriginCamera): void {
-        // The entity's relative position is the difference between its high-precision position and the camera's
-        this.position = this.doublepos.subtract(camera.doublepos);
+        this.doublepos.subtractToRef(camera.doublepos, this.position);
     }
 }
