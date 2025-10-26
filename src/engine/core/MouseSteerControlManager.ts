@@ -1,5 +1,6 @@
 import { Scene, Vector3, Quaternion, KeyboardEventTypes } from "@babylonjs/core";
 import { OriginCamera } from "./CameraManager";
+import { GuiManager } from "./GuiManager";
 
 /**
  * Configuration options for the space flight mouse-steer controller
@@ -44,21 +45,21 @@ export type SpaceFlightOpts = {
 
 /**
  * MouseSteerControlManager implements **mouse steering** for a 6DOF spacecraft camera:
- * - Mouse controls **yaw/pitch** based on cursor offset from screen center.
- * - Roll and translation are **keyboard** driven (Z/S, Q/D, R/F, E/A, Shift/Ctrl).
- * - Movement is applied to `OriginCamera.doublepos` (floating-origin friendly).
+ * - Mouse controls **yaw/pitch** based on cursor offset from screen center
+ * - Roll and translation are **keyboard** driven (Z/S, Q/D, R/F, E/A, Shift/Ctrl)
+ * - Movement is applied to `OriginCamera.doublepos` (floating-origin friendly)
  *
- * This controller does **not** bind pointer-lock; it reads absolute mouse position in the canvas.
+ * This controller does **not** bind pointer-lock; it reads absolute mouse position in the canvas
  */
 export class MouseSteerControlManager {
     private camera: OriginCamera;
     private scene: Scene;
     private canvas: HTMLCanvasElement;
 
-    /** World-space (double) linear velocity integrated each frame. */
+    /** World-space (double) linear velocity integrated each frame */
     private velocity = new Vector3();
 
-    /** Keyboard inputs state (ZQSD/RF + roll + boost/brake). */
+    /** Keyboard inputs state (ZQSD/RF + roll + boost/brake) */
     private inputs = { fwd: 0, strafe: 0, rise: 0, rollLeft: 0, rollRight: 0, boost: 0, brake: 0 };
 
     private mouseX = 0;
@@ -70,6 +71,8 @@ export class MouseSteerControlManager {
 
     private mouseActiveInWindow = true;
     private lmbDown = false;
+
+    public gui?: GuiManager;
 
     /**
      * Creates a new MouseSteerControlManager controller
@@ -137,6 +140,10 @@ export class MouseSteerControlManager {
 
         // --- POINTER EVENTS avec capture (béton) ---
         const onPointerDown = (e: PointerEvent) => {
+            if (this.rect && this.gui) {
+                this.gui.updateMouseCrosshair(e.clientX, e.clientY, this.rect);
+            }
+
             // On n'active que pour LMB (ou touch)
             if (e.pointerType === "mouse" && e.button !== 0) return;
             this.canvas.setPointerCapture(e.pointerId);
@@ -156,6 +163,10 @@ export class MouseSteerControlManager {
         };
 
         const onPointerMove = (e: PointerEvent) => {
+            if (this.rect && this.gui) {
+                this.gui.updateMouseCrosshair(e.clientX, e.clientY, this.rect);
+            }
+
             if (!this.rect) updateRect();
             const r = this.rect!;
             this.mouseX = e.clientX - r.left;

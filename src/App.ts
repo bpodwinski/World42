@@ -28,6 +28,7 @@ import {
 import { TextureManager } from './engine/core/TextureManager';
 import { io } from 'socket.io-client';
 import { MouseSteerControlManager } from './engine/core/MouseSteerControlManager';
+import { GuiManager } from './engine/core/GuiManager';
 
 /**
  * FloatingCameraScene creates and configures the scene with a floating-origin camera,
@@ -54,6 +55,10 @@ export class FloatingCameraScene {
             texture.anisotropicFilteringLevel = 16;
         });
 
+        // GUI
+        const gui = new GuiManager(scene);
+        gui.setMouseCrosshairVisible(true);
+
         // Create OriginCamera
         let planetTarget = PlanetData.get('Mercury').position.clone();
         planetTarget.x += ScaleManager.toSimulationUnits(0);
@@ -66,14 +71,15 @@ export class FloatingCameraScene {
 
         camera.minZ = 0.001;
         camera.maxZ = 1_000_000_0;
-        camera.fov = 0.8;
+        camera.fov = 0.9;
         camera.checkCollisions = true;
         camera.applyGravity = false;
         camera.ellipsoid = new Vector3(0.01, 0.01, 0.01);
         camera.inertia = 0;
         camera.inputs.clear();
 
-        new MouseSteerControlManager(camera, scene, engine.getRenderingCanvas()!);
+        const control = new MouseSteerControlManager(camera, scene, canvas);
+        control.gui = gui;
 
         // Adjust camera speed with mouse wheel
         canvas.addEventListener(
