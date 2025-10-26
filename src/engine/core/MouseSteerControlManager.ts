@@ -68,6 +68,9 @@ export class MouseSteerControlManager {
     private opts: Required<SpaceFlightOpts>;
     private beforeRenderObserver?: any;
 
+    private mouseOverCanvas = false;
+    private mouseActiveInWindow = true;
+
     /**
      * Creates a new MouseSteerControlManager controller
      * @param camera    OriginCamera to control (must use rotationQuaternion, not target)
@@ -118,22 +121,61 @@ export class MouseSteerControlManager {
      * Registers input listeners for mouse (absolute position) and keyboard
      */
     private bindInputs(): void {
+        const updateRect = () => { this.rect = this.canvas.getBoundingClientRect(); };
+        const centerMouse = () => {
+            if (!this.rect) updateRect();
+            const r = this.rect!;
+            this.mouseX = r.width * 0.5;
+            this.mouseY = r.height * 0.5;
+        };
+
+        const onMouseEnterCanvas = () => { this.mouseOverCanvas = true; };
+        const onMouseLeaveCanvas = () => { this.mouseOverCanvas = false; };
+
         // Track mouse position in the canvas (absolute, not relative deltas)
         const onMouseMove = (e: MouseEvent) => {
-            if (!this.rect) this.rect = this.canvas.getBoundingClientRect();
+            if (!this.rect) updateRect();
 
             const r = this.rect!;
+            if (!this.mouseOverCanvas) return;
             this.mouseX = e.clientX - r.left;
             this.mouseY = e.clientY - r.top;
         };
 
         const onResize = () => {
-            this.rect = this.canvas.getBoundingClientRect();
+            updateRect();
+            centerMouse();
         };
 
+        const onWindowFocus = () => { this.mouseActiveInWindow = true; };
+        const onWindowBlur = () => { this.mouseActiveInWindow = false; centerMouse(); };
+
+        const onWindowMouseOut = (e: MouseEvent) => {
+            if (!e.relatedTarget && !(e as any).toElement) {
+                this.mouseActiveInWindow = false;
+                centerMouse();
+            }
+        };
+
+        const onVisibilityChange = () => {
+            this.mouseActiveInWindow = !document.hidden && document.hasFocus();
+            if (!this.mouseActiveInWindow) centerMouse();
+        };
+
+        // Listeners
         window.addEventListener("mousemove", onMouseMove, { passive: true });
         window.addEventListener("resize", onResize);
+
+        window.addEventListener("focus", onWindowFocus);
+        window.addEventListener("blur", onWindowBlur);
+        window.addEventListener("mouseout", onWindowMouseOut);
+        document.addEventListener("visibilitychange", onVisibilityChange);
+
+        this.canvas.addEventListener("mouseenter", onMouseEnterCanvas);
+        this.canvas.addEventListener("mouseleave", onMouseLeaveCanvas);
+
         this.rect = this.canvas.getBoundingClientRect();
+        centerMouse();
 
         this.scene.onKeyboardObservable.add(kb => {
             if (kb.type !== KeyboardEventTypes.KEYDOWN && kb.type !== KeyboardEventTypes.KEYUP) return;
@@ -150,11 +192,15 @@ export class MouseSteerControlManager {
             if (k === "e") this.inputs.rollLeft = down ? 1 : 0;
             if (k === "a") this.inputs.rollRight = down ? 1 : 0;
 
-            if (kb.event.shiftKey) this.inputs.boost = down ? 1 : 0;
+            if (k === "shift") this.inputs.boost = down ? 1 : 0;
             if (k === "control") this.inputs.brake = down ? 1 : 0;
         });
 
-        (this as any)._listeners = { onMouseMove, onResize };
+        (this as any)._listeners = {
+            onMouseMove, onResize,
+            onWindowFocus, onWindowBlur, onWindowMouseOut, onVisibilityChange,
+            onMouseEnterCanvas, onMouseLeaveCanvas
+        };
     }
 
     /**
@@ -166,6 +212,13 @@ export class MouseSteerControlManager {
 
         window.removeEventListener("mousemove", L.onMouseMove);
         window.removeEventListener("resize", L.onResize);
+        window.removeEventListener("focus", L.onWindowFocus);
+        window.removeEventListener("blur", L.onWindowBlur);
+        window.removeEventListener("mouseout", L.onWindowMouseOut);
+        document.removeEventListener("visibilitychange", L.onVisibilityChange);
+
+        this.canvas.removeEventListener("mouseenter", L.onMouseEnterCanvas);
+        this.canvas.removeEventListener("mouseleave", L.onMouseLeaveCanvas);
     }
 
     /**
@@ -175,26 +228,33 @@ export class MouseSteerControlManager {
         const dt = this.scene.getEngine().getDeltaTime() * 0.001;
         if (dt <= 0 || !this.rect) return;
 
+        const steerEnabled = this.mouseActiveInWindow && this.mouseOverCanvas;
+
         // 1) Cursor offset from screen center (maps to yaw/pitch)
-        const cx = this.rect.width * 0.5;
-        const cy = this.rect.height * 0.5;
-        let dx = this.mouseX - cx;
-        let dy = this.mouseY - cy;
+        let ax = 0, ay = 0;
 
-        if (this.opts.invertY) dy = -dy;
+        if (steerEnabled) {
+            const cx = this.rect.width * 0.5;
+            const cy = this.rect.height * 0.5;
+            let dx = this.mouseX - cx;
+            let dy = this.mouseY - cy;
 
-        const mag = Math.hypot(dx, dy);
-        const dz = this.opts.deadzonePx;
-        const R = this.opts.maxRadiusPx;
-        let ax = 0, ay = 0, radiusNorm = 0;
+            if (this.opts.invertY) dy = -dy;
 
-        if (mag > dz) {
-            const clipped = Math.min(mag, R);
-            radiusNorm = (clipped - dz) / (R - dz); // 0..1
-            const k = Math.pow(radiusNorm, this.opts.responseCurve); // response shaping
-            const nx = dx / mag, ny = dy / mag; // unit direction
-            ax = nx * k; // horizontal deflection (-1..1)
-            ay = ny * k; // vertical deflection (-1..1)
+            const mag = Math.hypot(dx, dy);
+            const dz = this.opts.deadzonePx;
+            const R = this.opts.maxRadiusPx;
+
+            if (mag > dz) {
+                const clipped = Math.min(mag, R);
+                const radiusNorm = (clipped - dz) / (R - dz); // 0..1
+
+                const k = Math.pow(radiusNorm, this.opts.responseCurve); // response shaping
+                const nx = dx / mag, ny = dy / mag; // unit direction
+
+                ax = nx * k; // horizontal deflection (-1..1)
+                ay = ny * k; // vertical deflection (-1..1)
+            }
         }
 
         // 2) Angular velocity from mouse deflection (yaw/pitch)
