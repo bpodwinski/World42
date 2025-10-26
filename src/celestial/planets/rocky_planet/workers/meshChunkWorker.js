@@ -514,5 +514,5 @@ self.onmessage = (event) => {
 
     self.postMessage(meshData);
 
-    console.log('Chunk created at: ' + (performance.now() - start) + 'ms');
+    //console.log('Chunk created at: ' + (performance.now() - start) + 'ms');
 };

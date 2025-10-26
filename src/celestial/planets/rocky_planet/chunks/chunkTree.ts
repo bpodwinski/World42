@@ -315,7 +315,7 @@ export class ChunkTree {
             ];
 
             const minDistance = Math.min(...distances);
-            const lodRange = this.radius * 2 * Math.pow(0.5, this.level);
+            const lodRange = this.radius * 4 * Math.pow(0.5, this.level);
 
             if (minDistance < lodRange && this.level < this.maxLevel) {
                 // If chunk is close and can be subdivided, process children
