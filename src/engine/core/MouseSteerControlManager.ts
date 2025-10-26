@@ -93,12 +93,12 @@ export class MouseSteerControlManager {
             maxYawRate: opts.maxYawRate ?? 0.75,
             maxPitchRate: opts.maxPitchRate ?? 0.75,
             invertY: opts.invertY ?? false,
-            acceleration: opts.acceleration ?? 20,
-            strafeAcceleration: opts.strafeAcceleration ?? 20,
-            maxSpeed: opts.maxSpeed ?? 1000,
-            damping: opts.damping ?? 0.1,
-            boostMultiplier: opts.boostMultiplier ?? 4,
-            brakeDamping: opts.brakeDamping ?? 0.35,
+            acceleration: opts.acceleration ?? 10,
+            strafeAcceleration: opts.strafeAcceleration ?? 10,
+            maxSpeed: opts.maxSpeed ?? 1500,
+            damping: opts.damping ?? 0.02,
+            boostMultiplier: opts.boostMultiplier ?? 5,
+            brakeDamping: opts.brakeDamping ?? 0.3,
         };
 
         // Ensure we rotate with quaternions (never use setTarget for 6DOF)
