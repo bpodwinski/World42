@@ -41,6 +41,24 @@ export type SpaceFlightOpts = {
 
     /** Stronger damping when braking (Ctrl) */
     brakeDamping?: number;
+
+    /** Maximum yaw angular acceleration (rad/s^2) */
+    yawAcceleration?: number;
+
+    /** Maximum pitch angular acceleration (rad/s^2) */
+    pitchAcceleration?: number;
+
+    /**
+     * Angular damping factor (0..1), applied every frame on angular velocities.
+     * 0 = no damping, 0.2..0.6 = typical, 1 = extremely strong.
+     */
+    angularDamping?: number;
+
+    /** How fast the mouse deflection follows when held (0..1, higher = snappier) */
+    steerFollow?: number;
+
+    /** Exponential decay of deflection when LMB released (0..1 per frame @60fps) */
+    releaseDamping?: number;
 };
 
 /**
@@ -74,13 +92,14 @@ export class MouseSteerControlManager {
 
     public gui?: GuiManager;
 
-    /**
-     * Creates a new MouseSteerControlManager controller
-     * @param camera    OriginCamera to control (must use rotationQuaternion, not target)
-     * @param scene     Babylon.js scene
-     * @param canvas    Rendering canvas (used to read absolute mouse position)
-     * @param opts      Optional configuration overrides
-     */
+    // --- Angular state (integrated velocities) ---
+    private _yawVel = 0;   // rad/s
+    private _pitchVel = 0; // rad/s
+
+    // --- Filtered steer deflection (for release tail) ---
+    private _steerX = 0;   // -1..1 (yaw)
+    private _steerY = 0;   // -1..1 (pitch)
+
     constructor(camera: OriginCamera, scene: Scene, canvas: HTMLCanvasElement, opts: SpaceFlightOpts = {}) {
         this.camera = camera;
         this.scene = scene;
@@ -99,14 +118,19 @@ export class MouseSteerControlManager {
             damping: opts.damping ?? 0.02,
             boostMultiplier: opts.boostMultiplier ?? 5,
             brakeDamping: opts.brakeDamping ?? 0.3,
+            yawAcceleration: opts.yawAcceleration ?? 10,
+            pitchAcceleration: opts.pitchAcceleration ?? 10,
+            angularDamping: opts.angularDamping ?? 0.3,
+            steerFollow: opts.steerFollow ?? 0.5,
+            releaseDamping: opts.releaseDamping ?? 0.08,
         };
 
         // Ensure we rotate with quaternions (never use setTarget for 6DOF)
         if (!this.camera.rotationQuaternion) this.camera.rotationQuaternion = Quaternion.Identity();
 
-        // Désactive les inputs souris natifs de Babylon pour cette caméra
+        // Disable native pointer inputs for this camera
         this.camera.inputs.clear();
-        // (Optionnel) focus clavier fiable
+        // (Optional) reliable keyboard focus
         (this.canvas as any).tabIndex = 1;
         this.canvas.addEventListener("click", () => this.canvas.focus());
 
@@ -114,21 +138,14 @@ export class MouseSteerControlManager {
         this.beforeRenderObserver = this.scene.onBeforeRenderObservable.add(this.update);
     }
 
-    /**
-     * Disposes the controller, removing event listeners and the frame observer
-     */
     public dispose(): void {
         this.unbindInputs();
-
         if (this.beforeRenderObserver) {
             this.scene.onBeforeRenderObservable.remove(this.beforeRenderObserver);
             this.beforeRenderObserver = undefined;
         }
     }
 
-    /**
-     * Registers input listeners for pointer (absolute position) and keyboard
-     */
     private bindInputs(): void {
         const updateRect = () => { this.rect = this.canvas.getBoundingClientRect(); };
         const centerMouse = () => {
@@ -138,19 +155,14 @@ export class MouseSteerControlManager {
             this.mouseY = r.height * 0.5;
         };
 
-        // --- POINTER EVENTS avec capture (béton) ---
+        // --- Pointer events ---
         const onPointerDown = (e: PointerEvent) => {
-            if (this.rect && this.gui) {
-                this.gui.updateMouseCrosshair(e.clientX, e.clientY, this.rect);
-            }
-
-            // On n'active que pour LMB (ou touch)
+            if (this.rect && this.gui) this.gui.updateMouseCrosshair(e.clientX, e.clientY, this.rect);
             if (e.pointerType === "mouse" && e.button !== 0) return;
             this.canvas.setPointerCapture(e.pointerId);
-            e.preventDefault(); // évite la sélection/drag natif
+            e.preventDefault();
             this.lmbDown = true;
             if (!this.rect) updateRect();
-            // maj position immédiate
             const r = this.rect!;
             this.mouseX = e.clientX - r.left;
             this.mouseY = e.clientY - r.top;
@@ -163,27 +175,18 @@ export class MouseSteerControlManager {
         };
 
         const onPointerMove = (e: PointerEvent) => {
-            if (this.rect && this.gui) {
-                this.gui.updateMouseCrosshair(e.clientX, e.clientY, this.rect);
-            }
-
+            if (this.rect && this.gui) this.gui.updateMouseCrosshair(e.clientX, e.clientY, this.rect);
             if (!this.rect) updateRect();
             const r = this.rect!;
             this.mouseX = e.clientX - r.left;
             this.mouseY = e.clientY - r.top;
         };
 
-        // Empêche menu contextuel qui casse le drag
         const onContextMenu = (e: MouseEvent) => e.preventDefault();
 
-        const onResize = () => {
-            updateRect();
-            centerMouse();
-        };
-
+        const onResize = () => { updateRect(); centerMouse(); };
         const onWindowFocus = () => { this.mouseActiveInWindow = true; };
         const onWindowBlur = () => { this.mouseActiveInWindow = false; this.lmbDown = false; centerMouse(); };
-
         const onWindowMouseOut = (e: MouseEvent) => {
             if (!e.relatedTarget && !(e as any).toElement) {
                 this.mouseActiveInWindow = false;
@@ -191,13 +194,11 @@ export class MouseSteerControlManager {
                 centerMouse();
             }
         };
-
         const onVisibilityChange = () => {
             this.mouseActiveInWindow = !document.hidden && document.hasFocus();
             if (!this.mouseActiveInWindow) { this.lmbDown = false; centerMouse(); }
         };
 
-        // Listeners
         this.canvas.addEventListener("pointerdown", onPointerDown);
         this.canvas.addEventListener("pointerup", onPointerUp);
         this.canvas.addEventListener("pointermove", onPointerMove, { passive: true });
@@ -212,7 +213,7 @@ export class MouseSteerControlManager {
         this.rect = this.canvas.getBoundingClientRect();
         centerMouse();
 
-        // --- Clavier ---
+        // --- Keyboard ---
         this.scene.onKeyboardObservable.add(kb => {
             if (kb.type !== KeyboardEventTypes.KEYDOWN && kb.type !== KeyboardEventTypes.KEYUP) return;
             const down = kb.type === KeyboardEventTypes.KEYDOWN;
@@ -239,9 +240,6 @@ export class MouseSteerControlManager {
         };
     }
 
-    /**
-     * Unregisters input listeners
-     */
     private unbindInputs(): void {
         const L = (this as any)._listeners;
         if (!L) return;
@@ -259,24 +257,33 @@ export class MouseSteerControlManager {
     }
 
     /**
-     * Per-frame update: computes yaw/pitch from mouse offset, roll/translation from keyboard integrates velocity, and applies floating-origin movement via `doublepos`
+     * Helper: accelerate `current` toward `target` with max acceleration `acc` (units/s^2)
+     */
+    private _approach(current: number, target: number, acc: number, dt: number): number {
+        const delta = target - current;
+        const maxStep = acc * dt;
+        if (Math.abs(delta) <= maxStep) return target;
+        return current + Math.sign(delta) * maxStep;
+    }
+
+    /**
+     * Per-frame update: computes yaw/pitch from mouse offset with angular acceleration,
+     * roll/translation from keyboard, integrates velocities, and applies floating-origin movement.
      */
     private update = (): void => {
         const dt = this.scene.getEngine().getDeltaTime() * 0.001;
         if (dt <= 0 || !this.rect) return;
 
-        // Steering actif uniquement si fenêtre active + LMB maintenu
+        // Steering only when window active + LMB held
         const steerEnabled = this.mouseActiveInWindow && this.lmbDown;
 
-        // 1) Cursor offset from screen center (maps to yaw/pitch)
+        // 1) Mouse offset -> raw normalized deflection (ax, ay)
         let ax = 0, ay = 0;
-
         if (steerEnabled) {
             const cx = this.rect.width * 0.5;
             const cy = this.rect.height * 0.5;
             let dx = this.mouseX - cx;
             let dy = this.mouseY - cy;
-
             if (this.opts.invertY) dy = -dy;
 
             const mag = Math.hypot(dx, dy);
@@ -286,24 +293,43 @@ export class MouseSteerControlManager {
             if (mag > dz) {
                 const clipped = Math.min(mag, R);
                 const radiusNorm = (clipped - dz) / (R - dz); // 0..1
-
-                const k = Math.pow(radiusNorm, this.opts.responseCurve); // response shaping
-                const nx = dx / mag, ny = dy / mag; // unit direction
-
-                ax = nx * k; // horizontal deflection (-1..1)
-                ay = ny * k; // vertical deflection (-1..1)
+                const k = Math.pow(radiusNorm, this.opts.responseCurve);
+                const nx = dx / mag, ny = dy / mag;
+                ax = nx * k; // -1..1
+                ay = ny * k; // -1..1
             }
         }
 
-        // 2) Angular velocity from mouse deflection (yaw/pitch)
-        const yawRate = this.opts.maxYawRate * ax;
-        const pitchRate = this.opts.maxPitchRate * ay;
+        // --- Filtered deflection with release tail ---
+        const follow = this.opts.steerFollow;          // 0..1
+        const relD = this.opts.releaseDamping;       // ~0.08..0.2 at 60fps
+        const relExp = Math.exp(-relD * dt * 60);      // fps-independent
 
-        if (yawRate || pitchRate) {
+        if (steerEnabled) {
+            this._steerX = this._steerX + (ax - this._steerX) * follow;
+            this._steerY = this._steerY + (ay - this._steerY) * follow;
+        } else {
+            this._steerX *= relExp;
+            this._steerY *= relExp;
+        }
+
+        // 2) Target angular rates from filtered deflection
+        const targetYawRate = this.opts.maxYawRate * this._steerX; // rad/s
+        const targetPitchRate = this.opts.maxPitchRate * this._steerY; // rad/s
+
+        // 3) Integrate angular velocities with acceleration limits + angular damping
+        const angDamp = Math.exp(-this.opts.angularDamping * dt * 60);
+        this._yawVel = this._approach(this._yawVel * angDamp, targetYawRate, this.opts.yawAcceleration, dt);
+        this._pitchVel = this._approach(this._pitchVel * angDamp, targetPitchRate, this.opts.pitchAcceleration, dt);
+
+        // 4) Apply yaw & pitch rotations from integrated angular velocities
+        if (this._yawVel || this._pitchVel) {
             const right = this.camera.getDirection(Vector3.Right());
             const up = this.camera.getDirection(Vector3.Up());
-            const qYaw = Quaternion.RotationAxis(up, yawRate * dt);
-            const qPitch = Quaternion.RotationAxis(right, pitchRate * dt);
+
+            const qYaw = Quaternion.RotationAxis(up, this._yawVel * dt);
+            const qPitch = Quaternion.RotationAxis(right, this._pitchVel * dt);
+
             this.camera.rotationQuaternion = qPitch.multiply(qYaw).multiply(this.camera.rotationQuaternion!);
             this.camera.rotationQuaternion!.normalize();
         }
@@ -317,12 +343,11 @@ export class MouseSteerControlManager {
             this.camera.rotationQuaternion!.normalize();
         }
 
-        // 3) Translation — keyboard only (no mouse-driven forward)
+        // 5) Translation — keyboard only
         const right = this.camera.getDirection(Vector3.Right());
         const up = this.camera.getDirection(Vector3.Up());
         const fwd = this.camera.getDirection(Vector3.Forward());
 
-        // Acceleration per axis
         let acceleration = this.opts.acceleration;
         if (this.inputs.boost) acceleration *= this.opts.boostMultiplier;
 
@@ -330,24 +355,20 @@ export class MouseSteerControlManager {
         this.velocity.addInPlace(right.scale(this.inputs.strafe * this.opts.strafeAcceleration * dt));
         this.velocity.addInPlace(up.scale(this.inputs.rise * this.opts.strafeAcceleration * dt));
 
-        // Brake / damping
+        // Brake / damping (linear)
         const damping = this.inputs.brake ? this.opts.brakeDamping : this.opts.damping;
         const dampFactor = Math.exp(-damping * dt * 60);
         this.velocity.scaleInPlace(dampFactor);
 
-        // Kill micro-drift
         if (this.velocity.lengthSquared() < 1e-6) this.velocity.set(0, 0, 0);
 
         // Clamp total speed
         const speed = this.velocity.length();
         if (speed > this.opts.maxSpeed) this.velocity.scaleInPlace(this.opts.maxSpeed / speed);
 
-        // 4) Move in world (floating-origin): apply velocity to doubleposzzzzzz
+        // 6) Move in world (floating-origin)
         if (this.velocity.lengthSquared() > 0) {
             this.camera.doublepos.addInPlace(this.velocity.scale(dt));
         }
-
-        // (Optional) debug rapide:
-        // console.log({ steerEnabled, yawRate, pitchRate, mouseX: this.mouseX, mouseY: this.mouseY });
     };
 }
