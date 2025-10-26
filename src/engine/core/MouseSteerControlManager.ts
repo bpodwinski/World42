@@ -68,8 +68,8 @@ export class MouseSteerControlManager {
     private opts: Required<SpaceFlightOpts>;
     private beforeRenderObserver?: any;
 
-    private mouseOverCanvas = false;
     private mouseActiveInWindow = true;
+    private lmbDown = false;
 
     /**
      * Creates a new MouseSteerControlManager controller
@@ -101,6 +101,12 @@ export class MouseSteerControlManager {
         // Ensure we rotate with quaternions (never use setTarget for 6DOF)
         if (!this.camera.rotationQuaternion) this.camera.rotationQuaternion = Quaternion.Identity();
 
+        // Désactive les inputs souris natifs de Babylon pour cette caméra
+        this.camera.inputs.clear();
+        // (Optionnel) focus clavier fiable
+        (this.canvas as any).tabIndex = 1;
+        this.canvas.addEventListener("click", () => this.canvas.focus());
+
         this.bindInputs();
         this.beforeRenderObserver = this.scene.onBeforeRenderObservable.add(this.update);
     }
@@ -118,7 +124,7 @@ export class MouseSteerControlManager {
     }
 
     /**
-     * Registers input listeners for mouse (absolute position) and keyboard
+     * Registers input listeners for pointer (absolute position) and keyboard
      */
     private bindInputs(): void {
         const updateRect = () => { this.rect = this.canvas.getBoundingClientRect(); };
@@ -129,18 +135,35 @@ export class MouseSteerControlManager {
             this.mouseY = r.height * 0.5;
         };
 
-        const onMouseEnterCanvas = () => { this.mouseOverCanvas = true; };
-        const onMouseLeaveCanvas = () => { this.mouseOverCanvas = false; };
-
-        // Track mouse position in the canvas (absolute, not relative deltas)
-        const onMouseMove = (e: MouseEvent) => {
+        // --- POINTER EVENTS avec capture (béton) ---
+        const onPointerDown = (e: PointerEvent) => {
+            // On n'active que pour LMB (ou touch)
+            if (e.pointerType === "mouse" && e.button !== 0) return;
+            this.canvas.setPointerCapture(e.pointerId);
+            e.preventDefault(); // évite la sélection/drag natif
+            this.lmbDown = true;
             if (!this.rect) updateRect();
-
+            // maj position immédiate
             const r = this.rect!;
-            if (!this.mouseOverCanvas) return;
             this.mouseX = e.clientX - r.left;
             this.mouseY = e.clientY - r.top;
         };
+
+        const onPointerUp = (e: PointerEvent) => {
+            if (e.pointerType === "mouse" && e.button !== 0) return;
+            try { this.canvas.releasePointerCapture(e.pointerId); } catch { }
+            this.lmbDown = false;
+        };
+
+        const onPointerMove = (e: PointerEvent) => {
+            if (!this.rect) updateRect();
+            const r = this.rect!;
+            this.mouseX = e.clientX - r.left;
+            this.mouseY = e.clientY - r.top;
+        };
+
+        // Empêche menu contextuel qui casse le drag
+        const onContextMenu = (e: MouseEvent) => e.preventDefault();
 
         const onResize = () => {
             updateRect();
@@ -148,35 +171,37 @@ export class MouseSteerControlManager {
         };
 
         const onWindowFocus = () => { this.mouseActiveInWindow = true; };
-        const onWindowBlur = () => { this.mouseActiveInWindow = false; centerMouse(); };
+        const onWindowBlur = () => { this.mouseActiveInWindow = false; this.lmbDown = false; centerMouse(); };
 
         const onWindowMouseOut = (e: MouseEvent) => {
             if (!e.relatedTarget && !(e as any).toElement) {
                 this.mouseActiveInWindow = false;
+                this.lmbDown = false;
                 centerMouse();
             }
         };
 
         const onVisibilityChange = () => {
             this.mouseActiveInWindow = !document.hidden && document.hasFocus();
-            if (!this.mouseActiveInWindow) centerMouse();
+            if (!this.mouseActiveInWindow) { this.lmbDown = false; centerMouse(); }
         };
 
         // Listeners
-        window.addEventListener("mousemove", onMouseMove, { passive: true });
-        window.addEventListener("resize", onResize);
+        this.canvas.addEventListener("pointerdown", onPointerDown);
+        this.canvas.addEventListener("pointerup", onPointerUp);
+        this.canvas.addEventListener("pointermove", onPointerMove, { passive: true });
+        this.canvas.addEventListener("contextmenu", onContextMenu);
 
+        window.addEventListener("resize", onResize);
         window.addEventListener("focus", onWindowFocus);
         window.addEventListener("blur", onWindowBlur);
         window.addEventListener("mouseout", onWindowMouseOut);
         document.addEventListener("visibilitychange", onVisibilityChange);
 
-        this.canvas.addEventListener("mouseenter", onMouseEnterCanvas);
-        this.canvas.addEventListener("mouseleave", onMouseLeaveCanvas);
-
         this.rect = this.canvas.getBoundingClientRect();
         centerMouse();
 
+        // --- Clavier ---
         this.scene.onKeyboardObservable.add(kb => {
             if (kb.type !== KeyboardEventTypes.KEYDOWN && kb.type !== KeyboardEventTypes.KEYUP) return;
             const down = kb.type === KeyboardEventTypes.KEYDOWN;
@@ -197,9 +222,9 @@ export class MouseSteerControlManager {
         });
 
         (this as any)._listeners = {
-            onMouseMove, onResize,
-            onWindowFocus, onWindowBlur, onWindowMouseOut, onVisibilityChange,
-            onMouseEnterCanvas, onMouseLeaveCanvas
+            onPointerDown, onPointerUp, onPointerMove,
+            onContextMenu,
+            onResize, onWindowFocus, onWindowBlur, onWindowMouseOut, onVisibilityChange
         };
     }
 
@@ -210,15 +235,16 @@ export class MouseSteerControlManager {
         const L = (this as any)._listeners;
         if (!L) return;
 
-        window.removeEventListener("mousemove", L.onMouseMove);
+        this.canvas.removeEventListener("pointerdown", L.onPointerDown);
+        this.canvas.removeEventListener("pointerup", L.onPointerUp);
+        this.canvas.removeEventListener("pointermove", L.onPointerMove);
+        this.canvas.removeEventListener("contextmenu", L.onContextMenu);
+
         window.removeEventListener("resize", L.onResize);
         window.removeEventListener("focus", L.onWindowFocus);
         window.removeEventListener("blur", L.onWindowBlur);
         window.removeEventListener("mouseout", L.onWindowMouseOut);
         document.removeEventListener("visibilitychange", L.onVisibilityChange);
-
-        this.canvas.removeEventListener("mouseenter", L.onMouseEnterCanvas);
-        this.canvas.removeEventListener("mouseleave", L.onMouseLeaveCanvas);
     }
 
     /**
@@ -228,7 +254,8 @@ export class MouseSteerControlManager {
         const dt = this.scene.getEngine().getDeltaTime() * 0.001;
         if (dt <= 0 || !this.rect) return;
 
-        const steerEnabled = this.mouseActiveInWindow && this.mouseOverCanvas;
+        // Steering actif uniquement si fenêtre active + LMB maintenu
+        const steerEnabled = this.mouseActiveInWindow && this.lmbDown;
 
         // 1) Cursor offset from screen center (maps to yaw/pitch)
         let ax = 0, ay = 0;
@@ -304,12 +331,12 @@ export class MouseSteerControlManager {
         const speed = this.velocity.length();
         if (speed > this.opts.maxSpeed) this.velocity.scaleInPlace(this.opts.maxSpeed / speed);
 
-        // 4) Move in world (floating-origin): apply velocity to doublepos
+        // 4) Move in world (floating-origin): apply velocity to doubleposzzzzzz
         if (this.velocity.lengthSquared() > 0) {
             this.camera.doublepos.addInPlace(this.velocity.scale(dt));
         }
 
-        // (Optional) If you keep a debug target, compute it without setTarget:
-        // const lookD = 10; this.camera.doubletgt = this.camera.doublepos.add(fwd.scale(lookD));
+        // (Optional) debug rapide:
+        // console.log({ steerEnabled, yawRate, pitchRate, mouseX: this.mouseX, mouseY: this.mouseY });
     };
 }

@@ -10,6 +10,13 @@
   <title>Planet LOD</title>
 
   <style>
+    html, body, #renderCanvas {
+      user-select: none;
+      -webkit-user-select: none;
+      -ms-user-select: none;
+      touch-action: none;
+    }
+
     body {
       margin: 0px;
       overflow: hidden;
@@ -19,6 +26,7 @@
     }
 
     #renderCanvas {
+      display: block;
       width: 100%;
       height: 100%;
     }
