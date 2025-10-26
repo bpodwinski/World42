@@ -26,7 +26,7 @@ uniform vec3 uPlanetCenter;       // Centre global de la planète
 uniform vec3 uPatchCenter;        // Centre du patch (calculé sur le CPU)
 
 varying vec2 vUV;
-varying vec3 vNormal;
+varying vec3 vRadial;
 varying vec3 vPosition;
 
 void main(void) {
@@ -42,7 +42,7 @@ void main(void) {
   vUV = vec2(uCoord, vCoord);
 
   vPosition = displacedPosition;
-  vNormal = normalize(normal);
+  vRadial = normalize(displacedPosition - uPlanetCenter);
 
   gl_Position = worldViewProjection * vec4(displacedPosition, 1.0);
 }
