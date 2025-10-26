@@ -6,6 +6,7 @@ import {
     TextBlock,
     Image
 } from "@babylonjs/gui";
+import { SpeedHUD } from "./SpeedHUD";
 
 /**
  * Options for configuring GUI crosshairs
@@ -43,6 +44,8 @@ export type CrosshairOpts = {
 export class GuiManager {
     private ui: AdvancedDynamicTexture;
 
+    private speedHud: SpeedHUD;
+
     /** Center crosshair container (fixed at screen center) */
     private crosshairContainer: Rectangle;
 
@@ -74,6 +77,16 @@ export class GuiManager {
         };
 
         this.ui = AdvancedDynamicTexture.CreateFullscreenUI("World42UI", true, scene);
+
+        // ——— Speed HUD ———
+        this.speedHud = new SpeedHUD(this.ui, {
+            topPx: 30,
+            leftPx: 0,
+            fontSize: 16,
+            color: "white",
+            outlineColor: "black",
+            outlineWidth: 4,
+        });
 
         // ----- Center crosshair (fixed) -----
         this.crosshairContainer = new Rectangle("crosshair_center");
@@ -118,6 +131,11 @@ export class GuiManager {
         this.hintText.paddingBottom = 10;
         this.hintText.isPointerBlocker = false;
         this.ui.addControl(this.hintText);
+    }
+
+    /** Update the speed label (expects m/s) */
+    public setSpeed(ms: number) {
+        this.speedHud.set(ms);
     }
 
     /**

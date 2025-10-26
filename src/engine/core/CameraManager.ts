@@ -14,7 +14,11 @@ export interface FloatingEntityInterface extends TransformNode {
 }
 
 /**
- * A floating-origin camera that remains fixed at the origin (0, 0, 0), while its attached entities are moved according to their high-precision positions
+ * Floating-origin camera:
+ * - Keeps the render-space camera at (0,0,0)
+ * - Maintains a high-precision position in `doublepos`
+ * - Updates attached floating entities relative to `doublepos`
+ * - Computes velocity and speed each frame from `doublepos`
  */
 export class OriginCamera extends UniversalCamera {
     public debugMode: boolean = false;
@@ -22,70 +26,95 @@ export class OriginCamera extends UniversalCamera {
     private _doubletgtLine: LinesMesh | null = null;
     private _floatingDebugLines: LinesMesh[] = [];
 
-    // List of floating entities managed by this camera
+    // Managed floating entities
     private _floatingEntities: FloatingEntity[] = [];
 
-    // High-precision position.
+    // High-precision position/target
     private _doublepos: Vector3 = new Vector3();
+    private _doubletgt: Vector3 = new Vector3();
+
+    // --- Velocity state (simulation units) ---
+    // Velocity vector (units of simulation per second)
+    private _velocitySim: Vector3 = new Vector3(0, 0, 0);
+    // Speed magnitude (units of simulation per second)
+    private _speedSim: number = 0;
+
+    // Internal previous-frame state for velocity computation
+    private _lastDoublepos: Vector3 = new Vector3();
+    private _lastTimestampMs: number = performance.now();
 
     /**
-     * Gets the camera's high-precision position
+     * Current high-precision position (simulation units).
      */
     public get doublepos(): Vector3 {
         return this._doublepos;
     }
-    /**
-     * Sets the camera's high-precision position
-     */
     public set doublepos(pos: Vector3) {
         this._doublepos.copyFrom(pos);
     }
 
-    // High-precision target
-    private _doubletgt: Vector3 = new Vector3();
-
     /**
-     * Gets the camera's high-precision target
+     * Current high-precision target (simulation units).
+     * The actual look target in render-space is (doubletgt - doublepos).
      */
     public get doubletgt(): Vector3 {
         return this._doubletgt;
     }
-
-    /**
-     * Sets the camera's high-precision target. The actual target is computed as the difference between the high-precision target and the high-precision position
-     */
     public set doubletgt(tgt: Vector3) {
         this._doubletgt.copyFrom(tgt);
-        //this.setTarget(this._doubletgt.subtract(this._doublepos));
+        // If you want to drive look-at each frame: setTarget(this._doubletgt.subtract(this._doublepos))
     }
 
     /**
-     * Creates a new floating-origin camera
-     *
-     * @param name - The name of the camera
-     * @param position - The initial high-precision position
-     * @param scene - The Babylon.js scene
+     * Current velocity vector in simulation units per second.
+     * This is computed each frame from doublepos delta / dt.
+     */
+    public get velocitySim(): Vector3 {
+        return this._velocitySim;
+    }
+
+    /**
+     * Current speed (magnitude of velocity) in simulation units per second.
+     */
+    public get speedSim(): number {
+        return this._speedSim;
+    }
+
+    /**
+     * Create a floating-origin camera.
+     * @param name   Camera name
+     * @param position Initial high-precision position (simulation units)
+     * @param scene  Babylon.js scene
      */
     constructor(name: string, position: Vector3, scene: Scene) {
-        // Initialize the actual camera position at the origin
+        // Render-space camera starts at origin (0,0,0)
         super(name, Vector3.Zero(), scene);
 
-        // Store the high-precision position
+        // Store high-precision position
         this.doublepos = position;
 
-        // Before evaluating active meshes each frame, update the high-precision position and adjust the positions of all managed entities
-        scene.onBeforeActiveMeshesEvaluationObservable.add(() => {
-            // Add the accumulated movement to the high-precision position
-            this.doublepos.addInPlace(this.position);
+        // Initialize velocity history
+        this._lastDoublepos.copyFrom(position);
+        this._lastTimestampMs = performance.now();
 
-            // Reset the actual camera position back to the origin
+        // Per-frame update: integrate render-space movement into doublepos,
+        // reset render-space position, update entities, compute velocity, debug lines.
+        scene.onBeforeActiveMeshesEvaluationObservable.add(() => {
+            // 1) Floating-origin integration:
+            // Accumulate render-space delta into high-precision space
+            this.doublepos.addInPlace(this.position);
+            // Reset render-space camera to origin
             this.position.set(0, 0, 0);
 
-            // Update all attached floating entities
+            // 2) Update attached floating entities to reflect new doublepos
             for (let entity of this._floatingEntities) {
                 entity.update(this);
             }
 
+            // 3) Compute velocity from doublepos delta / dt
+            this._updateVelocity();
+
+            // 4) Debug visuals (optional)
             if (this.debugMode) {
                 this.updateDebugVisuals();
             }
@@ -93,76 +122,105 @@ export class OriginCamera extends UniversalCamera {
     }
 
     /**
-     * Adds a floating entity to be managed by this camera
-     *
-     * @param entity - The floating entity to add
+     * Add a floating entity managed by this camera.
      */
     public add(entity: FloatingEntity): void {
         this._floatingEntities.push(entity);
     }
 
+    /**
+     * Compute velocity & speed (simulation units / second) from doublepos.
+     * Uses wall-clock delta between frames.
+     */
+    private _updateVelocity(): void {
+        const nowMs = performance.now();
+        const dt = (nowMs - this._lastTimestampMs) / 1000.0; // seconds
+
+        if (dt > 0) {
+            // delta in simulation units
+            const dx = this._doublepos.x - this._lastDoublepos.x;
+            const dy = this._doublepos.y - this._lastDoublepos.y;
+            const dz = this._doublepos.z - this._lastDoublepos.z;
+
+            // velocity (sim units / s)
+            this._velocitySim.set(dx / dt, dy / dt, dz / dt);
+            this._speedSim = this._velocitySim.length();
+
+            // persist for next frame
+            this._lastDoublepos.copyFrom(this._doublepos);
+            this._lastTimestampMs = nowMs;
+        }
+        // If dt == 0 (very rare), keep previous velocity
+    }
+
+    /**
+     * Debug helpers: draw lines for doublepos and (doubletgt - doublepos)
+     * in render-space from (0,0,0).
+     */
     private updateDebugVisuals(): void {
         const scene = this.getScene();
 
-        // doublepos line: [0, 0, 0] -> doublepos
-        const dp = this.doublepos; // pas de clone, on ne le modifie pas ici
+        // Line for doublepos: [0,0,0] -> doublepos
+        const dp = this.doublepos;
         const dpPts = [Vector3.Zero(), dp];
 
         if (!this._doubleposLine) {
-            this._doubleposLine = MeshBuilder.CreateLines("doubleposLine", { points: dpPts }, scene) as LinesMesh;
+            this._doubleposLine = MeshBuilder.CreateLines(
+                "doubleposLine",
+                { points: dpPts },
+                scene
+            ) as LinesMesh;
             this._doubleposLine.color = Color3.Red();
         } else {
-            MeshBuilder.CreateLines("doubleposLine", { points: dpPts, instance: this._doubleposLine }, scene);
+            MeshBuilder.CreateLines(
+                "doubleposLine",
+                { points: dpPts, instance: this._doubleposLine },
+                scene
+            );
         }
 
-        // doubletgt relatif : (doubletgt - doublepos)
+        // Line for relative target: (doubletgt - doublepos)
         const dt = this.doubletgt.subtract(this.doublepos);
         const dtPts = [Vector3.Zero(), dt];
 
         if (!this._doubletgtLine) {
-            this._doubletgtLine = MeshBuilder.CreateLines("doubletgtLine", { points: dtPts }, scene) as LinesMesh;
+            this._doubletgtLine = MeshBuilder.CreateLines(
+                "doubletgtLine",
+                { points: dtPts },
+                scene
+            ) as LinesMesh;
             this._doubletgtLine.color = Color3.Blue();
         } else {
-            MeshBuilder.CreateLines("doubletgtLine", { points: dtPts, instance: this._doubletgtLine }, scene);
+            MeshBuilder.CreateLines(
+                "doubletgtLine",
+                { points: dtPts, instance: this._doubletgtLine },
+                scene
+            );
         }
     }
 }
 
 /**
- * A floating entity whose position is maintained in high precision. The entity updates its relative position based on the camera's high-precision position
+ * Floating entity with high-precision position in `doublepos`.
+ * Its render-space transform is updated relative to the camera's doublepos.
  */
 export class FloatingEntity extends TransformNode {
-    // High-precision position.
     private _doublepos: Vector3 = new Vector3();
 
-    /**
-     * Gets the entity's high-precision position
-     */
+    /** High-precision position (simulation units). */
     public get doublepos(): Vector3 {
         return this._doublepos;
     }
-
-    /**
-     * Sets the entity's high-precision position
-     */
     public set doublepos(pos: Vector3) {
         this._doublepos.copyFrom(pos);
     }
 
-    /**
-     * Creates a new floating entity
-     *
-     * @param name - The name of the entity
-     * @param scene - The Babylon.js scene
-     */
     constructor(name: string, scene: Scene) {
         super(name, scene);
     }
 
     /**
-     * Updates the entity's position relative to the camera's high-precision position
-     *
-     * @param cam - The floating-origin camera
+     * Update render-space position relative to camera.doublepos
      */
     public update(camera: OriginCamera): void {
         this.doublepos.subtractToRef(camera.doublepos, this.position);

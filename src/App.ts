@@ -28,7 +28,7 @@ import {
 import { TextureManager } from './engine/core/TextureManager';
 import { io } from 'socket.io-client';
 import { MouseSteerControlManager } from './engine/core/MouseSteerControlManager';
-import { GuiManager } from './engine/core/GuiManager';
+import { GuiManager } from './engine/core/gui/GuiManager';
 
 /**
  * FloatingCameraScene creates and configures the scene with a floating-origin camera,
@@ -284,14 +284,36 @@ export class FloatingCameraScene {
         // Map to store planet meshes (unused in current version)
         const planetMeshes = new Map<string, Mesh>();
 
+        // --- HUD Vitesse (lissé + throttlé) -----------------------------------------
+        let emaMS = 0; // vitesse lissée (m/s)
+        let lastHudUpdate = performance.now();
+        const TAU = 0.1;           // constante de temps du filtre (s) -> plus grand = plus lisse
+        const HUD_RATE_MS = 250;   // fréquence d'update HUD (ms) -> 5 Hz
+
         // Update loop before rendering
-        // scene.onBeforeRenderObservable.add(() => {
-        //     updateGlowIntensity();
-        //     StarGlare.updateParticleSize(
-        //         camera.doublepos,
-        //         PlanetData.get("Sun").position
-        //     );
-        // });
+        scene.onBeforeRenderObservable.add(() => {
+            // updateGlowIntensity();
+            // StarGlare.updateParticleSize(
+            //     camera.doublepos,
+            //     PlanetData.get("Sun").position
+            // );
+
+            // vitesse simulée -> m/s
+            const speedMS = ScaleManager.simSpeedToMetersPerSec(camera.speedSim);
+
+            // lissage 1er ordre (alpha dépend du dt frame)
+            const dt = scene.getEngine().getDeltaTime() / 1000; // s
+            const alpha = 1 - Math.exp(-dt / TAU);
+            emaMS += (speedMS - emaMS) * alpha;
+
+            // throttle HUD à 5 Hz + quantification pour éviter micro-variations
+            const now = performance.now();
+            if (now - lastHudUpdate >= HUD_RATE_MS) {
+                const displayMS = Math.round(emaMS * 10) / 10; // pas de 0.1 m/s
+                gui.setSpeed(displayMS);
+                lastHudUpdate = now;
+            }
+        });
 
         // Asynchronous LOD update loop for QuadTree
         async function updateLODs() {
