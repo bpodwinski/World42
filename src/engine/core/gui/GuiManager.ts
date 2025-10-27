@@ -61,8 +61,8 @@ export class GuiManager {
      */
     constructor(scene: Scene, opts: CrosshairOpts = {}) {
         this.opts = {
-            src: opts.src ?? "/assets/ui/crosshair_center.png",
-            mouseSrc: opts.mouseSrc ?? "/assets/ui/crosshair_mouse.png",
+            src: opts.src ?? "/assets/gui/crosshair_center.png",
+            mouseSrc: opts.mouseSrc ?? "/assets/gui/crosshair_mouse.png",
             sizePx: opts.sizePx ?? 20,
             mouseSizePx: opts.mouseSizePx ?? 36,
             inactiveAlpha: opts.inactiveAlpha ?? 0.7,
