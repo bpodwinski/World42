@@ -7,6 +7,14 @@ export class ScaleManager {
     /** Kilometers -> Simulation Units factor */
     private static readonly SCALE_FACTOR: number = Number(process.env.SCALE_FACTOR ?? 1);
 
+    public static simDistanceToKm(simUnits: number): number {
+        return this.toRealUnits(simUnits);
+    }
+
+    public static simDistanceToMeters(simUnits: number): number {
+        return this.kmToMeters(this.simDistanceToKm(simUnits));
+    }
+
     // ==========
     // Distances
     // ==========

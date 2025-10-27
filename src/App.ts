@@ -61,7 +61,7 @@ export class FloatingCameraScene {
         const systemBodies = loadedSystem.bodies;
 
         const Sun = systemBodies.get('Sun');
-        const Body = systemBodies.get('Mercury');
+        const Body = systemBodies.get('Mars');
 
         if (!Sun || !Body) {
             throw new Error('Planets JSON must at least contain "Sun" and "Body"');
@@ -92,6 +92,10 @@ export class FloatingCameraScene {
         camera.ellipsoid = new Vector3(0.01, 0.01, 0.01);
         camera.inertia = 0;
         camera.inputs.clear();
+
+        const dSim = camera.distanceToSim(Body.node.position);
+        const dKm = ScaleManager.simDistanceToKm(dSim);
+        const dM = ScaleManager.simDistanceToMeters(dSim);
 
         const control = new MouseSteerControlManager(camera, scene, canvas);
         control.gui = gui;
@@ -158,18 +162,36 @@ export class FloatingCameraScene {
         let lastHudUpdate = performance.now();
         const TAU = 0.1;
         const HUD_RATE_MS = 250;
+        let lastDistLog = performance.now();
+        const DIST_LOG_RATE_MS = 500;
 
         scene.onBeforeRenderObservable.add(() => {
+            const now = performance.now();
+            if (now - lastDistLog >= DIST_LOG_RATE_MS) {
+                // Recalcule à chaque frame (origin flottant => positions haute précision)
+                const dSim = camera.distanceToSim(Body.node.position);
+
+                // Si tu as ajouté les alias :
+                // const dKm = ScaleManager.simDistanceToKm(dSim);
+                // Sinon, utilise toRealUnits (sim -> km) directement :
+                const dKm = ScaleManager.toRealUnits(dSim);
+
+                console.log(`Mercure: ${dKm.toFixed(0)} km (${(dKm / 1e6).toFixed(3)} Mm)`);
+
+                lastDistLog = now;
+            }
+
+            // ... le reste de ton code HUD vitesse
             const speedMS = ScaleManager.simSpeedToMetersPerSec(camera.speedSim);
             const dt = scene.getEngine().getDeltaTime() / 1000;
             const alpha = 1 - Math.exp(-dt / TAU);
             emaMS += (speedMS - emaMS) * alpha;
 
-            const now = performance.now();
-            if (now - lastHudUpdate >= HUD_RATE_MS) {
+            const nowHud = performance.now();
+            if (nowHud - lastHudUpdate >= HUD_RATE_MS) {
                 const displayMS = Math.round(emaMS * 10) / 10;
                 gui.setSpeed(displayMS);
-                lastHudUpdate = now;
+                lastHudUpdate = nowHud;
             }
         });
 

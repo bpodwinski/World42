@@ -7,6 +7,7 @@ import {
     Color3,
     LinesMesh,
 } from "@babylonjs/core";
+import { ScaleManager } from "../scale/scale-manager";
 
 export interface FloatingEntityInterface extends TransformNode {
     doublepos: Vector3;
@@ -42,6 +43,20 @@ export class OriginCamera extends UniversalCamera {
     // Internal previous-frame state for velocity computation
     private _lastDoublepos: Vector3 = new Vector3();
     private _lastTimestampMs: number = performance.now();
+
+    public distanceToSim(target: Vector3 | FloatingEntity): number {
+        const tp = target instanceof FloatingEntity ? target.doublepos : target;
+        return Vector3.Distance(this.doublepos, tp);
+    }
+
+    public distanceToKm(target: Vector3 | FloatingEntity): number {
+        const dSim = this.distanceToSim(target);
+        return ScaleManager.toRealUnits(dSim); // sim -> km
+    }
+
+    public distanceToMeters(target: Vector3 | FloatingEntity): number {
+        return ScaleManager.kmToMeters(this.distanceToKm(target)); // km -> m
+    }
 
     /**
      * Current high-precision position (simulation units)
