@@ -7,18 +7,17 @@ const { TsCheckerRspackPlugin } = require('ts-checker-rspack-plugin');
 
 const config = {
     entry: {
-        index: './src/Main.ts'
+        index: './src/index.ts'
     },
     output: {
         path: path.resolve(__dirname, 'dist'),
         filename: '[name].js',
-        publicPath: '/World42/',
         clean: true
     },
     devServer: {
         host: "localhost",
         port: 3000,
-        open: ["/World42/"],
+        open: ["/"],
         historyApiFallback: true
     },
     resolve: {

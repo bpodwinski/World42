@@ -33,9 +33,9 @@ export class OriginCamera extends UniversalCamera {
     private _doublepos: Vector3 = new Vector3();
     private _doubletgt: Vector3 = new Vector3();
 
-    // --- Velocity state (simulation units) ---
     // Velocity vector (units of simulation per second)
     private _velocitySim: Vector3 = new Vector3(0, 0, 0);
+
     // Speed magnitude (units of simulation per second)
     private _speedSim: number = 0;
 
@@ -44,7 +44,7 @@ export class OriginCamera extends UniversalCamera {
     private _lastTimestampMs: number = performance.now();
 
     /**
-     * Current high-precision position (simulation units).
+     * Current high-precision position (simulation units)
      */
     public get doublepos(): Vector3 {
         return this._doublepos;
@@ -54,34 +54,33 @@ export class OriginCamera extends UniversalCamera {
     }
 
     /**
-     * Current high-precision target (simulation units).
-     * The actual look target in render-space is (doubletgt - doublepos).
+     * Current high-precision target (simulation units). The actual look target in render-space is (doubletgt - doublepos)
      */
     public get doubletgt(): Vector3 {
         return this._doubletgt;
     }
+
     public set doubletgt(tgt: Vector3) {
         this._doubletgt.copyFrom(tgt);
         // If you want to drive look-at each frame: setTarget(this._doubletgt.subtract(this._doublepos))
     }
 
     /**
-     * Current velocity vector in simulation units per second.
-     * This is computed each frame from doublepos delta / dt.
+     * Current velocity vector in simulation units per second. This is computed each frame from doublepos delta / dt
      */
     public get velocitySim(): Vector3 {
         return this._velocitySim;
     }
 
     /**
-     * Current speed (magnitude of velocity) in simulation units per second.
+     * Current speed (magnitude of velocity) in simulation units per second
      */
     public get speedSim(): number {
         return this._speedSim;
     }
 
     /**
-     * Create a floating-origin camera.
+     * Create a floating-origin camera
      * @param name   Camera name
      * @param position Initial high-precision position (simulation units)
      * @param scene  Babylon.js scene
@@ -97,12 +96,12 @@ export class OriginCamera extends UniversalCamera {
         this._lastDoublepos.copyFrom(position);
         this._lastTimestampMs = performance.now();
 
-        // Per-frame update: integrate render-space movement into doublepos,
-        // reset render-space position, update entities, compute velocity, debug lines.
+        // Per-frame update: integrate render-space movement into doublepos, reset render-space position, update entities, compute velocity, debug lines
         scene.onBeforeActiveMeshesEvaluationObservable.add(() => {
             // 1) Floating-origin integration:
             // Accumulate render-space delta into high-precision space
             this.doublepos.addInPlace(this.position);
+
             // Reset render-space camera to origin
             this.position.set(0, 0, 0);
 
@@ -122,15 +121,14 @@ export class OriginCamera extends UniversalCamera {
     }
 
     /**
-     * Add a floating entity managed by this camera.
+     * Add a floating entity managed by this camera
      */
     public add(entity: FloatingEntity): void {
         this._floatingEntities.push(entity);
     }
 
     /**
-     * Compute velocity & speed (simulation units / second) from doublepos.
-     * Uses wall-clock delta between frames.
+     * Compute velocity & speed (simulation units / second) from doublepos. Uses wall-clock delta between frames
      */
     private _updateVelocity(): void {
         const nowMs = performance.now();
@@ -154,8 +152,7 @@ export class OriginCamera extends UniversalCamera {
     }
 
     /**
-     * Debug helpers: draw lines for doublepos and (doubletgt - doublepos)
-     * in render-space from (0,0,0).
+     * Debug helpers: draw lines for doublepos and (doubletgt - doublepos) in render-space from (0,0,0)
      */
     private updateDebugVisuals(): void {
         const scene = this.getScene();
@@ -201,13 +198,12 @@ export class OriginCamera extends UniversalCamera {
 }
 
 /**
- * Floating entity with high-precision position in `doublepos`.
- * Its render-space transform is updated relative to the camera's doublepos.
+ * Floating entity with high-precision position in `doublepos`. Its render-space transform is updated relative to the camera's doublepos
  */
 export class FloatingEntity extends TransformNode {
     private _doublepos: Vector3 = new Vector3();
 
-    /** High-precision position (simulation units). */
+    /** High-precision position (simulation units) */
     public get doublepos(): Vector3 {
         return this._doublepos;
     }

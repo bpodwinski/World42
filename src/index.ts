@@ -1,6 +1,6 @@
 import "@babylonjs/core/Debug/debugLayer";
 import "@babylonjs/inspector";
-import { FloatingCameraScene } from "./App";
+import { FloatingCameraScene } from "./app";
 import { EngineManager } from "./engine/core/EngineManager";
 
 window.addEventListener("DOMContentLoaded", async () => {

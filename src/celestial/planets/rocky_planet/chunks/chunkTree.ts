@@ -5,7 +5,7 @@ import { WorkerPool } from './workerPool';
 import {
     FloatingEntityInterface,
     OriginCamera
-} from '../../../../engine/core/CameraManager';
+} from '../../../../engine/core/camera/CameraManager';
 import { Terrain } from '../Terrain';
 import { DeleteSemaphore } from './deleteSemaphore';
 import { io, Socket } from 'socket.io-client';

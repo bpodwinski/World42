@@ -1,5 +1,5 @@
 import { Scene, Vector3, Quaternion, KeyboardEventTypes } from "@babylonjs/core";
-import { OriginCamera } from "./CameraManager";
+import { OriginCamera } from "./camera/CameraManager";
 import { GuiManager } from "./gui/GuiManager";
 
 /**

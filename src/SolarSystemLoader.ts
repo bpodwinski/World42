@@ -6,7 +6,7 @@ import {
     Color3,
     TransformNode
 } from "@babylonjs/core";
-import { FloatingEntity, OriginCamera } from "./engine/core/CameraManager";
+import { FloatingEntity, OriginCamera } from "./engine/core/camera/CameraManager";
 import { ChunkTree, Face } from "./celestial/planets/rocky_planet/chunks/chunkTree";
 import { ScaleManager } from "./engine/core/ScaleManager";
 

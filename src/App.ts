@@ -18,7 +18,7 @@ import '@babylonjs/inspector';
 
 import { PostProcess } from './engine/core/PostProcessManager';
 import { ScaleManager } from './engine/core/ScaleManager';
-import { FloatingEntity, OriginCamera } from './engine/core/CameraManager';
+import { FloatingEntity, OriginCamera } from './engine/core/camera/CameraManager';
 import { TextureManager } from './engine/core/TextureManager';
 import { io } from 'socket.io-client';
 import { MouseSteerControlManager } from './engine/core/MouseSteerControlManager';

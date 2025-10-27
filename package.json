@@ -7,23 +7,23 @@
     "deploy": "gh-pages -d dist"
   },
   "devDependencies": {
-    "@rsbuild/core": "^1.2.19",
-    "@rspack/cli": "^1.2.8",
-    "@rspack/core": "^1.2.8",
+    "@rsbuild/core": "^1.4.12",
+    "@rspack/cli": "^1.5.8",
+    "@rspack/core": "^1.5.8",
     "gh-pages": "^6.3.0",
-    "html-webpack-plugin": "^5.6.3",
-    "ts-checker-rspack-plugin": "^1.1.1",
+    "html-webpack-plugin": "^5.6.4",
+    "ts-checker-rspack-plugin": "^1.1.6",
     "ts-shader-loader": "^2.0.2"
   },
   "dependencies": {
-    "@babylonjs/core": "^7.54.0",
-    "@babylonjs/gui": "^7.54.0",
-    "@babylonjs/inspector": "^7.54.0",
-    "@babylonjs/ktx2decoder": "^7.54.0",
-    "@babylonjs/loaders": "^7.54.0",
-    "@babylonjs/materials": "^7.54.0",
+    "@babylonjs/core": "^7.54.3",
+    "@babylonjs/gui": "^7.54.3",
+    "@babylonjs/inspector": "^7.54.3",
+    "@babylonjs/ktx2decoder": "^7.54.3",
+    "@babylonjs/loaders": "^7.54.3",
+    "@babylonjs/materials": "^7.54.3",
     "cors": "^2.8.5",
-    "dotenv": "^16.4.7",
+    "dotenv": "^17.2.3",
     "socket.io-client": "^4.8.1"
   }
 }
