@@ -11,3 +11,14 @@ package-lock.json
 *.tif
 *.hdr
 *.exr
+
+!public/**/*.jpg
+!public/**/*.jpeg
+!public/**/*.png
+!public/**/*.webp
+!public/**/*.ktx2
+!public/**/*.dds
+!public/**/*.tif
+!public/**/*.tiff
+!public/**/*.hdr
+!public/**/*.exr
