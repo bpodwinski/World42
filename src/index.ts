@@ -1,7 +1,7 @@
 import "@babylonjs/core/Debug/debugLayer";
 import "@babylonjs/inspector";
 import { FloatingCameraScene } from "./app";
-import { EngineManager } from "./engine/core/EngineManager";
+import { EngineManager } from "./core/render/engine-manager";
 
 window.addEventListener("DOMContentLoaded", async () => {
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;

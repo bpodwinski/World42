@@ -1,6 +1,6 @@
 import { Scene, Vector3, Quaternion, KeyboardEventTypes } from "@babylonjs/core";
-import { OriginCamera } from "./camera/CameraManager";
-import { GuiManager } from "./gui/GuiManager";
+import { OriginCamera } from "../camera/camera-manager";
+import { GuiManager } from "../gui/gui-manager";
 
 /**
  * Configuration options for the space flight mouse-steer controller

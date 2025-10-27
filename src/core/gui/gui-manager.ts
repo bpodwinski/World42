@@ -6,9 +6,9 @@ import {
     TextBlock,
     Image
 } from "@babylonjs/gui";
-import { SpeedHUD } from "./components/SpeedHUD";
-import { CenterCrosshair } from "./components/CenterCrosshair";
-import { MouseCrosshair } from "./components/MouseCrosshair";
+import { SpeedHUD } from "./components/speed-hud";
+import { CenterCrosshair } from "./components/center-crosshair";
+import { MouseCrosshair } from "./components/mouse-crosshair";
 
 /**
  * Options for configuring GUI crosshairs

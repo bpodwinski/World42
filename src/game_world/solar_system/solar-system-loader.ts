@@ -6,9 +6,9 @@ import {
     Color3,
     TransformNode
 } from "@babylonjs/core";
-import { FloatingEntity, OriginCamera } from "./engine/core/camera/CameraManager";
-import { ChunkTree, Face } from "./celestial/planets/rocky_planet/chunks/chunkTree";
-import { ScaleManager } from "./engine/core/ScaleManager";
+import { FloatingEntity, OriginCamera } from "../../core/camera/camera-manager";
+import { ScaleManager } from "../../core/scale/scale-manager";
+import { ChunkTree, Face } from "../../systems/lod/chunks/chunkTree";
 
 export type PlanetCDLOD = {
     entity: FloatingEntity;
@@ -21,12 +21,16 @@ export type PlanetCDLOD = {
 export type CDLODOptions = {
     /** Niveaux de LOD max (par défaut 8) */
     maxLevel?: number;
+
     /** Résolution de base des patches (par défaut 64) */
     resolution?: number;
+
     /** Sauter certains corps (ex: Sun) */
     skip?: (name: string, body: LoadedBody) => boolean;
+
     /** Faces à générer (par défaut le cube complet) */
     faces?: Face[];
+
     /** Fallback si radiusMeters manquant (km -> unités simu si besoin) */
     fallbackRadiusKm?: number;
 };

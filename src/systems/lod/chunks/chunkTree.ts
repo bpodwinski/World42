@@ -2,13 +2,10 @@ import { Scene, Mesh, Vector3, ShaderMaterial } from '@babylonjs/core';
 
 import { ChunkForge } from './chunkForge';
 import { WorkerPool } from './workerPool';
-import {
-    FloatingEntityInterface,
-    OriginCamera
-} from '../../../../engine/core/camera/CameraManager';
-import { Terrain } from '../Terrain';
 import { DeleteSemaphore } from './deleteSemaphore';
 import { io, Socket } from 'socket.io-client';
+import { FloatingEntityInterface, OriginCamera } from '../../../core/camera/camera-manager';
+import { Terrain } from '../../../game_objects/planets/rocky_planet/terrain';
 
 //const socket: Socket = io("***:8888");
 

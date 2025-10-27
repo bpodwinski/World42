@@ -1,15 +1,13 @@
 import { Effect, Scene, ShaderMaterial, Vector3 } from '@babylonjs/core';
-import { ScaleManager } from '../../../engine/core/ScaleManager';
+import { ScaleManager } from '../../../core/scale/scale-manager';
 
-import terrainDebugLODShader from '../../../shaders/terrain/_terrainDebugLOD.glsl';
-
-import terrainVertexShader from '../../../shaders/terrain/terrainVertexShader.glsl';
-import terrainFragmentShader from '../../../shaders/terrain/terrainFragmentShader.glsl';
-import { TextureManager } from '../../../engine/core/TextureManager';
-import { PlanetData } from '../PlanetData';
+import terrainDebugLODShader from '../../../assets/shaders/terrain/_terrainDebugLOD.glsl';
+import terrainVertexShader from '../../../assets/shaders/terrain/terrainVertexShader.glsl';
+import terrainFragmentShader from '../../../assets/shaders/terrain/terrainFragmentShader.glsl';
+import { TextureManager } from '../../../core/io/texture-manager';
+import { PlanetData } from '../../../game_world/solar_system/planet-data';
 
 Effect.IncludesShadersStore['debugLOD'] = terrainDebugLODShader;
-
 Effect.ShadersStore['terrainVertexShader'] = terrainVertexShader;
 Effect.ShadersStore['terrainFragmentShader'] = terrainFragmentShader;
 

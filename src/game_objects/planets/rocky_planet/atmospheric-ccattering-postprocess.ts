@@ -14,7 +14,7 @@ import {
 import { AtmosphericScatteringSettings } from '../../../types/AtmosphericScatteringPostProcessTypes';
 
 import atmosphereFragmentShader from '../shaders/atmosphericScatteringFragmentShader.glsl';
-import { OriginCamera } from '../../../engine/core/camera/CameraManager';
+import { OriginCamera } from '../../../core/camera/camera-manager';
 
 const SHADER_UNIFORMS = [
     'logarithmicDepthConstant',

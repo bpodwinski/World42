@@ -16,16 +16,16 @@ import '@babylonjs/core/Materials/Textures/Loaders/ktxTextureLoader';
 import '@babylonjs/core/Debug/debugLayer';
 import '@babylonjs/inspector';
 
-import { PostProcess } from './engine/core/PostProcessManager';
-import { ScaleManager } from './engine/core/ScaleManager';
-import { FloatingEntity, OriginCamera } from './engine/core/camera/CameraManager';
-import { TextureManager } from './engine/core/TextureManager';
+import { PostProcess } from './core/render/postprocess-manager';
+import { ScaleManager } from './core/scale/scale-manager';
+import { FloatingEntity, OriginCamera } from './core/camera/camera-manager';
+import { TextureManager } from './core/io/texture-manager';
 import { io } from 'socket.io-client';
-import { MouseSteerControlManager } from './engine/core/MouseSteerControlManager';
-import { GuiManager } from './engine/core/gui/GuiManager';
+import { MouseSteerControlManager } from './core/control/mouse-steer-control-manager';
+import { GuiManager } from './core/gui/gui-manager';
 
-import { createCDLODForAllPlanets, loadSolarSystemFromJSON, precomputeAndRunLODLoop, type SystemJSON } from './SolarSystemLoader';
-import planetsJson from './var/planets.json';
+import { createCDLODForAllPlanets, loadSolarSystemFromJSON, precomputeAndRunLODLoop, type SystemJSON } from './game_world/solar_system/solar-system-loader';
+import planetsJson from './game_world/solar_system/planets.json';
 
 function toSystemJSON(raw: any): SystemJSON {
     const out: Record<string, {
@@ -55,6 +55,7 @@ export class FloatingCameraScene {
         scene.clearColor.set(0, 0, 0, 1);
         scene.collisionsEnabled = true;
 
+        // rework to params
         const normalized = toSystemJSON(planetsJson);
         const loadedSystem = await loadSolarSystemFromJSON(scene, normalized);
         const systemBodies = loadedSystem.bodies;
