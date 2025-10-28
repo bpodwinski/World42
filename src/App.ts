@@ -26,6 +26,7 @@ import { GuiManager } from './core/gui/gui-manager';
 
 import { createCDLODForAllPlanets, loadSolarSystemFromJSON, precomputeAndRunLODLoop, type SystemJSON } from './game_world/solar_system/solar-system-loader';
 import planetsJson from './game_world/solar_system/planets.json';
+import { teleportToEntity } from './teleport-to-entity';
 
 function toSystemJSON(raw: any): SystemJSON {
     const out: Record<string, {
@@ -61,7 +62,7 @@ export class FloatingCameraScene {
         const systemBodies = loadedSystem.bodies;
 
         const Sun = systemBodies.get('Sun');
-        const Body = systemBodies.get('Mars');
+        const Body = systemBodies.get('Mercury');
 
         if (!Sun || !Body) {
             throw new Error('Planets JSON must at least contain "Sun" and "Body"');
@@ -78,7 +79,7 @@ export class FloatingCameraScene {
         gui.setMouseCrosshairVisible(true);
 
         let planetTarget = Body.node.position.clone();
-        planetTarget.y += ScaleManager.toSimulationUnits(Body.radiusMeters ?? 0) * 1.02;
+        planetTarget.y += ScaleManager.toSimulationUnits(Body.radiusMeters ?? 0) * 1.05;
 
         let camera = new OriginCamera('camera', planetTarget, scene);
         camera.debugMode = true;
@@ -105,13 +106,36 @@ export class FloatingCameraScene {
             camera,
             loadedSystem,
             {
-                maxLevel: 8,
-                resolution: 64,
+                maxLevel: 12,
+                resolution: 40,
                 skip: (name) => name.toLowerCase() === "sun",
             }
         );
 
         precomputeAndRunLODLoop(scene, camera, allCDLOD);
+
+        // RACCOURCI: T pour se téléporter
+        window.addEventListener('keydown', (ev) => {
+            if (ev.key.toLowerCase() === 't') {
+                const pluto = systemBodies.get('Earth');
+                if (!pluto) {
+                    console.warn("[teleport] La planète 'Pluto' est introuvable dans systemBodies.");
+                    return;
+                }
+
+                // rayon en km depuis la data (ou fallback Mars pour ton test)
+                const radiusKm = ScaleManager.metersToKm(pluto.radiusMeters ?? Body.radiusMeters ?? 0);
+
+                // altitude d’approche (ex: 5000 km)
+                teleportToEntity(
+                    camera,
+                    pluto.node.position, // ou pluto.entity.doublepos si dispo
+                    radiusKm
+                );
+
+                console.log(`[teleport] Camera déplacée vers Pluto (+5000 km).`);
+            }
+        });
 
         new PostProcess('Pipeline', scene, camera);
 
