@@ -159,9 +159,14 @@ export class MouseSteerControlManager {
         const onPointerDown = (e: PointerEvent) => {
             if (this.rect && this.gui) this.gui.updateMouseCrosshair(e.clientX, e.clientY, this.rect);
             if (e.pointerType === "mouse" && e.button !== 0) return;
+
             this.canvas.setPointerCapture(e.pointerId);
             e.preventDefault();
+
             this.lmbDown = true;
+
+            if (this.gui) this.gui.setMouseCrosshairActive(true);
+
             if (!this.rect) updateRect();
             const r = this.rect!;
             this.mouseX = e.clientX - r.left;
@@ -171,12 +176,16 @@ export class MouseSteerControlManager {
         const onPointerUp = (e: PointerEvent) => {
             if (e.pointerType === "mouse" && e.button !== 0) return;
             try { this.canvas.releasePointerCapture(e.pointerId); } catch { }
+
             this.lmbDown = false;
+
+            if (this.gui) this.gui.setMouseCrosshairActive(false);
         };
 
         const onPointerMove = (e: PointerEvent) => {
             if (this.rect && this.gui) this.gui.updateMouseCrosshair(e.clientX, e.clientY, this.rect);
             if (!this.rect) updateRect();
+
             const r = this.rect!;
             this.mouseX = e.clientX - r.left;
             this.mouseY = e.clientY - r.top;
@@ -186,7 +195,19 @@ export class MouseSteerControlManager {
 
         const onResize = () => { updateRect(); centerMouse(); };
         const onWindowFocus = () => { this.mouseActiveInWindow = true; };
-        const onWindowBlur = () => { this.mouseActiveInWindow = false; this.lmbDown = false; centerMouse(); };
+
+
+        const onWindowBlur = (e: FocusEvent) => {
+            if (!(e.relatedTarget as any) && !(e as any).toElement) {
+                this.mouseActiveInWindow = false;
+                this.lmbDown = false;
+
+                if (this.gui) this.gui.setMouseCrosshairActive(false);
+
+                centerMouse();
+            }
+        };
+
         const onWindowMouseOut = (e: MouseEvent) => {
             if (!e.relatedTarget && !(e as any).toElement) {
                 this.mouseActiveInWindow = false;
@@ -194,9 +215,16 @@ export class MouseSteerControlManager {
                 centerMouse();
             }
         };
+
         const onVisibilityChange = () => {
             this.mouseActiveInWindow = !document.hidden && document.hasFocus();
-            if (!this.mouseActiveInWindow) { this.lmbDown = false; centerMouse(); }
+            if (!this.mouseActiveInWindow) {
+                this.lmbDown = false;
+
+                if (this.gui) this.gui.setMouseCrosshairActive(false);
+
+                centerMouse();
+            }
         };
 
         this.canvas.addEventListener("pointerdown", onPointerDown);

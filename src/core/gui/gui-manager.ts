@@ -1,10 +1,8 @@
 import { Scene } from "@babylonjs/core";
 import {
     AdvancedDynamicTexture,
-    Rectangle,
     Control,
     TextBlock,
-    Image
 } from "@babylonjs/gui";
 import { SpeedHUD } from "./components/speed-hud";
 import { CenterCrosshair } from "./components/center-crosshair";
@@ -34,6 +32,26 @@ export type CrosshairOpts = {
 
     /** Alpha of the **mouse** crosshair (0..1) */
     mouseAlpha?: number;
+
+    /** Texture URL used when the left mouse button (LMB) is **not** held. */
+    mouseSrcIdle?: string;
+
+    /**
+     * Texture URL used while the left mouse button (LMB) is held. Falls back to {@link CrosshairOpts.mouseSrc} if not provided.
+     */
+    mouseSrcActive?: string;
+
+    /**
+     * Crosshair size (width & height in pixels) while active (LMB held).
+     * @defaultValue {@link CrosshairOpts.mouseSizePx}
+     */
+    mouseActiveSizePx?: number;
+
+    /**
+     * Crosshair alpha while active (LMB held).
+     * @defaultValue {@link CrosshairOpts.mouseAlpha}
+     */
+    mouseActiveAlpha?: number;
 };
 
 /**
@@ -48,7 +66,7 @@ export class GuiManager {
 
     private speedHud: SpeedHUD;
     private center: CenterCrosshair;
-    private mouse: MouseCrosshair;
+    private mouse!: MouseCrosshair;
 
     private hintText: TextBlock;
 
@@ -63,11 +81,15 @@ export class GuiManager {
         this.opts = {
             src: opts.src ?? "/assets/gui/crosshair_center.png",
             mouseSrc: opts.mouseSrc ?? "/assets/gui/crosshair_mouse.png",
-            sizePx: opts.sizePx ?? 20,
-            mouseSizePx: opts.mouseSizePx ?? 36,
+            sizePx: opts.sizePx ?? 26,
+            mouseSizePx: opts.mouseSizePx ?? 26,
             inactiveAlpha: opts.inactiveAlpha ?? 0.7,
             activeAlpha: opts.activeAlpha ?? 0.9,
-            mouseAlpha: opts.mouseAlpha ?? 0.2,
+            mouseAlpha: opts.mouseAlpha ?? 1.0,
+            mouseSrcIdle: opts.mouseSrcIdle ?? (opts.mouseSrc ?? "/assets/gui/cursor.png"),
+            mouseSrcActive: opts.mouseSrcActive ?? (opts.mouseSrc ?? "/assets/gui/crosshair_mouse.png"),
+            mouseActiveSizePx: opts.mouseActiveSizePx ?? (opts.mouseSizePx ?? 36),
+            mouseActiveAlpha: opts.mouseActiveAlpha ?? (opts.mouseAlpha ?? 0.2),
         };
 
         this.ui = AdvancedDynamicTexture.CreateFullscreenUI("World42UI", true, scene);
@@ -91,9 +113,12 @@ export class GuiManager {
         });
 
         this.mouse = new MouseCrosshair(this.ui, {
-            src: this.opts.mouseSrc,
-            sizePx: this.opts.mouseSizePx,
-            alpha: this.opts.mouseAlpha,
+            idleSrc: this.opts.mouseSrcIdle,   // ex: "ui/crosshair_idle.png"
+            activeSrc: this.opts.mouseSrcActive, // ex: "ui/crosshair_active.png"
+            sizePx: this.opts.mouseSizePx ?? 24,
+            activeSizePx: this.opts.mouseActiveSizePx ?? (this.opts.mouseSizePx ?? 24),
+            idleAlpha: this.opts.mouseAlpha ?? 1,
+            activeAlpha: this.opts.mouseActiveAlpha ?? (this.opts.mouseAlpha ?? 1),
         });
 
         // Hint (optional)
@@ -143,7 +168,12 @@ export class GuiManager {
         this.mouse.setSize(sizePx);
     }
 
+    public setMouseCrosshairActive(active: boolean) {
+        this.mouse.setActive(active);
+    }
+
     public updateMouseCrosshair(clientX: number, clientY: number, canvasRect: DOMRect) {
+        // compat: on garde l’alias
         this.mouse.updateClientPos(clientX, clientY, canvasRect);
     }
 
