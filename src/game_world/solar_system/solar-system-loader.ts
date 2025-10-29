@@ -7,7 +7,6 @@ import {
     TransformNode
 } from "@babylonjs/core";
 import { FloatingEntity, OriginCamera } from "../../core/camera/camera-manager";
-import { ScaleManager } from "../../core/scale/scale-manager";
 import { ChunkTree, Face } from "../../systems/lod/chunks/chunkTree";
 
 export type PlanetCDLOD = {
@@ -30,23 +29,17 @@ export type CDLODOptions = {
 
     /** Faces à générer (par défaut le cube complet) */
     faces?: Face[];
-
-    /** Fallback si radiusMeters manquant (km -> unités simu si besoin) */
-    fallbackRadiusKm?: number;
 };
 
 /** JSON shape attendu (ex: Sun/Earth/... -> { position_km, diameter_km, rotation_period_days }) */
 export type BodyJSON = {
     position_km: [number, number, number];
     diameter_km: number | null;
-    rotation_period_days: number | null; // durée d'un tour (sidéral). null -> pas de rotation animée
+    rotation_period_days: number | null;
 };
 export type SystemJSON = Record<string, BodyJSON>;
 
 export type LoadSystemOptions = {
-    /** Rayon minimal de rendu en mètres pour ne pas “disparaître” (utile pour de très petits objets) */
-    minRenderRadiusMeters?: number;
-
     /** Matériau par défaut (si non fourni, un PBR simple est créé) */
     makeMaterial?: (name: string, isStar: boolean, scene: Scene) => PBRMetallicRoughnessMaterial;
 
@@ -82,7 +75,6 @@ export async function loadSolarSystemFromJSON(
     opts: LoadSystemOptions = {}
 ): Promise<LoadedSystem> {
     const {
-        minRenderRadiusMeters = 1,
         animateRotation = true,
         parent,
         makeMaterial = (name, isStar, scn) => {
@@ -128,11 +120,9 @@ export async function loadSolarSystemFromJSON(
 
         const isStar = name.toLowerCase() === "sun" || name.toLowerCase().includes("star");
         let meshName: string | undefined;
-        let radiusMeters: number | undefined;
 
         if (data.diameter_km && data.diameter_km > 0) {
-            radiusMeters = Math.max((data.diameter_km) / 2, minRenderRadiusMeters);
-            const sphere = MeshBuilder.CreateSphere(`mesh_${name}`, { diameter: radiusMeters * 2, segments: 32 }, scene);
+            const sphere = MeshBuilder.CreateSphere(`mesh_${name}`, { diameter: data.diameter_km, segments: 64 }, scene);
             sphere.parent = node;
 
             const mat = makeMaterial(name, isStar, scene);
@@ -145,7 +135,7 @@ export async function loadSolarSystemFromJSON(
             name,
             node,
             meshName,
-            radiusMeters,
+            radiusMeters: data.diameter_km ?? 0 * 0.5,
             rotationPeriodDays: data.rotation_period_days ?? null
         });
     });
@@ -178,7 +168,6 @@ export function createCDLODForAllPlanets(
         resolution = 64,
         faces = ["front", "back", "left", "right", "top", "bottom"],
         skip = (name) => name.toLowerCase() === "sun",
-        fallbackRadiusKm = 1000, // au cas où un corps n'a pas de diamètre
     } = opts;
 
     const out = new Map<string, PlanetCDLOD>();
@@ -193,8 +182,7 @@ export function createCDLODForAllPlanets(
 
         // Rayon (m) si fourni, sinon fallback converti depuis km
         const radius =
-            body.radiusMeters ??
-            ScaleManager.toSimulationUnits(fallbackRadiusKm);
+            body.radiusMeters ?? 0;
 
         const chunks = faces.map(
             (face) =>

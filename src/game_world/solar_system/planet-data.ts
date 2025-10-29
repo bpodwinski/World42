@@ -30,13 +30,13 @@ type PlanetJson = {
 type PlanetMapJson = Record<string, PlanetJson>;
 
 /** Convert raw JSON entry to PlanetInfo (unit conversion included) */
-function toPlanetInfo(pj: PlanetJson): PlanetInfo {
-    const posKm = new Vector3(pj.position_km[0], pj.position_km[1], pj.position_km[2]);
+function toPlanetInfo(planet_json: PlanetJson): PlanetInfo {
+    const posKm = new Vector3(planet_json.position_km[0], planet_json.position_km[1], planet_json.position_km[2]);
     const position = ScaleManager.toSimulationVector(posKm);
-    const diameter = ScaleManager.toSimulationUnits(pj.diameter_km);
+    const diameter = ScaleManager.toSimulationUnits(planet_json.diameter_km);
     const rotationSpeed =
-        pj.rotation_period_days && pj.rotation_period_days !== 0
-            ? (2 * Math.PI) / (pj.rotation_period_days * 86400)
+        planet_json.rotation_period_days && planet_json.rotation_period_days !== 0
+            ? (2 * Math.PI) / (planet_json.rotation_period_days * 86400)
             : 0;
 
     return { position, diameter, rotationSpeed };
@@ -68,8 +68,6 @@ export class PlanetData {
      */
     public static get(planetName: keyof typeof PlanetData.planets): PlanetInfo {
         const data = PlanetData.planets[planetName];
-
-        //console.info(`[PlanetData] get: ${String(planetName)}`);
 
         return data;
     }
