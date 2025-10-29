@@ -26,7 +26,7 @@ import { GuiManager } from './core/gui/gui-manager';
 
 import { createCDLODForAllPlanets, loadSolarSystemFromJSON, precomputeAndRunLODLoop, type SystemJSON } from './game_world/solar_system/solar-system-loader';
 import planetsJson from './game_world/solar_system/planets.json';
-import { teleportToEntity } from './teleport-to-entity';
+import { teleportToEntity } from './core/camera/teleport-to-entity';
 
 function toSystemJSON(raw: any): SystemJSON {
     const out: Record<string, {
@@ -122,7 +122,8 @@ export class FloatingCameraScene {
                 teleportToEntity(
                     camera,
                     pluto.node.position,
-                    pluto.radiusMeters ?? 0
+                    pluto.radiusMeters ?? 0,
+                    5
                 );
             }
         });
