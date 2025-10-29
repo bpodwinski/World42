@@ -10,6 +10,65 @@ World42 is a high-performance, multithreaded planet rendering engine that levera
 - Quadsphere with a uniform mesh
 - Asynchronous CDLOD/Quadtree using Web Workers
 
+## Folder structure
+
+```txt
+World42/
+│
+├─ core/                     # Reusable engine subsystems (indépendants du jeu)
+│  ├─ camera/                # OriginCamera, FloatingEntity, etc.
+│  ├─ scale/                 # ScaleManager, conversions (km → sim units)
+│  ├─ control/               # MouseSteerControlManager, input abstractions
+│  ├─ render/                # PostProcessManager, shaders, WebGPU/WebGL setup
+│  ├─ io/                    # TextureManager, AssetLoader, network utils
+│  └── ...
+│
+├─ game_objects/             # High-level engine systems built *from core*
+│  └─ planet/                # CDLOD / Quadtree / ChunkTree logic
+│        └─ rocky_planet/
+│              ├─ quadtree/
+│              ├─ chunks/
+│              ├─ terrain/
+│              └─ shaders/
+│
+├─ game_world/               # Game-specific logic built on top of engine/
+│  ├─ entities/              # Planet entities, moons, satellites, etc.
+│  ├─ solar_system/          # Multi-planet orchestration (Mercure, Terre, etc.)
+│  └─ ...
+│
+├─systems/
+│  └─ lod/                   # Orchestrateur générique
+│      ├─ LodController.ts   # Décide quels patches sont requis
+│      ├─ LodMetrics.ts      # Erreurs écran, géo, hystérésis
+│      ├─ LodScheduler.ts    # File de maj, budgets (ms/frames)
+│      ├─ LodCache.ts        # Pool, eviction
+│      └─ workers/           # Workers génériques (interfaces + impl par défaut)
+│          ├─ LodWorker.ts
+│          └─ worker-protocol.ts
+│
+│
+├─ assets/                   # Non-code resources
+│  ├─ textures/
+│  ├─ models/
+│  ├─ skyboxes/
+│  ├─ shaders/
+│  └─ ...
+│
+├─ utils/                  # Generic utilities (unit conversions, timing)
+│  └─ log.ts
+│
+├─ screens/                  # Game states (e.g. SolarSystemScreen, MenuScreen)
+│  ├─ solar-system-screen.ts
+│  ├─ intro-screen.ts
+│  └─ ...
+│
+├─ public/                   # Static assets served by the dev server
+│
+
+├─ main.ts                   # Entry point (creates Engine, Scene, Camera)
+├─ app.ts                    # Initializes scene, event loop, GUI, etc.
+```
+
 ## Demo
 [https://bpodwinski.github.io/World42/](https://bpodwinski.github.io/World42/)
 - Press L to display LODs
