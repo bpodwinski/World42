@@ -79,7 +79,7 @@ export class FloatingCameraScene {
         gui.setMouseCrosshairVisible(true);
 
         let planetTarget = Body.node.position.clone();
-        planetTarget.y += ScaleManager.toSimulationUnits(Body.radiusMeters ?? 0) * 1.05;
+        planetTarget.y += Body.radiusMeters ?? 0 * 1.00;
 
         let camera = new OriginCamera('camera', planetTarget, scene);
         camera.debugMode = true;
@@ -93,10 +93,6 @@ export class FloatingCameraScene {
         camera.ellipsoid = new Vector3(0.01, 0.01, 0.01);
         camera.inertia = 0;
         camera.inputs.clear();
-
-        const dSim = camera.distanceToSim(Body.node.position);
-        const dKm = ScaleManager.simDistanceToKm(dSim);
-        const dM = ScaleManager.simDistanceToMeters(dSim);
 
         const control = new MouseSteerControlManager(camera, scene, canvas);
         control.gui = gui;
@@ -117,23 +113,17 @@ export class FloatingCameraScene {
         // RACCOURCI: T pour se téléporter
         window.addEventListener('keydown', (ev) => {
             if (ev.key.toLowerCase() === 't') {
-                const pluto = systemBodies.get('Earth');
+                const pluto = systemBodies.get('Pluto');
                 if (!pluto) {
                     console.warn("[teleport] La planète 'Pluto' est introuvable dans systemBodies.");
                     return;
                 }
 
-                // rayon en km depuis la data (ou fallback Mars pour ton test)
-                const radiusKm = ScaleManager.metersToKm(pluto.radiusMeters ?? Body.radiusMeters ?? 0);
-
-                // altitude d’approche (ex: 5000 km)
                 teleportToEntity(
                     camera,
-                    pluto.node.position, // ou pluto.entity.doublepos si dispo
-                    radiusKm
+                    pluto.node.position,
+                    pluto.radiusMeters ?? 0
                 );
-
-                console.log(`[teleport] Camera déplacée vers Pluto (+5000 km).`);
             }
         });
 
@@ -167,7 +157,7 @@ export class FloatingCameraScene {
 
         const sun = MeshBuilder.CreateSphere('sun', {
             segments: 64,
-            diameter: (Sun.radiusMeters ? Sun.radiusMeters * 2 : ScaleManager.toSimulationUnits(1391000))
+            diameter: Sun.radiusMeters ?? 0 * 2
         });
         let sunMaterial = new PBRMetallicRoughnessMaterial('sunMaterial', scene);
         sunMaterial.emissiveTexture = new TextureManager('sun_surface_albedo.ktx2', scene);
@@ -195,21 +185,15 @@ export class FloatingCameraScene {
                 // Recalcule à chaque frame (origin flottant => positions haute précision)
                 const dSim = camera.distanceToSim(Body.node.position);
 
-                // Si tu as ajouté les alias :
-                // const dKm = ScaleManager.simDistanceToKm(dSim);
-                // Sinon, utilise toRealUnits (sim -> km) directement :
-                const dKm = ScaleManager.toRealUnits(dSim);
-
-                console.log(`Mercure: ${dKm.toFixed(0)} km (${(dKm / 1e6).toFixed(3)} Mm)`);
+                console.log(`Mercure: ${dSim.toFixed(0)} km (${(dSim / 1e6).toFixed(3)} Mm)`);
 
                 lastDistLog = now;
             }
 
             // ... le reste de ton code HUD vitesse
-            const speedMS = ScaleManager.simSpeedToMetersPerSec(camera.speedSim);
             const dt = scene.getEngine().getDeltaTime() / 1000;
             const alpha = 1 - Math.exp(-dt / TAU);
-            emaMS += (speedMS - emaMS) * alpha;
+            emaMS += (camera.speedSim - emaMS) * alpha;
 
             const nowHud = performance.now();
             if (nowHud - lastHudUpdate >= HUD_RATE_MS) {
