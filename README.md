@@ -95,3 +95,6 @@ World42/
    npm run serve
    http://localhost:3000/World42/
    ```
+
+## Sources
+https://joshanthony.info/2021/12/06/how-i-structure-my-game-projects/
