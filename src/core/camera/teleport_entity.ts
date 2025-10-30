@@ -50,7 +50,7 @@ export function teleportToEntity(
 
     // New high-precision camera position
     const targetDoublePos = tgtPos.add(
-        dir.scale(planetDiameter * diameterOffset)
+        dir.scale((planetDiameter * 0.5) * diameterOffset)
     );
 
     // Apply high-precision position (or fallback to standard position)

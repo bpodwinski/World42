@@ -34,8 +34,8 @@ export type CDLODOptions = {
 /** JSON shape attendu (ex: Sun/Earth/... -> { position_km, diameter_km, rotation_period_days }) */
 export type BodyJSON = {
     position_km: [number, number, number];
-    diameter_km: number | null;
-    rotation_period_days: number | null;
+    diameter_km: number;
+    rotation_period_days: number;
 };
 export type SystemJSON = Record<string, BodyJSON>;
 
@@ -52,10 +52,10 @@ export type LoadSystemOptions = {
 
 export type LoadedBody = {
     name: string;
-    node: TransformNode;      // racine du corps
-    meshName?: string;        // nom de la mesh (si créée)
-    radiusMeters?: number;    // rayon utilisé pour la mesh
-    rotationPeriodDays?: number | null;
+    node: TransformNode;    // racine du corps
+    meshName: string;       // nom de la mesh (si créée)
+    diameter: number;       // diamètre utilisé pour la mesh
+    rotationPeriodDays: number;
 };
 
 export type LoadedSystem = {
@@ -115,14 +115,14 @@ export async function loadSolarSystemFromJSON(
         node.parent = root;
 
         // Position (km -> m)
-        const [xKm, yKm, zKm] = data.position_km ?? [0, 0, 0];
+        const [xKm, yKm, zKm] = data.position_km;
         node.position = new Vector3(xKm, yKm, zKm);
 
         const isStar = name.toLowerCase() === "sun" || name.toLowerCase().includes("star");
-        let meshName: string | undefined;
+        let meshName = `mesh_${name}`;
 
         if (data.diameter_km && data.diameter_km > 0) {
-            const sphere = MeshBuilder.CreateSphere(`mesh_${name}`, { diameter: data.diameter_km, segments: 64 }, scene);
+            const sphere = MeshBuilder.CreateSphere(meshName, { diameter: data.diameter_km, segments: 64 }, scene);
             sphere.parent = node;
 
             const mat = makeMaterial(name, isStar, scene);
@@ -135,8 +135,8 @@ export async function loadSolarSystemFromJSON(
             name,
             node,
             meshName,
-            radiusMeters: data.diameter_km ?? 0 * 0.5,
-            rotationPeriodDays: data.rotation_period_days ?? null
+            diameter: data.diameter_km,
+            rotationPeriodDays: data.rotation_period_days
         });
     });
 
@@ -180,10 +180,6 @@ export function createCDLODForAllPlanets(
         ent.doublepos.set(body.node.position.x, body.node.position.y, body.node.position.z);
         camera.add(ent);
 
-        // Rayon (m) si fourni, sinon fallback converti depuis km
-        const radius =
-            body.radiusMeters ?? 0;
-
         const chunks = faces.map(
             (face) =>
                 new ChunkTree(
@@ -192,7 +188,7 @@ export function createCDLODForAllPlanets(
                     { uMin: -1, uMax: 1, vMin: -1, vMax: 1 },
                     0,
                     maxLevel,
-                    radius,
+                    (body.diameter * 0.5),
                     body.node.position, // position "double" pour le LOD
                     resolution,
                     face,
@@ -202,7 +198,7 @@ export function createCDLODForAllPlanets(
                 )
         );
 
-        out.set(name, { entity: ent, chunks, radius, maxLevel, resolution });
+        out.set(name, { entity: ent, chunks, radius: (body.diameter * 0.5), maxLevel, resolution });
     }
 
     return out;
