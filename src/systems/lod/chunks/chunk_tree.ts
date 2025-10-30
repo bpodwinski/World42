@@ -1,11 +1,10 @@
 import { Scene, Mesh, Vector3, ShaderMaterial } from '@babylonjs/core';
-
-import { ChunkForge } from './chunkForge';
-import { WorkerPool } from './workerPool';
-import { DeleteSemaphore } from './deleteSemaphore';
+import { ChunkForge } from './chunk_forge';
+import { DeleteSemaphore } from '../workers/delete_semaphore';
 import { io, Socket } from 'socket.io-client';
-import { FloatingEntityInterface, OriginCamera } from '../../../core/camera/camera-manager';
+import { FloatingEntityInterface, OriginCamera } from '../../../core/camera/camera_manager';
 import { Terrain } from '../../../game_objects/planets/rocky_planet/terrain';
+import { WorkerPool } from '../workers/worker_pool';
 
 //const socket: Socket = io("***:8888");
 
@@ -30,7 +29,7 @@ export type Face = 'front' | 'back' | 'left' | 'right' | 'top' | 'bottom';
  * Instantiated with the worker script URL and using hardware concurrency for both workers and concurrent tasks
  */
 export const globalWorkerPool = new WorkerPool(
-    new URL('../workers/meshChunkWorker', import.meta.url).href,
+    new URL('../workers/terrain_mesh_worker', import.meta.url).href,
     navigator.hardwareConcurrency - 1,
     navigator.hardwareConcurrency - 1,
     true

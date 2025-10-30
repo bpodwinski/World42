@@ -1,4 +1,4 @@
-import { PriorityQueue } from "./priorityQueue";
+import { PriorityQueue } from "./priority_queue";
 
 /**
  * Interface for tasks to send to worker
@@ -119,6 +119,7 @@ export class WorkerPool {
 
         // Extrait la tâche de plus haute priorité
         const task = this.taskQueue.pop()!;
+
         // Prend un worker depuis availableWorkers
         const worker = this.availableWorkers.shift()!;
         (worker as WorkerWithTask).currentTask = task;
@@ -146,6 +147,7 @@ export class WorkerPool {
             workerWithTask.currentTask.callback(data);
             delete workerWithTask.currentTask;
         }
+
         this.updateWorkerStatus();
         this.scheduleNext();
     }
@@ -171,6 +173,7 @@ export class WorkerPool {
      */
     private markWorkerBusy(worker: Worker) {
         this.removeWorkerFromArray(worker, this.availableWorkers);
+
         if (!this.busyWorkers.includes(worker)) {
             this.busyWorkers.push(worker);
         }
@@ -184,6 +187,7 @@ export class WorkerPool {
      */
     private markWorkerAvailable(worker: Worker) {
         this.removeWorkerFromArray(worker, this.busyWorkers);
+
         if (!this.availableWorkers.includes(worker)) {
             this.availableWorkers.push(worker);
         }
@@ -210,6 +214,7 @@ export class WorkerPool {
      */
     private removeWorkerFromArray(worker: Worker, arr: Worker[]) {
         const index = arr.indexOf(worker);
+
         if (index !== -1) {
             arr.splice(index, 1);
         }
@@ -230,9 +235,11 @@ export class WorkerPool {
             const pendingTasks = this.taskQueue.size();
             const info = `Workers: Available: ${availableCount} | Busy: ${busyCount} | Tasks pending: ${pendingTasks}`;
             const statusDiv = document.getElementById("worker-status");
+
             if (statusDiv) {
                 statusDiv.innerText = info;
             }
+
             this.workerStatusTimeout = null;
         }, 250);
     }
@@ -244,12 +251,15 @@ export class WorkerPool {
         [...this.availableWorkers, ...this.busyWorkers].forEach((w) =>
             w.terminate()
         );
+
         this.availableWorkers = [];
         this.busyWorkers = [];
+
         // Réinitialise la PriorityQueue en créant une nouvelle instance
         this.taskQueue = new PriorityQueue<WorkerTask>(
             (a, b) => a.priority - b.priority
         );
+
         this.activeTaskCount = 0;
         this.updateWorkerStatus();
     }

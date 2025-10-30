@@ -1,6 +1,6 @@
 import { Vector3 } from "@babylonjs/core";
-import { OriginCamera } from "./camera-manager";
-import { ScaleManager } from "../scale/scale-manager";
+import { OriginCamera } from "./camera_manager";
+import { ScaleManager } from "../scale/scale_manager";
 
 type HasDoublePos = { doublepos: Vector3 };
 type HasPosition = { position: Vector3 };

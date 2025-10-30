@@ -1,5 +1,5 @@
 import { Vector3 } from "@babylonjs/core";
-import { ScaleManager } from "../../core/scale/scale-manager";
+import { ScaleManager } from "../../core/scale/scale_manager";
 import planetsJson from "./planets.json";
 
 /**

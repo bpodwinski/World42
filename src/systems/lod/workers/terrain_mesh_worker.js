@@ -417,6 +417,7 @@ function computeChunkMeshData(bounds, resolution, radius, face, noise) {
                 verts[tri1Indices[1]],
                 verts[tri1Indices[2]]
             );
+
             const tri2Normal = computeTriangleNormal(
                 v0,
                 verts[tri2Indices[1]],
@@ -428,6 +429,7 @@ function computeChunkMeshData(bounds, resolution, radius, face, noise) {
                 normalAccum[idx] = normalAccum[idx].add(tri1Normal);
                 normalCount[idx]++;
             });
+
             tri2Indices.forEach((idx) => {
                 normalAccum[idx] = normalAccum[idx].add(tri2Normal);
                 normalCount[idx]++;
@@ -441,6 +443,7 @@ function computeChunkMeshData(bounds, resolution, radius, face, noise) {
             const avgNormal = normalAccum[i]
                 .scale(1 / normalCount[i])
                 .normalize();
+
             const idx = i * 3;
             normals[idx] = avgNormal.x;
             normals[idx + 1] = avgNormal.y;
@@ -461,6 +464,7 @@ function computeChunkMeshData(bounds, resolution, radius, face, noise) {
 function computeTriangleNormal(v0, v1, v2) {
     const edge1 = new Vector3(v1.x - v0.x, v1.y - v0.y, v1.z - v0.z);
     const edge2 = new Vector3(v2.x - v0.x, v2.y - v0.y, v2.z - v0.z);
+
     return edge2.cross(edge1).normalize();
 }
 

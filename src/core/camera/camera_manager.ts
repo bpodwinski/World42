@@ -7,7 +7,7 @@ import {
     Color3,
     LinesMesh,
 } from "@babylonjs/core";
-import { ScaleManager } from "../scale/scale-manager";
+import { ScaleManager } from "../scale/scale_manager";
 
 export interface FloatingEntityInterface extends TransformNode {
     doublepos: Vector3;

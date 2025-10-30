@@ -1,5 +1,5 @@
 import { DefaultRenderingPipeline, Scene } from "@babylonjs/core";
-import { OriginCamera } from "../camera/camera-manager";
+import { OriginCamera } from "../camera/camera_manager";
 
 /**
  * PostProcess class for managing the post-processing pipeline. This class configures Babylon.js's default rendering pipeline to apply various effects (tone mapping, FXAA, bloom, sharpen, etc.) on the scene

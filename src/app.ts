@@ -16,17 +16,17 @@ import '@babylonjs/core/Materials/Textures/Loaders/ktxTextureLoader';
 import '@babylonjs/core/Debug/debugLayer';
 import '@babylonjs/inspector';
 
-import { PostProcess } from './core/render/postprocess-manager';
-import { ScaleManager } from './core/scale/scale-manager';
-import { FloatingEntity, OriginCamera } from './core/camera/camera-manager';
-import { TextureManager } from './core/io/texture-manager';
+import { PostProcess } from './core/render/postprocess_manager';
+import { ScaleManager } from './core/scale/scale_manager';
+import { FloatingEntity, OriginCamera } from './core/camera/camera_manager';
+import { TextureManager } from './core/io/texture_manager';
 import { io } from 'socket.io-client';
-import { MouseSteerControlManager } from './core/control/mouse-steer-control-manager';
-import { GuiManager } from './core/gui/gui-manager';
+import { MouseSteerControlManager } from './core/control/mouse_steer_control_manager';
+import { GuiManager } from './core/gui/gui_manager';
 
-import { createCDLODForAllPlanets, loadSolarSystemFromJSON, precomputeAndRunLODLoop, type SystemJSON } from './game_world/solar_system/solar-system-loader';
+import { createCDLODForAllPlanets, loadSolarSystemFromJSON, precomputeAndRunLODLoop, type SystemJSON } from './game_world/solar_system/solar_system_loader';
 import planetsJson from './game_world/solar_system/planets.json';
-import { teleportToEntity } from './core/camera/teleport-to-entity';
+import { teleportToEntity } from './core/camera/teleport_entity';
 
 function toSystemJSON(raw: any): SystemJSON {
     const out: Record<string, {
@@ -79,7 +79,7 @@ export class FloatingCameraScene {
         gui.setMouseCrosshairVisible(true);
 
         let planetTarget = Body.node.position.clone();
-        planetTarget.y += Body.radiusMeters ?? 0 * 1.00;
+        planetTarget.y += Body.radiusMeters ?? 0 * 1.2;
 
         let camera = new OriginCamera('camera', planetTarget, scene);
         camera.debugMode = true;
@@ -123,7 +123,7 @@ export class FloatingCameraScene {
                     camera,
                     pluto.node.position,
                     pluto.radiusMeters ?? 0,
-                    5
+                    20
                 );
             }
         });
