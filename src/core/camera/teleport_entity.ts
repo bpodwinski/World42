@@ -1,6 +1,5 @@
 import { Vector3 } from "@babylonjs/core";
 import { OriginCamera } from "./camera_manager";
-import { ScaleManager } from "../scale/scale_manager";
 
 type HasDoublePos = { doublepos: Vector3 };
 type HasPosition = { position: Vector3 };
@@ -10,7 +9,7 @@ type HasPosition = { position: Vector3 };
  *
  * @param camera - Floating-origin aware camera (`OriginCamera`). If it exposes `doublepos`/`doubletgt`, they will be used for high precision; otherwise falls back to `position`/`setTarget`.
  * @param target - Destination anchor: `{ doublepos }`, `{ position }`, or a `Vector3`.
- * @param planetDiameter - Planet diameter (source units expected by `ScaleManager.toSimulationUnits`, typically kilometers).
+ * @param planetDiameter - Planet diameter.
  * @param diameterOffsetPercent - Percentage of the planet diameter to add along the outward direction.
  */
 export function teleportToEntity(
@@ -37,6 +36,7 @@ export function teleportToEntity(
 
     if (!camPos || !tgtPos) {
         console.error("[teleportToEntity] Camera or target has no valid position.", { camPos, tgtPos, target });
+
         return;
     }
 
@@ -50,7 +50,7 @@ export function teleportToEntity(
 
     // New high-precision camera position
     const targetDoublePos = tgtPos.add(
-        dir.scale(ScaleManager.toSimulationUnits(planetDiameter * diameterOffset))
+        dir.scale(planetDiameter * diameterOffset)
     );
 
     // Apply high-precision position (or fallback to standard position)

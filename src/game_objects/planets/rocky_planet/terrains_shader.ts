@@ -1,6 +1,4 @@
 import { Effect, Scene, ShaderMaterial, Vector3 } from '@babylonjs/core';
-import { ScaleManager } from '../../../core/scale/scale_manager';
-
 import terrainDebugLODShader from '../../../assets/shaders/terrain/_terrainDebugLOD.glsl';
 import terrainVertexShader from '../../../assets/shaders/terrain/terrainVertexShader.glsl';
 import terrainFragmentShader from '../../../assets/shaders/terrain/terrainFragmentShader.glsl';
@@ -90,7 +88,7 @@ export class TerrainShader {
         const lodRanges: number[] = [];
         for (let i = 0; i < maxLevel; i++) {
             lodRanges[i] =
-                ScaleManager.toSimulationUnits(planetRadius) * Math.pow(2, i);
+                planetRadius * Math.pow(2, i);
         }
         shader.setFloats('lodRangesLUT', lodRanges);
         shader.setVector3('uPlanetCenter', planetCenter);

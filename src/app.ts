@@ -17,7 +17,6 @@ import '@babylonjs/core/Debug/debugLayer';
 import '@babylonjs/inspector';
 
 import { PostProcess } from './core/render/postprocess_manager';
-import { ScaleManager } from './core/scale/scale_manager';
 import { FloatingEntity, OriginCamera } from './core/camera/camera_manager';
 import { TextureManager } from './core/io/texture_manager';
 import { io } from 'socket.io-client';

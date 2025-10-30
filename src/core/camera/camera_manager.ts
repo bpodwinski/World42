@@ -46,11 +46,13 @@ export class OriginCamera extends UniversalCamera {
 
     public distanceToSim(target: Vector3 | FloatingEntity): number {
         const tp = target instanceof FloatingEntity ? target.doublepos : target;
+
         return Vector3.Distance(this.doublepos, tp);
     }
 
     public distanceToKm(target: Vector3 | FloatingEntity): number {
         const dSim = this.distanceToSim(target);
+
         return ScaleManager.toRealUnits(dSim); // sim -> km
     }
 
