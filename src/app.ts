@@ -17,7 +17,6 @@ import '@babylonjs/core/Debug/debugLayer';
 import '@babylonjs/inspector';
 
 import { PostProcess } from './core/render/postprocess_manager';
-import { ScaleManager } from './core/scale/scale_manager';
 import { FloatingEntity, OriginCamera } from './core/camera/camera_manager';
 import { TextureManager } from './core/io/texture_manager';
 import { io } from 'socket.io-client';
@@ -31,8 +30,8 @@ import { teleportToEntity } from './core/camera/teleport_entity';
 function toSystemJSON(raw: any): SystemJSON {
     const out: Record<string, {
         position_km: [number, number, number];
-        diameter_km: number | null;
-        rotation_period_days: number | null;
+        diameter_km: number;
+        rotation_period_days: number;
     }> = {};
     for (const [name, v] of Object.entries(raw)) {
         const arr = Array.isArray((v as any).position_km) ? (v as any).position_km as number[] : [0, 0, 0];
@@ -40,10 +39,11 @@ function toSystemJSON(raw: any): SystemJSON {
 
         out[name] = {
             position_km: [x, y, z],
-            diameter_km: (v as any).diameter_km ?? null,
-            rotation_period_days: (v as any).rotation_period_days ?? null,
+            diameter_km: (v as any).diameter_km,
+            rotation_period_days: (v as any).rotation_period_days,
         };
     }
+
     return out;
 }
 
@@ -79,7 +79,7 @@ export class FloatingCameraScene {
         gui.setMouseCrosshairVisible(true);
 
         let planetTarget = Body.node.position.clone();
-        planetTarget.y += Body.radiusMeters ?? 0 * 1.2;
+        planetTarget.y += Body.diameter * 0.52;
 
         let camera = new OriginCamera('camera', planetTarget, scene);
         camera.debugMode = true;
@@ -122,7 +122,7 @@ export class FloatingCameraScene {
                 teleportToEntity(
                     camera,
                     pluto.node.position,
-                    pluto.radiusMeters ?? 0,
+                    pluto.diameter,
                     20
                 );
             }
@@ -158,7 +158,7 @@ export class FloatingCameraScene {
 
         const sun = MeshBuilder.CreateSphere('sun', {
             segments: 64,
-            diameter: Sun.radiusMeters ?? 0 * 2
+            diameter: Sun.diameter
         });
         let sunMaterial = new PBRMetallicRoughnessMaterial('sunMaterial', scene);
         sunMaterial.emissiveTexture = new TextureManager('sun_surface_albedo.ktx2', scene);
@@ -168,9 +168,6 @@ export class FloatingCameraScene {
         sun.material = sunMaterial;
         sun.checkCollisions = true;
         sun.parent = entSun;
-
-        // Map to store planet meshes (unused in current version)
-        const planetMeshes = new Map<string, Mesh>();
 
         // --- HUD Vitesse (lissé + throttlé) -----------------------------------------
         let emaMS = 0;
@@ -183,10 +180,9 @@ export class FloatingCameraScene {
         scene.onBeforeRenderObservable.add(() => {
             const now = performance.now();
             if (now - lastDistLog >= DIST_LOG_RATE_MS) {
-                // Recalcule à chaque frame (origin flottant => positions haute précision)
                 const dSim = camera.distanceToSim(Body.node.position);
 
-                console.log(`Mercure: ${dSim.toFixed(0)} km (${(dSim / 1e6).toFixed(3)} Mm)`);
+                console.log(`${Body.name}: ${dSim.toFixed(0)} km`);
 
                 lastDistLog = now;
             }
