@@ -1,6 +1,6 @@
 import { Vector3 } from "@babylonjs/core";
 import { ScaleManager } from "../../core/scale/scale_manager";
-import planetsJson from "./planets.json";
+import planetsJson from "./data.json";
 
 /**
  * Planet data in simulation units: Includes position, diameter, and rotation speed (rad/s)

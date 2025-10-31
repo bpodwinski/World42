@@ -6,7 +6,7 @@ beforeAll(async () => {
     process.env.SCALE_FACTOR = "1000";
     ({ ScaleManager } = await import("../../core/scale/scale_manager"));
     // Chemin à adapter si nécessaire (ex: src/assets/planets.json)
-    planets = (await import("./planets.json")).default;
+    planets = (await import("./data.json")).default;
 });
 
 describe("Planet diameters -> simulation units", () => {

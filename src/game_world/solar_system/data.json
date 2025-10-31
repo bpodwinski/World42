@@ -1,5 +1,6 @@
 {
     "Sun": {
+        "type": "star",
         "position_km": [
             0,
             0,
@@ -9,6 +10,7 @@
         "rotation_period_days": null
     },
     "Mercury": {
+        "type": "planet",
         "position_km": [
             57910000,
             0,
@@ -18,6 +20,7 @@
         "rotation_period_days": 58.6
     },
     "Venus": {
+        "type": "planet",
         "position_km": [
             108200000,
             0,
@@ -27,6 +30,7 @@
         "rotation_period_days": 243
     },
     "Earth": {
+        "type": "planet",
         "position_km": [
             149600000,
             0,
@@ -36,6 +40,7 @@
         "rotation_period_days": 1
     },
     "Mars": {
+        "type": "planet",
         "position_km": [
             227900000,
             0,
@@ -45,6 +50,7 @@
         "rotation_period_days": 1.025
     },
     "Jupiter": {
+        "type": "planet",
         "position_km": [
             778500000,
             0,
@@ -54,6 +60,7 @@
         "rotation_period_days": 0.41
     },
     "Saturn": {
+        "type": "planet",
         "position_km": [
             1429000000,
             0,
@@ -63,6 +70,7 @@
         "rotation_period_days": 0.45
     },
     "Uranus": {
+        "type": "planet",
         "position_km": [
             2870000000,
             0,
@@ -72,6 +80,7 @@
         "rotation_period_days": -0.72
     },
     "Neptune": {
+        "type": "planet",
         "position_km": [
             4500000000,
             0,
@@ -81,6 +90,7 @@
         "rotation_period_days": 0.67
     },
     "Pluto": {
+        "type": "planet",
         "position_km": [
             5906400000,
             0,

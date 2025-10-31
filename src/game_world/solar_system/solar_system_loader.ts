@@ -4,10 +4,11 @@ import {
     MeshBuilder,
     PBRMetallicRoughnessMaterial,
     Color3,
-    TransformNode
+    TransformNode,
 } from "@babylonjs/core";
 import { FloatingEntity, OriginCamera } from "../../core/camera/camera_manager";
 import { ChunkTree, Face } from "../../systems/lod/chunks/chunk_tree";
+import { TextureManager } from "../../core/io/texture_manager";
 
 export type PlanetCDLOD = {
     entity: FloatingEntity;
@@ -33,10 +34,12 @@ export type CDLODOptions = {
 
 /** JSON shape attendu (ex: Sun/Earth/... -> { position_km, diameter_km, rotation_period_days }) */
 export type BodyJSON = {
+    type: string;
     position_km: [number, number, number];
     diameter_km: number;
-    rotation_period_days: number;
+    rotation_period_days: number | null;
 };
+
 export type SystemJSON = Record<string, BodyJSON>;
 
 export type LoadSystemOptions = {
@@ -51,11 +54,12 @@ export type LoadSystemOptions = {
 };
 
 export type LoadedBody = {
+    bodyType: string;
     name: string;
     node: TransformNode;    // racine du corps
     meshName: string;       // nom de la mesh (si créée)
     diameter: number;       // diamètre utilisé pour la mesh
-    rotationPeriodDays: number;
+    rotationPeriodDays: number | null;
 };
 
 export type LoadedSystem = {
@@ -77,18 +81,24 @@ export async function loadSolarSystemFromJSON(
     const {
         animateRotation = true,
         parent,
-        makeMaterial = (name, isStar, scn) => {
+        makeMaterial = (name: string, isStar: boolean, scn: Scene) => {
+            // Un seul mat, paramétré selon isStar
             const mat = new PBRMetallicRoughnessMaterial(`mat_${name}`, scn);
-            mat.baseColor = isStar ? new Color3(1, 0.95, 0.8) : new Color3(0.6, 0.6, 0.65);
-            // Donne un côté "lumineux" au Soleil:
+
             if (isStar) {
-                mat.emissiveColor = new Color3(1, 0.9, 0.6);
+                // Texture émissive (KTX2 ok si le loader est importé quelque part dans l’app)
+                mat.emissiveTexture = new TextureManager('sun_surface_albedo.ktx2', scn);
+                mat.emissiveColor = new Color3(1, 1, 1);
                 mat.metallic = 0.0;
-                mat.roughness = 1.0;
+                mat.roughness = 0.0;
+                // Optionnel : visible de l'intérieur si tu te téléportes dedans
+                // mat.backFaceCulling = false;
             } else {
+                mat.baseColor = new Color3(0.6, 0.6, 0.65);
                 mat.metallic = 0.0;
                 mat.roughness = 1.0;
             }
+
             return mat;
         }
     } = opts;
@@ -100,9 +110,12 @@ export async function loadSolarSystemFromJSON(
         typeof jsonSource === "string"
             ? await (async () => {
                 const isLikelyJsonString = jsonSource.trim().startsWith("{");
+
                 if (isLikelyJsonString) return JSON.parse(jsonSource) as SystemJSON;
                 const res = await fetch(jsonSource);
+
                 if (!res.ok) throw new Error(`Failed to fetch JSON: ${res.status} ${res.statusText}`);
+
                 return (await res.json()) as SystemJSON;
             })()
             : jsonSource;
@@ -114,11 +127,14 @@ export async function loadSolarSystemFromJSON(
         const node = new TransformNode(`node_${name}`, scene);
         node.parent = root;
 
+        // Normalise le type (star/planet/...)
+        const kind = data.type;
+        const isStar = kind === "star";
+
         // Position (km -> m)
         const [xKm, yKm, zKm] = data.position_km;
         node.position = new Vector3(xKm, yKm, zKm);
 
-        const isStar = name.toLowerCase() === "sun" || name.toLowerCase().includes("star");
         let meshName = `mesh_${name}`;
 
         if (data.diameter_km && data.diameter_km > 0) {
@@ -126,12 +142,21 @@ export async function loadSolarSystemFromJSON(
             sphere.parent = node;
 
             const mat = makeMaterial(name, isStar, scene);
+            if (isStar) {
+                mat.emissiveColor = new Color3(1, 1, 1);
+                mat.metallic = 0.0;
+                mat.roughness = 0.0;
+            } else {
+                mat.metallic = 0.0;
+                mat.roughness = 1.0;
+            }
             sphere.material = mat;
 
             meshName = sphere.name;
         }
 
         bodies.set(name, {
+            bodyType: kind,
             name,
             node,
             meshName,
@@ -167,13 +192,11 @@ export function createCDLODForAllPlanets(
         maxLevel = 8,
         resolution = 64,
         faces = ["front", "back", "left", "right", "top", "bottom"],
-        skip = (name) => name.toLowerCase() === "sun",
     } = opts;
 
     const out = new Map<string, PlanetCDLOD>();
 
     for (const [name, body] of loaded.bodies) {
-        if (skip(name, body)) continue;
 
         // Entité flottante
         const ent = new FloatingEntity(`ent_${name}`, scene);
@@ -221,5 +244,6 @@ export async function precomputeAndRunLODLoop(
             await new Promise<void>(r => requestAnimationFrame(() => r()));
         }
     }
+
     loop();
 }
