@@ -1,0 +1,41 @@
+{
+    "folders": [
+        {
+            "path": "../"
+        }
+    ],
+    "settings": {
+        "editor.tabSize": 4,
+        "editor.insertSpaces": true,
+        "editor.detectIndentation": false,
+        "editor.rulers": [
+            {
+                "column": 80,
+                "color": "#00e1ff21"
+            },
+            {
+                "column": 100,
+                "color": "#ffbb002a"
+            },
+            {
+                "column": 120,
+                "color": "#ff000031"
+            }
+        ],
+        "workbench.colorCustomizations": {
+            "activityBar.background": "#eb330080",
+            "activityBar.activeBackground": "#eb330080",
+            "titleBar.activeBackground": "#eb330080",
+            "editorRuler.foreground": "#ffffff1f",
+            "statusBar.background": "#eb330080"
+        },
+        "[typescript]": {
+            "editor.rulers": [
+                80
+            ],
+            "editor.wordWrap": "wordWrapColumn",
+            "editor.wordWrapColumn": 80,
+            "editor.defaultFormatter": "vscode.typescript-language-features"
+        },
+    }
+}
