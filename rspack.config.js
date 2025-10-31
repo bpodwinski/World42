@@ -1,9 +1,9 @@
 require('dotenv').config();
 
-const { DefinePlugin, EnvironmentPlugin } = require('@rspack/core');
 const path = require('path');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const { TsCheckerRspackPlugin } = require('ts-checker-rspack-plugin');
+const Dotenv = require('dotenv-webpack');
 
 const config = {
     entry: {
@@ -17,7 +17,6 @@ const config = {
     devServer: {
         host: "localhost",
         port: 3000,
-        //open: ["/"],
         historyApiFallback: true
     },
     resolve: {
@@ -42,12 +41,10 @@ const config = {
             template: './index.html'
         }),
         new TsCheckerRspackPlugin(),
-        new DefinePlugin({
-            'process.env.ASSETS_URL': JSON.stringify(process.env.ASSETS_URL)
-        }),
-        new EnvironmentPlugin({
-            ENGINE: "auto",
-            SCALE_FACTOR: "1"
+        new Dotenv({
+            path: './.env',
+            systemvars: true,
+            allowEmptyValues: true,
         }),
     ],
     experiments: {

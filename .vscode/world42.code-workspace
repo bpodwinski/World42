@@ -23,11 +23,11 @@
             }
         ],
         "workbench.colorCustomizations": {
-            "activityBar.background": "#eb330080",
-            "activityBar.activeBackground": "#eb330080",
-            "titleBar.activeBackground": "#eb330080",
+            "activityBar.background": "#00000080",
+            "activityBar.activeBackground": "#00000080",
+            "titleBar.activeBackground": "#00000080",
             "editorRuler.foreground": "#ffffff1f",
-            "statusBar.background": "#eb330080"
+            "statusBar.background": "#00000080"
         },
         "[typescript]": {
             "editor.rulers": [
