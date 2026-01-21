@@ -75,19 +75,19 @@ export type LoadedSystem = {
  */
 export async function loadSolarSystemFromJSON(
     scene: Scene,
-    jsonSource: string | SystemJSON,
+    jsonSource: SystemJSON | unknown,
     opts: LoadSystemOptions = {}
 ): Promise<LoadedSystem> {
     const {
         animateRotation = true,
         parent,
-        makeMaterial = (name: string, isStar: boolean, scn: Scene) => {
+        makeMaterial = (name: string, isStar: boolean, scene: Scene) => {
             // Un seul mat, paramétré selon isStar
-            const mat = new PBRMetallicRoughnessMaterial(`mat_${name}`, scn);
+            const mat = new PBRMetallicRoughnessMaterial(`mat_${name}`, scene);
 
             if (isStar) {
                 // Texture émissive (KTX2 ok si le loader est importé quelque part dans l’app)
-                mat.emissiveTexture = new TextureManager('sun_surface_albedo.ktx2', scn);
+                mat.emissiveTexture = new TextureManager('sun_surface_albedo.ktx2', scene);
                 mat.emissiveColor = new Color3(1, 1, 1);
                 mat.metallic = 0.0;
                 mat.roughness = 0.0;
@@ -106,20 +106,7 @@ export async function loadSolarSystemFromJSON(
     const root = new TransformNode("SolarSystem", scene);
     if (parent) root.parent = parent;
 
-    const system: SystemJSON =
-        typeof jsonSource === "string"
-            ? await (async () => {
-                const isLikelyJsonString = jsonSource.trim().startsWith("{");
-
-                if (isLikelyJsonString) return JSON.parse(jsonSource) as SystemJSON;
-                const res = await fetch(jsonSource);
-
-                if (!res.ok) throw new Error(`Failed to fetch JSON: ${res.status} ${res.statusText}`);
-
-                return (await res.json()) as SystemJSON;
-            })()
-            : jsonSource;
-
+    const system: SystemJSON = normalizeSystemJSON(jsonSource);
     const bodies = new Map<string, LoadedBody>();
 
     // Création des corps
@@ -128,8 +115,7 @@ export async function loadSolarSystemFromJSON(
         node.parent = root;
 
         // Normalise le type (star/planet/...)
-        const kind = data.type;
-        const isStar = kind === "star";
+        const isStar = data.type === "star";
 
         // Position (km -> m)
         const [xKm, yKm, zKm] = data.position_km;
@@ -137,26 +123,23 @@ export async function loadSolarSystemFromJSON(
 
         let meshName = `mesh_${name}`;
 
-        if (data.diameter_km && data.diameter_km > 0) {
+        if (isStar) {
             const sphere = MeshBuilder.CreateSphere(meshName, { diameter: data.diameter_km, segments: 64 }, scene);
             sphere.parent = node;
 
             const mat = makeMaterial(name, isStar, scene);
-            if (isStar) {
-                mat.emissiveColor = new Color3(1, 1, 1);
-                mat.metallic = 0.0;
-                mat.roughness = 0.0;
-            } else {
-                mat.metallic = 0.0;
-                mat.roughness = 1.0;
-            }
+
+            mat.emissiveColor = new Color3(1, 1, 1);
+            mat.metallic = 0.0;
+            mat.roughness = 0.0;
+
             sphere.material = mat;
 
             meshName = sphere.name;
         }
 
         bodies.set(name, {
-            bodyType: kind,
+            bodyType: data.type,
             name,
             node,
             meshName,
@@ -172,6 +155,7 @@ export async function loadSolarSystemFromJSON(
             bodies.forEach((b) => {
                 const T = b.rotationPeriodDays;
                 if (!T || !isFinite(T) || T === 0) return;
+
                 // vitesse angulaire = 2π / période (en secondes)
                 const omega = (2 * Math.PI) / (T * 86400);
                 b.node.rotation.y += omega * dt;
@@ -192,11 +176,13 @@ export function createCDLODForAllPlanets(
         maxLevel = 8,
         resolution = 64,
         faces = ["front", "back", "left", "right", "top", "bottom"],
+        skip = (_name: string, body: LoadedBody) => body.bodyType === "star",
     } = opts;
 
     const out = new Map<string, PlanetCDLOD>();
 
     for (const [name, body] of loaded.bodies) {
+        if (skip(name, body)) continue;
 
         // Entité flottante
         const ent = new FloatingEntity(`ent_${name}`, scene);
@@ -246,4 +232,46 @@ export async function precomputeAndRunLODLoop(
     }
 
     loop();
+}
+
+function normalizeSystemJSON(raw: unknown): SystemJSON {
+    const out: SystemJSON = {};
+
+    if (typeof raw !== "object" || raw === null) return out;
+
+    for (const [name, vAny] of Object.entries(raw as Record<string, any>)) {
+        const v = vAny ?? {};
+
+        // type: accepte "star"/"sun"/"planet", insensible à la casse, défaut "planet"
+        const typeRaw =
+            typeof v.type === "string" ? v.type :
+                typeof v.Type === "string" ? v.Type :
+                    "planet";
+        const type = String(typeRaw).toLowerCase().trim();
+
+        // position: préfère position_km: [x,y,z], sinon fallback 0,0,0
+        let x = 0, y = 0, z = 0;
+        if (Array.isArray(v.position_km)) {
+            [x = 0, y = 0, z = 0] = v.position_km as number[];
+        } else if (typeof v.x === "number" || typeof v.y === "number" || typeof v.z === "number") {
+            x = Number(v.x ?? 0); y = Number(v.y ?? 0); z = Number(v.z ?? 0);
+        }
+
+        // diamètre: accepte diameter_km ou diameter
+        const diameter_km = Number(v.diameter_km ?? v.diameter ?? 0);
+        const rot = v.rotation_period_days;
+        const rotation_period_days =
+            rot === null || rot === undefined ? null : Number(rot);
+
+        out[name] = {
+            type,
+            position_km: [x, y, z],
+            diameter_km: Number.isFinite(diameter_km) ? diameter_km : 0,
+            rotation_period_days: Number.isFinite(Number(rotation_period_days))
+                ? Number(rotation_period_days)
+                : null,
+        };
+    }
+
+    return out;
 }

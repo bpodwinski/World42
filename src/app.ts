@@ -20,36 +20,6 @@ import { createCDLODForAllPlanets, loadSolarSystemFromJSON, precomputeAndRunLODL
 import planetsJson from './game_world/solar_system/data.json';
 import { teleportToEntity } from './core/camera/teleport_entity';
 
-function toSystemJSON(raw: any): SystemJSON {
-    const out: SystemJSON = {};
-
-    for (const [name, vAny] of Object.entries(raw)) {
-        const v = vAny as {
-            type?: string;
-            position_km?: number[];
-            diameter_km?: number;
-            rotation_period_days?: number | null;
-        };
-
-        const [x = 0, y = 0, z = 0] = Array.isArray(v.position_km) ? v.position_km as number[] : [0, 0, 0];
-
-        // si pas de type fourni → "planet" par défaut (plus de cas spécial Sun)
-        const inferredType =
-            typeof v.type === "string" && v.type.trim().length > 0
-                ? v.type.toLowerCase()
-                : "planet";
-
-        out[name] = {
-            type: inferredType,
-            position_km: [x, y, z],
-            diameter_km: Number(v.diameter_km ?? 0),
-            rotation_period_days: (v.rotation_period_days ?? null) as number | null,
-        };
-    }
-
-    return out;
-}
-
 export class FloatingCameraScene {
     public static async CreateScene(
         engine: Engine | WebGPUEngine,
@@ -60,8 +30,7 @@ export class FloatingCameraScene {
         scene.collisionsEnabled = true;
 
         // rework to params
-        const normalized = toSystemJSON(planetsJson);
-        const loadedSystem = await loadSolarSystemFromJSON(scene, normalized);
+        const loadedSystem = await loadSolarSystemFromJSON(scene, planetsJson);
         const systemBodies = loadedSystem.bodies;
         const body = systemBodies.get('Mercury');
 
@@ -103,7 +72,6 @@ export class FloatingCameraScene {
             {
                 maxLevel: 12,
                 resolution: 40,
-                skip: (name) => name.toLowerCase() === "sun",
             }
         );
 
