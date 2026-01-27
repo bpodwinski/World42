@@ -304,7 +304,7 @@ export class ChunkTree {
         camPos: Vector3,
         patchCenter: Vector3,
         corners: Vector3[]
-    ): number {
+    ): { distance: number; radius: number } {
         let r2 = 0;
         for (const c of corners) {
             const dx = c.x - patchCenter.x;
@@ -316,7 +316,9 @@ export class ChunkTree {
         const sphereRadius = Math.sqrt(r2);
 
         const dc = Vector3.Distance(camPos, patchCenter);
-        return Math.max(0, dc - sphereRadius);
+        const distance = Math.max(0, dc - sphereRadius);
+
+        return { distance, radius: sphereRadius };
     }
 
     /**
@@ -344,6 +346,40 @@ export class ChunkTree {
 
         const d = Math.max(distanceToPatch, ChunkTree.minDistEpsilon);
         return (geometricError / d) * K;
+    }
+
+    private isPatchVisibleByHorizon(
+        camPos: Vector3,
+        planetCenter: Vector3,
+        planetRadius: number,
+        patchCenter: Vector3,
+        patchBoundingRadius: number
+    ): boolean {
+        const VC = camPos.subtract(planetCenter);
+        const d = VC.length();
+
+        // If camera is inside / on the planet, disable horizon culling (everything is potentially visible)
+        if (d <= planetRadius) return true;
+
+        const dirCam = VC.scale(1 / d);
+
+        const PC = patchCenter.subtract(planetCenter);
+        const pcLen = PC.length() || 1;
+        const dirPatch = PC.scale(1 / pcLen);
+
+        // Horizon angle
+        const cosAlpha = planetRadius / d; // in (0..1)
+        const alpha = Math.acos(Math.min(1, Math.max(0, cosAlpha)));
+
+        // Patch angular radius (conservative)
+        const s = patchBoundingRadius / planetRadius;
+        const beta = Math.asin(Math.min(1, Math.max(0, s)));
+
+        // Angle between camera direction and patch direction
+        const dot = Vector3.Dot(dirCam, dirPatch);
+        const angle = Math.acos(Math.min(1, Math.max(-1, dot)));
+
+        return angle <= (alpha + beta);
     }
 
     /**
@@ -376,11 +412,22 @@ export class ChunkTree {
             });
 
             // Use bounding sphere distance instead of "min distance to center/corners"
-            const distanceToPatch = this.distanceToPatchBoundingSphere(
+            const { distance: distanceToPatch, radius: bsRadius } =
+                this.distanceToPatchBoundingSphere(camera.doublepos, center, corners);
+
+            const planetCenter = this.parentEntity.doublepos;
+
+            if (!this.isPatchVisibleByHorizon(
                 camera.doublepos,
+                planetCenter,
+                this.radius,
                 center,
-                corners
-            );
+                bsRadius
+            )) {
+                // Hidden by planet curvature -> do not load/split
+                this.deactivate();
+                return;
+            }
 
             // SSE decision in pixels
             const ssePx = this.computeSSEPx(camera, distanceToPatch, corners);
