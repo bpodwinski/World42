@@ -26,7 +26,8 @@ export type Face = 'front' | 'back' | 'left' | 'right' | 'top' | 'bottom';
 /**
  * Global worker pool for mesh chunk computation
  *
- * Instantiated with the worker script URL and using hardware concurrency for both workers and concurrent tasks
+ * Instantiated with the worker script URL and using hardware concurrency
+ * for both workers and concurrent tasks.
  */
 export const globalWorkerPool = new WorkerPool(
     new URL('../workers/terrain_mesh_worker', import.meta.url).href,
@@ -36,14 +37,18 @@ export const globalWorkerPool = new WorkerPool(
 );
 
 /**
- * Global cache to store precomputed meshes
+ * Global cache to store precomputed meshes (optional)
  */
 const precomputedChunkCache = new Map<string, Promise<Mesh>>();
 
 /**
- * ChunkTree class represents a terrain chunk and manages its hierarchical subdivision
+ * ChunkTree represents a terrain chunk node and manages hierarchical subdivision (quadtree)
  *
- * Stores spatial information and holds reference to the generated mesh if available
+ * Each node owns:
+ *  - UV bounds on a cube face
+ *  - LOD level
+ *  - optional Babylon mesh (generated async via worker pool)
+ *  - optional children (4 quadrants)
  */
 export class ChunkTree {
     scene: Scene;
@@ -70,28 +75,28 @@ export class ChunkTree {
     // Keeps track of the LOD level for which the mesh was generated
     private currentLODLevel: number | null = null;
 
-    // Nouveau flag pour activer le pré-calcul
+    // Flag to enable/disable precompute caching
     private precomputeEnabled: boolean = false;
 
-    // Flag to enable or disable debug mode for LOD (passed to the shader)
+    // Debug mode flag (passed to the shader)
     public debugLOD: boolean;
     public static debugLODEnabled: boolean = false;
 
     /**
-     * Creates new QuadTree instance
+     * Creates a new ChunkTree node
      *
-     * @param {Scene} scene - Babylon.js scene used for mesh creation
-     * @param {OriginCamera} camera - Camera used for LOD calculations
-     * @param {Bounds} bounds - UV bounds of the terrain chunk
-     * @param {number} level - Current LOD level
-     * @param {number} maxLevel - Maximum LOD level allowed
-     * @param {number} radius - Radius of the planet in simulation units
-     * @param {Vector3} center - Center position of the chunk (in simulation units)
-     * @param {number} resolution - Grid resolution for the chunk
-     * @param {Face} face - Cube face for the terrain chunk
-     * @param {FloatingEntityInterface} parentEntity - Entity to which the mesh is attached
-     * @param {boolean} [precomputeEnabled=false] - Active ou non le pré-calcul du mesh
-     * @param {boolean} [debugLOD=false] - Whether to enable LOD debug mode
+     * @param scene - Babylon.js scene used for mesh creation
+     * @param camera - Camera used for LOD calculations
+     * @param bounds - UV bounds of the terrain chunk
+     * @param level - Current LOD level
+     * @param maxLevel - Maximum LOD level allowed
+     * @param radius - Planet radius in simulation units
+     * @param center - Center position of the chunk (simulation units)
+     * @param resolution - Grid resolution used to generate the mesh
+     * @param face - Cube face for the terrain chunk
+     * @param parentEntity - Entity to which the mesh is attached (floating origin)
+     * @param precomputeEnabled - Enables/disables precompute mesh caching
+     * @param debugLOD - Whether to enable LOD debug mode
      */
     constructor(
         scene: Scene,
@@ -125,11 +130,9 @@ export class ChunkTree {
     }
 
     /**
-     * Returns the center position of the chunk in world space
+     * Returns the center position of the chunk in world space.
      *
-     * Uses bounds and parent's double position for calculation
-     *
-     * @returns {Vector3} Center position of the chunk
+     * Uses bounds + parentEntity.doublepos to compute a point on the quadsphere at planet radius.
      */
     private getCenterChunk(): Vector3 {
         const { uMin, uMax, vMin, vMax } = this.bounds;
@@ -137,13 +140,11 @@ export class ChunkTree {
         const vCenter = (vMin + vMax) / 2;
         const posCube = Terrain.mapUVtoCube(uCenter, vCenter, this.face);
 
-        return this.parentEntity.doublepos.add(
-            posCube.normalize().scale(this.radius)
-        );
+        return this.parentEntity.doublepos.add(posCube.normalize().scale(this.radius));
     }
 
     /**
-     * Returns a unique key for caching this chunk mesh
+     * Returns a unique key for caching this chunk mesh.
      */
     private getChunkCacheKey(): string {
         const { uMin, uMax, vMin, vMax } = this.bounds;
@@ -151,20 +152,21 @@ export class ChunkTree {
     }
 
     /**
-     * Méthode optionnelle pour pré-calculer et stocker le mesh de ce chunk en RAM
-     * Si 'precomputeEnabled' est true, le mesh sera généré et stocké dans le cache global.
+     * Optional precompute: generates and stores the mesh of this chunk in the global cache (RAM).
+     * Only runs when precomputeEnabled is true.
      */
     public async precomputeMesh(): Promise<void> {
         if (!this.precomputeEnabled) return;
 
         const key = this.getChunkCacheKey();
         if (precomputedChunkCache.has(key)) {
-            console.log(`Chunk ${key} déjà pré-calculé`);
+            console.log(`Chunk ${key} already precomputed`);
             return;
         }
 
         const center = this.getCenterChunk();
-        console.log(`Pré-calcul du chunk ${key}...`);
+        console.log(`Precomputing chunk ${key}...`);
+
         const meshPromise = this.chunkForge.worker(
             {
                 bounds: this.bounds,
@@ -183,17 +185,14 @@ export class ChunkTree {
 
         try {
             await meshPromise;
-            console.log(`Chunk ${key} pré-calculé avec succès`);
+            console.log(`Chunk ${key} precomputed successfully`);
         } catch (e) {
-            console.error(`Erreur lors du pré-calcul du chunk ${key}:`, e);
+            console.error(`Error while precomputing chunk ${key}:`, e);
         }
     }
 
     /**
-     * Creates a new child QuadTree node with given bounds
-     *
-     * @param {Bounds} bounds - New bounds for the child node
-     * @returns {QuadTree} New child QuadTree node
+     * Creates a new child node with given bounds.
      */
     private createChild(bounds: Bounds): ChunkTree {
         return new ChunkTree(
@@ -213,9 +212,7 @@ export class ChunkTree {
     }
 
     /**
-     * Subdivides the current node into four child nodes
-     *ssss
-     * Computes new bounds for each quadrant and creates child QuadTree nodes
+     * Subdivides the current node into four child nodes (quadtree split).
      */
     subdivide(): void {
         this.children = [];
@@ -235,29 +232,24 @@ export class ChunkTree {
     }
 
     /**
-     * Disposes all child nodes and clears the children array
+     * Disposes all child nodes and clears the children array.
      */
     disposeChildren(): void {
-        if (this.children) {
-            this.children.forEach((child) => child.dispose());
-            this.children = null;
-        }
+        if (!this.children) return;
+        this.children.forEach((child) => child.dispose());
+        this.children = null;
     }
 
     /**
-     * Deactivates the current node and its children by disabling their meshes
+     * Deactivates the current node and all children by disabling their meshes.
      */
     deactivate(): void {
-        if (this.mesh) {
-            this.mesh.setEnabled(false);
-        }
-        if (this.children) {
-            this.children.forEach((child) => child.deactivate());
-        }
+        if (this.mesh) this.mesh.setEnabled(false);
+        if (this.children) this.children.forEach((child) => child.deactivate());
     }
 
     /**
-     * Disposes the current node's mesh and recursively disposes its children
+     * Disposes the current node mesh and recursively disposes its children.
      */
     dispose(): void {
         if (this.mesh) {
@@ -270,25 +262,107 @@ export class ChunkTree {
         }
     }
 
+    // --- SSE tuning knobs (adjust to taste)
+    public static sseThresholdPx = 6.0;   // 1..3 = very detailed, 3..6 = better perf
+    public static geomErrorScale = 0.6;   // empirical scale factor (depends on terrain)
+    public static minDistEpsilon = 1e-3;  // avoids division by zero
+
     /**
-     * Asynchronously updates the level of detail (LOD) for the chunk
-     *
-     * Waits for final mesh creation to avoid duplicate generation and manages subdivision
-     *
-     * @param {OriginCamera} camera - Camera used for LOD calculation
-     * @param {boolean} [debugMode=false] - Enable or disable debug mode during LOD update
-     * @returns {Promise<void>} Promise resolving when LOD update is complete
+     * Estimates patch world size from its 4 corner positions.
+     * We use the maximum edge/diagonal length as a conservative proxy for patch diameter.
      */
-    async updateLOD(
+    private estimatePatchWorldSize(corners: Vector3[]): number {
+        let max2 = 0;
+
+        const pairs: [number, number][] = [
+            [0, 1], [0, 2], [1, 3], [2, 3], // edges
+            [0, 3], [1, 2],                 // diagonals
+        ];
+
+        for (const [a, b] of pairs) {
+            const dx = corners[b].x - corners[a].x;
+            const dy = corners[b].y - corners[a].y;
+            const dz = corners[b].z - corners[a].z;
+            const d2 = dx * dx + dy * dy + dz * dz;
+            if (d2 > max2) max2 = d2;
+        }
+
+        return Math.sqrt(max2);
+    }
+
+    /**
+     * Computes camera-to-patch distance using a bounding sphere.
+     *
+     * distance = max(0, distance(camera, sphereCenter) - sphereRadius)
+     *
+     * - sphereCenter: patch center
+     * - sphereRadius: max distance from center to corners (conservative)
+     *
+     * This is more stable than using min(center/corners distance), especially near grazing angles.
+     */
+    private distanceToPatchBoundingSphere(
+        camPos: Vector3,
+        patchCenter: Vector3,
+        corners: Vector3[]
+    ): number {
+        let r2 = 0;
+        for (const c of corners) {
+            const dx = c.x - patchCenter.x;
+            const dy = c.y - patchCenter.y;
+            const dz = c.z - patchCenter.z;
+            const d2 = dx * dx + dy * dy + dz * dz;
+            if (d2 > r2) r2 = d2;
+        }
+        const sphereRadius = Math.sqrt(r2);
+
+        const dc = Vector3.Distance(camPos, patchCenter);
+        return Math.max(0, dc - sphereRadius);
+    }
+
+    /**
+     * Computes Screen-Space Error (SSE) in pixels.
+     *
+     * SSE_px ≈ (geometricError / distanceToPatch) * K
+     * where K = viewportHeight / (2 * tan(fov/2))
+     *
+     * geometricError is approximated from patch size and mesh resolution.
+     */
+    private computeSSEPx(
         camera: OriginCamera,
-        debugMode: boolean = false
-    ): Promise<void> {
+        distanceToPatch: number,
+        corners: Vector3[]
+    ): number {
+        const engine = this.scene.getEngine();
+        const viewportH = engine.getRenderHeight(true);
+
+        // Projection factor (pixels per world-unit at distance 1)
+        const K = viewportH / (2 * Math.tan(camera.fov * 0.5));
+
+        // Approximate geometric error: patch diameter / grid resolution (scaled empirically)
+        const patchSize = this.estimatePatchWorldSize(corners);
+        const geometricError = (patchSize / this.resolution) * ChunkTree.geomErrorScale;
+
+        const d = Math.max(distanceToPatch, ChunkTree.minDistEpsilon);
+        return (geometricError / d) * K;
+    }
+
+    /**
+     * Asynchronously updates the Level of Detail (LOD) for this node.
+     *
+     * Uses SSE (screen-space error) to decide whether to split into children or render the current mesh.
+     *
+     * @param camera - Camera used for LOD decision
+     * @param debugMode - Optional debug flag (not used here, kept for compatibility)
+     */
+    async updateLOD(camera: OriginCamera, debugMode: boolean = false): Promise<void> {
         if (this.updating) return;
         this.updating = true;
 
         try {
             const { uMin, uMax, vMin, vMax } = this.bounds;
             const center = this.getCenterChunk();
+
+            // Compute the 4 patch corner positions on the base sphere (radius only)
             const cornersUV = [
                 { u: uMin, v: vMin },
                 { u: uMin, v: vMax },
@@ -298,23 +372,21 @@ export class ChunkTree {
 
             const corners = cornersUV.map(({ u, v }) => {
                 const posCube = Terrain.mapUVtoCube(u, v, this.face);
-                return this.parentEntity.doublepos.add(
-                    posCube.normalize().scale(this.radius)
-                );
+                return this.parentEntity.doublepos.add(posCube.normalize().scale(this.radius));
             });
 
-            const distances = [
-                Vector3.Distance(center, camera.doublepos),
-                ...corners.map((corner) =>
-                    Vector3.Distance(corner, camera.doublepos)
-                )
-            ];
+            // Use bounding sphere distance instead of "min distance to center/corners"
+            const distanceToPatch = this.distanceToPatchBoundingSphere(
+                camera.doublepos,
+                center,
+                corners
+            );
 
-            const minDistance = Math.min(...distances);
-            const lodRange = this.radius * 4 * Math.pow(0.5, this.level);
+            // SSE decision in pixels
+            const ssePx = this.computeSSEPx(camera, distanceToPatch, corners);
 
-            if (minDistance < lodRange && this.level < this.maxLevel) {
-                // If chunk is close and can be subdivided, process children
+            // Split when error is above threshold (and we can still increase detail)
+            if (ssePx > ChunkTree.sseThresholdPx && this.level < this.maxLevel) {
                 if (!this.children) {
                     this.subdivide();
 
@@ -337,41 +409,29 @@ export class ChunkTree {
                         })
                     );
 
+                    // Enable children meshes
                     for (const child of this.children!) {
-                        if (child.mesh) {
-                            child.mesh.setEnabled(true);
-                        }
+                        if (child.mesh) child.mesh.setEnabled(true);
                     }
 
-                    if (this.mesh) {
-                        this.mesh.setEnabled(false);
-                    }
-
-                    // const semaphore = new DeleteSemaphore(this.children!, [
-                    //     this,
-                    // ]);
-                    // semaphore.update();
+                    // Disable current mesh to avoid overlap
+                    if (this.mesh) this.mesh.setEnabled(false);
                 }
 
-                // Disable current mesh to prevent overlap with children
-                if (this.mesh) {
-                    this.mesh.setEnabled(false);
-                }
+                // Ensure current mesh stays disabled while children are active
+                if (this.mesh) this.mesh.setEnabled(false);
 
-                await Promise.all(
-                    this.children!.map((child) =>
-                        child.updateLOD(camera, debugMode)
-                    )
-                );
+                // Recurse on children
+                await Promise.all(this.children!.map((child) => child.updateLOD(camera, debugMode)));
             } else {
+                // We are fine at current level (or reached max level)
+
                 if (this.mesh && this.currentLODLevel === this.level) {
-                    // Mesh is already up to date for this level
+                    // Mesh already up-to-date
                 } else if (!this.mesh) {
+                    // Mesh does not exist yet: build it (or load from precompute cache)
                     const key = this.getChunkCacheKey();
-                    if (
-                        this.precomputeEnabled &&
-                        precomputedChunkCache.has(key)
-                    ) {
+                    if (this.precomputeEnabled && precomputedChunkCache.has(key)) {
                         this.mesh = await precomputedChunkCache.get(key)!;
                     } else {
                         this.mesh = await this.chunkForge.worker(
@@ -388,14 +448,11 @@ export class ChunkTree {
                             center
                         );
                     }
-
                     this.currentLODLevel = this.level;
                 } else {
-                    // LOD level has changed: create new mesh immediately,
-                    // wait for it to render then dispose the old mesh
+                    // Mesh exists but considered out-of-date: rebuild and swap
                     const oldMesh = this.mesh;
-
-                    this.meshPromise = null; // Reset cache to force new mesh creation
+                    this.meshPromise = null;
 
                     this.mesh = await this.chunkForge.worker(
                         {
@@ -413,30 +470,23 @@ export class ChunkTree {
 
                     this.mesh.setEnabled(true);
 
-                    // Wait for new mesh to render
+                    // Wait for one frame so the new mesh is rendered, then dispose old mesh
                     await new Promise<void>((resolve) => {
-                        const observer = this.scene.onAfterRenderObservable.add(
-                            () => {
-                                this.scene.onAfterRenderObservable.remove(
-                                    observer
-                                );
-                                resolve();
-                            }
-                        );
+                        const observer = this.scene.onAfterRenderObservable.add(() => {
+                            this.scene.onAfterRenderObservable.remove(observer);
+                            resolve();
+                        });
                     });
 
-                    // Once new mesh is rendered, dispose the old mesh
                     oldMesh.dispose();
                     this.currentLODLevel = this.level;
                 }
 
-                if (this.children) {
-                    this.disposeChildren();
-                }
+                // If we were previously split, merge back by disposing children
+                if (this.children) this.disposeChildren();
 
-                if (this.mesh) {
-                    this.mesh.setEnabled(true);
-                }
+                // Ensure current mesh is enabled
+                if (this.mesh) this.mesh.setEnabled(true);
             }
         } finally {
             this.updating = false;
@@ -444,16 +494,11 @@ export class ChunkTree {
     }
 
     /**
-     * Updates the debugLOD uniform on the shader material of this chunk and its children
-     *
-     * @param debugLOD - New value for debugLOD (true: enabled, false: disabled)
+     * Updates the debugLOD uniform on the shader material of this chunk and its children.
      */
     public updateDebugLOD(debugLOD: boolean): void {
         if (this.mesh && this.mesh.material) {
-            (this.mesh.material as ShaderMaterial).setInt(
-                'debugLOD',
-                debugLOD ? 1 : 0
-            );
+            (this.mesh.material as ShaderMaterial).setInt('debugLOD', debugLOD ? 1 : 0);
         }
         if (this.children) {
             this.children.forEach((child) => child.updateDebugLOD(debugLOD));
