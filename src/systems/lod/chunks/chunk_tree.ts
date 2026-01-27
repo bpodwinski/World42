@@ -1,4 +1,12 @@
-import { Scene, Mesh, Vector3, ShaderMaterial } from '@babylonjs/core';
+import {
+    Scene,
+    Mesh,
+    Vector3,
+    ShaderMaterial,
+    MeshBuilder,
+    StandardMaterial,
+    Color3
+} from '@babylonjs/core';
 import { ChunkForge } from './chunk_forge';
 import { DeleteSemaphore } from '../workers/delete_semaphore';
 import { io, Socket } from 'socket.io-client';
@@ -81,6 +89,14 @@ export class ChunkTree {
     // Debug mode flag (passed to the shader)
     public debugLOD: boolean;
     public static debugLODEnabled: boolean = false;
+
+    /**
+     * Bounding sphere debug rendering
+     *  - Set ChunkTree.showBoundingSpheres = true to display
+     *  - Each node will draw a wireframe sphere of its current bounding sphere
+     */
+    public static showBoundingSpheres: boolean = false;
+    private debugBoundingSphereMesh: Mesh | null = null;
 
     /**
      * Creates a new ChunkTree node
@@ -245,6 +261,7 @@ export class ChunkTree {
      */
     deactivate(): void {
         if (this.mesh) this.mesh.setEnabled(false);
+        if (this.debugBoundingSphereMesh) this.debugBoundingSphereMesh.setEnabled(false);
         if (this.children) this.children.forEach((child) => child.deactivate());
     }
 
@@ -252,6 +269,10 @@ export class ChunkTree {
      * Disposes the current node mesh and recursively disposes its children.
      */
     dispose(): void {
+        if (this.debugBoundingSphereMesh) {
+            this.debugBoundingSphereMesh.dispose();
+            this.debugBoundingSphereMesh = null;
+        }
         if (this.mesh) {
             this.mesh.dispose();
             this.mesh = null;
@@ -291,6 +312,44 @@ export class ChunkTree {
     }
 
     /**
+     * Creates/updates a wireframe sphere representing this chunk bounding sphere.
+     * Safe to call every frame while debugging.
+     */
+    private updateBoundingSphereDebug(center: Vector3, radius: number): void {
+        if (!ChunkTree.showBoundingSpheres) {
+            if (this.debugBoundingSphereMesh) this.debugBoundingSphereMesh.setEnabled(false);
+            return;
+        }
+
+        if (!this.debugBoundingSphereMesh) {
+            const name = `dbg_bs_${this.face}_${this.level}_${Math.random().toString(36).slice(2)}`;
+
+            this.debugBoundingSphereMesh = MeshBuilder.CreateSphere(
+                name,
+                { diameter: 2 * radius, segments: 12 },
+                this.scene
+            );
+
+            const mat = new StandardMaterial(`${name}_mat`, this.scene);
+            mat.wireframe = true;
+            mat.emissiveColor = new Color3(0, 1, 0);
+            mat.disableLighting = true;
+
+            this.debugBoundingSphereMesh.material = mat;
+            this.debugBoundingSphereMesh.isPickable = false;
+            this.debugBoundingSphereMesh.alwaysSelectAsActiveMesh = true;
+        } else {
+            // Rescale existing unit sphere to the exact radius (cheap, avoids rebuild)
+            const current = this.debugBoundingSphereMesh.getBoundingInfo().boundingSphere.radius;
+            const scale = current > 0 ? radius / current : 1;
+            this.debugBoundingSphereMesh.scaling.set(scale, scale, scale);
+        }
+
+        this.debugBoundingSphereMesh.position.copyFrom(center);
+        this.debugBoundingSphereMesh.setEnabled(true);
+    }
+
+    /**
      * Computes camera-to-patch distance using a bounding sphere.
      *
      * distance = max(0, distance(camera, sphereCenter) - sphereRadius)
@@ -299,12 +358,14 @@ export class ChunkTree {
      * - sphereRadius: max distance from center to corners (conservative)
      *
      * This is more stable than using min(center/corners distance), especially near grazing angles.
+     *
+     * Returns both distance and radius (radius is useful for debug rendering).
      */
     private distanceToPatchBoundingSphere(
         camPos: Vector3,
         patchCenter: Vector3,
         corners: Vector3[]
-    ): number {
+    ): { distance: number; radius: number } {
         let r2 = 0;
         for (const c of corners) {
             const dx = c.x - patchCenter.x;
@@ -316,7 +377,9 @@ export class ChunkTree {
         const sphereRadius = Math.sqrt(r2);
 
         const dc = Vector3.Distance(camPos, patchCenter);
-        return Math.max(0, dc - sphereRadius);
+        const distance = Math.max(0, dc - sphereRadius);
+
+        return { distance, radius: sphereRadius };
     }
 
     /**
@@ -376,11 +439,12 @@ export class ChunkTree {
             });
 
             // Use bounding sphere distance instead of "min distance to center/corners"
-            const distanceToPatch = this.distanceToPatchBoundingSphere(
-                camera.doublepos,
-                center,
-                corners
-            );
+            const { distance: distanceToPatch, radius: bsRadius } =
+                this.distanceToPatchBoundingSphere(camera.doublepos, center, corners);
+
+            // Debug: draw bounding sphere (wireframe)
+            const centerRS = this.camera.toRenderSpace(center);
+            this.updateBoundingSphereDebug(centerRS, bsRadius);
 
             // SSE decision in pixels
             const ssePx = this.computeSSEPx(camera, distanceToPatch, corners);

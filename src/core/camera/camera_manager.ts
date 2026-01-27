@@ -212,6 +212,25 @@ export class OriginCamera extends UniversalCamera {
             );
         }
     }
+
+    /**
+     * Converts a high-precision world(sim) position to render-space (floating origin) position.
+     * render = world - camera.doublepos
+     */
+    public toRenderSpace(worldSim: Vector3, out: Vector3 = new Vector3()): Vector3 {
+        worldSim.subtractToRef(this.doublepos, out);
+        return out;
+    }
+
+    /**
+     * Converts a render-space position back to high-precision world(sim) position.
+     * world = render + camera.doublepos
+     */
+    public toWorldSpace(renderPos: Vector3, out: Vector3 = new Vector3()): Vector3 {
+        renderPos.addToRef(this.doublepos, out);
+        return out;
+    }
+
 }
 
 /**

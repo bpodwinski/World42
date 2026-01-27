@@ -70,16 +70,16 @@ export class FloatingCameraScene {
             camera,
             loadedSystem,
             {
-                maxLevel: 12,
-                resolution: 40,
+                maxLevel: 14,
+                resolution: 32,
             }
         );
 
         precomputeAndRunLODLoop(scene, camera, allCDLOD);
 
         // RACCOURCI: T pour se téléporter
-        window.addEventListener('keydown', (ev) => {
-            if (ev.key.toLowerCase() === 't') {
+        window.addEventListener('keydown', (e) => {
+            if (e.key.toLowerCase() === 't') {
                 const pluto = systemBodies.get('Pluto');
                 if (!pluto) {
                     console.warn("[teleport] La planète 'Pluto' est introuvable dans systemBodies.");
