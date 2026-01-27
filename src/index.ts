@@ -23,7 +23,7 @@ window.addEventListener("DOMContentLoaded", async () => {
             }
         }
 
-        if (e.key === "l") {
+        if (e.key === "m") {
             ChunkTree.debugLODEnabled = !ChunkTree.debugLODEnabled;
         }
     });

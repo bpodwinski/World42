@@ -6,7 +6,9 @@ import {
     Texture,
     StandardMaterial,
     CubeTexture,
-    WebGPUEngine
+    WebGPUEngine,
+    Viewport,
+    UniversalCamera
 } from '@babylonjs/core';
 import '@babylonjs/core/Materials/Textures/Loaders/ktxTextureLoader';
 import '@babylonjs/core/Debug/debugLayer';
@@ -51,11 +53,11 @@ export class FloatingCameraScene {
         let planetTarget = body.node.position.clone();
         planetTarget.y += body.diameter * 0.52;
 
-        let camera = new OriginCamera('camera', planetTarget, scene);
+        let camera = new OriginCamera('camera_player', planetTarget, scene);
         camera.debugMode = true;
         camera.minZ = 0.001;
         camera.maxZ = 1_000_000;
-        camera.fov = 1.2;
+        camera.fov = 0.8;
         camera.checkCollisions = true;
         camera.applyGravity = false;
         camera.ellipsoid = new Vector3(0.01, 0.01, 0.01);
@@ -64,6 +66,53 @@ export class FloatingCameraScene {
 
         const control = new MouseSteerControlManager(camera, scene, canvas);
         control.gui = gui;
+
+        // --- Debug camera (n'influence pas le LOD) -----------------------
+        const debugCam = new UniversalCamera('debugCam', Vector3.Zero(), scene);
+        debugCam.minZ = camera.minZ;
+        debugCam.maxZ = camera.maxZ;
+        debugCam.fov = camera.fov;
+        debugCam.inputs.clear(); // on la contrôle manuellement (optionnel)
+
+        // Position "monde" (double precision) pour la debug cam
+        let debugDoublePos = camera.doublepos.clone().add(new Vector3(0, 0, body.diameter * 1.5));
+        let debugDoubleTgt = body.node.position.clone();
+
+        // Affichage en picture-in-picture (en haut à droite)
+        camera.viewport = new Viewport(0, 0, 1, 1);
+        debugCam.viewport = new Viewport(0.5, 0.5, 0.5, 0.5);
+        scene.activeCameras = [camera, debugCam];
+
+        // Mise à jour de la debugCam en render-space via l'origine (floating origin) de "camera"
+        const tmpTgtRender = new Vector3();
+        scene.onBeforeRenderObservable.add(() => {
+            // renderPos = worldPos - camera.doublepos
+            camera.toRenderSpace(debugDoublePos, debugCam.position);
+            camera.toRenderSpace(debugDoubleTgt, tmpTgtRender);
+            debugCam.setTarget(tmpTgtRender);
+        });
+
+        const keys = new Set<string>();
+        window.addEventListener('keydown', (e) => keys.add(e.key.toLowerCase()));
+        window.addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
+
+        scene.onBeforeRenderObservable.add(() => {
+            const dt = engine.getDeltaTime() / 1000;
+            const speed = body.diameter * 0.2 * dt;
+
+            const fwd = debugCam.getDirection(Vector3.Forward());
+            const right = debugCam.getDirection(Vector3.Right());
+            const up = debugCam.getDirection(Vector3.Up());
+
+            if (keys.has('i')) debugDoublePos.addInPlace(fwd.scale(speed));
+            if (keys.has('k')) debugDoublePos.addInPlace(fwd.scale(-speed));
+            if (keys.has('l')) debugDoublePos.addInPlace(right.scale(speed));
+            if (keys.has('j')) debugDoublePos.addInPlace(right.scale(-speed));
+            if (keys.has('u')) debugDoublePos.addInPlace(up.scale(speed));
+            if (keys.has('o')) debugDoublePos.addInPlace(up.scale(-speed));
+
+        });
+
 
         const allCDLOD = createCDLODForAllPlanets(
             scene,
