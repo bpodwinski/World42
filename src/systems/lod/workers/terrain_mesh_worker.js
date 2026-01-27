@@ -503,7 +503,7 @@ function mapUVtoCube(u, v, face) {
  * @param {MessageEvent} event - The message event containing the mesh parameters
  */
 self.onmessage = (event) => {
-    const start = performance.now();
+    //const start = performance.now();
 
     const { bounds, resolution, radius, face, seed } = event.data;
     const noiseInstance = new SimplexNoise(seed || 1);

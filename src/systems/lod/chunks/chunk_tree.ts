@@ -263,7 +263,7 @@ export class ChunkTree {
     }
 
     // --- SSE tuning knobs (adjust to taste)
-    public static sseThresholdPx = 6.0;   // 1..3 = very detailed, 3..6 = better perf
+    public static sseThresholdPx = 10.0;   // 1..3 = very detailed, 3..6 = better perf
     public static geomErrorScale = 0.6;   // empirical scale factor (depends on terrain)
     public static minDistEpsilon = 1e-3;  // avoids division by zero
 

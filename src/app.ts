@@ -70,8 +70,8 @@ export class FloatingCameraScene {
             camera,
             loadedSystem,
             {
-                maxLevel: 12,
-                resolution: 40,
+                maxLevel: 11,
+                resolution: 32,
             }
         );
 
