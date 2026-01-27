@@ -26,41 +26,41 @@ export function isSphereInFrustum(
 
 /**
  * Horizon culling on a planet.
- * camPos / planetCenter / patchCenter are in world(sim) space (doublepos space).
+ * camPos / planetCenter / chunkCenter are in world(sim) space (doublepos space).
  *
- * Returns true if patch is potentially visible above the horizon.
- * 
+ * Returns true if chunk is potentially visible above the horizon.
+ *
  * Source: https://cesium.com/blog/2013/04/25/horizon-culling/
  */
 export function horizonCulling(
     camPos: Vector3,
     planetCenter: Vector3,
     planetRadius: number,
-    patchCenter: Vector3,
-    patchBoundingRadius: number
+    chunkCenter: Vector3,
+    chunkBoundingRadius: number
 ): boolean {
     const VC = camPos.subtract(planetCenter);
     const d = VC.length();
 
-    // Camera inside/on planet: disable horizon culling
-    if (d <= planetRadius) return true;
+    // Camera inside planet
+    if (d <= planetRadius) return false;
 
     const dirCam = VC.scale(1 / d);
 
-    const PC = patchCenter.subtract(planetCenter);
-    const pcLen = PC.length() || 1;
-    const dirPatch = PC.scale(1 / pcLen);
+    const CC = chunkCenter.subtract(planetCenter);
+    const ccLen = CC.length() || 1;
+    const dirChunk = CC.scale(1 / ccLen);
 
     // Horizon half-angle alpha
     const cosAlpha = planetRadius / d; // (0..1)
     const alpha = Math.acos(Math.min(1, Math.max(0, cosAlpha)));
 
-    // Patch angular radius beta (conservative)
-    const s = patchBoundingRadius / planetRadius;
+    // Chunk angular radius beta (conservative)
+    const s = chunkBoundingRadius / planetRadius;
     const beta = Math.asin(Math.min(1, Math.max(0, s)));
 
-    // Angle between camera direction and patch direction
-    const dot = Vector3.Dot(dirCam, dirPatch);
+    // Angle between camera direction and chunk direction
+    const dot = Vector3.Dot(dirCam, dirChunk);
     const angle = Math.acos(Math.min(1, Math.max(-1, dot)));
 
     return angle <= alpha + beta;
