@@ -498,7 +498,7 @@ export class ChunkTree {
                                     level: child.level,
                                     maxLevel: child.maxLevel
                                 },
-                                this.camera.doublepos,
+                                camera.doublepos,
                                 child.parentEntity,
                                 child.getCenterChunk()
                             );
@@ -539,7 +539,7 @@ export class ChunkTree {
                                 level: this.level,
                                 maxLevel: this.maxLevel
                             },
-                            this.camera.doublepos,
+                            camera.doublepos,
                             this.parentEntity,
                             center
                         );
@@ -559,7 +559,7 @@ export class ChunkTree {
                             level: this.level,
                             maxLevel: this.maxLevel
                         },
-                        this.camera.doublepos,
+                        camera.doublepos,
                         this.parentEntity,
                         center
                     );

@@ -309,7 +309,7 @@ function computeChunkMeshData(bounds, resolution, radius, face, noise) {
     const baseAmplitude = 4.0; // Amplitude de base
     const lacunarity = 2.5; // Multiplie la fréquence d'octave en octave
     const persistence = 0.5; // Multiplie l'amplitude d'octave en octave
-    const globalTerrainAmplitude = 120.0; // Amplitude globale du relief
+    const globalTerrainAmplitude = 0.0; // Amplitude globale du relief
 
     // Calcul des angles U et V
     const angleUMin = Math.atan(bounds.uMin);
@@ -339,6 +339,7 @@ function computeChunkMeshData(bounds, resolution, radius, face, noise) {
     let maxDist2 = 0;
     let minPlanetRadius = Infinity;
     let maxPlanetRadius = -Infinity;
+    let meanPlanetRadius = radius;
 
     // Étape 1 : Générer les positions et UVs
     for (let i = 0; i <= res; i++) {
@@ -379,13 +380,6 @@ function computeChunkMeshData(bounds, resolution, radius, face, noise) {
             posSphere = posSphere.scale(radius + elevation);
 
             verts.push(posSphere);
-
-            // Bounding sphere autour du centre local (base sphere)
-            const dx = posSphere.x - centerLocal.x;
-            const dy = posSphere.y - centerLocal.y;
-            const dz = posSphere.z - centerLocal.z;
-            const d2 = dx * dx + dy * dy + dz * dz;
-            if (d2 > maxDist2) maxDist2 = d2;
 
             // Min/Max rayon (optionnel, utile debug)
             const pr = radius + elevation;
@@ -485,11 +479,27 @@ function computeChunkMeshData(bounds, resolution, radius, face, noise) {
         }
     }
 
+    // Centre "tight" au rayon moyen du patch (plus proche du relief)
+    meanPlanetRadius = 0.5 * (minPlanetRadius + maxPlanetRadius);
+    const centerLocalTight = centerLocal.normalize().scale(meanPlanetRadius);
+
+    // Bounding sphere autour du centre tight
+    let maxDist2Tight = 0;
+    for (let k = 0; k < verts.length; k++) {
+        const p = verts[k];
+        const dx = p.x - centerLocalTight.x;
+        const dy = p.y - centerLocalTight.y;
+        const dz = p.z - centerLocalTight.z;
+        const d2 = dx * dx + dy * dy + dz * dz;
+        if (d2 > maxDist2Tight) maxDist2Tight = d2;
+    }
+    const boundingRadiusTight = Math.sqrt(maxDist2Tight);
+
     return {
         positions, indices, normals, uvs,
         boundsInfo: {
-            centerLocal: [centerLocal.x, centerLocal.y, centerLocal.z],
-            boundingRadius: Math.sqrt(maxDist2),
+            centerLocal: [centerLocalTight.x, centerLocalTight.y, centerLocalTight.z],
+            boundingRadius: boundingRadiusTight,
             minPlanetRadius,
             maxPlanetRadius
         }

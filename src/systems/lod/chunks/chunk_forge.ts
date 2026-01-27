@@ -1,4 +1,4 @@
-import { Scene, Mesh, Vector3 } from '@babylonjs/core';
+import { Scene, Mesh, Vector3, AbstractMesh } from '@babylonjs/core';
 import { Face, ChunkTree, Bounds } from './chunk_tree';
 import { Socket } from 'socket.io-client';
 import { Terrain } from '../../../game_objects/planets/rocky_planet/terrain';
@@ -102,7 +102,32 @@ export class ChunkForge implements IChunkForge {
             false,
             ChunkTree.debugLODEnabled
         );
+
         terrainMesh.alwaysSelectAsActiveMesh = true;
+
+        // Distance "propre" (utilise boundsInfo du worker si dispo)
+        let centerWorld = center;
+        const bi = meshData?.boundsInfo;
+        if (bi?.centerLocal) {
+            const c = Vector3.FromArray(bi.centerLocal);
+            centerWorld = parentEntity.doublepos.add(c);
+        }
+
+        const dist = Vector3.Distance(centerWorld, cameraPosition);
+        const far = dist > params.radius * 0.01; // à ajuster selon ton échelle
+
+        // Rendu proches d'abord, puis lointains (pour que le depth buffer serve d'occluder)
+        terrainMesh.renderingGroupId = far ? 1 : 0;
+
+        // Occlusion queries seulement pour les lointains
+        if (far) {
+            terrainMesh.occlusionType = AbstractMesh.OCCLUSION_TYPE_OPTIMISTIC;
+            terrainMesh.occlusionQueryAlgorithmType = AbstractMesh.OCCLUSION_ALGORITHM_TYPE_CONSERVATIVE;
+            terrainMesh.occlusionRetryCount = 2;
+        } else {
+            terrainMesh.occlusionType = AbstractMesh.OCCLUSION_TYPE_NONE;
+        }
+
         return terrainMesh;
     }
 
