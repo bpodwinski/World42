@@ -1,4 +1,4 @@
-import { Scene, Mesh, Vector3, ShaderMaterial } from '@babylonjs/core';
+import { Scene, Mesh, Vector3, ShaderMaterial, Plane } from '@babylonjs/core';
 import { ChunkForge } from './chunk_forge';
 import { DeleteSemaphore } from '../workers/delete_semaphore';
 import { io, Socket } from 'socket.io-client';
@@ -348,6 +348,16 @@ export class ChunkTree {
         return (geometricError / d) * K;
     }
 
+    private isSphereInFrustum(centerRender: Vector3, radius: number, planes: Plane[]): boolean {
+        // Un point est dehors si pour une plane: n·p + d < -radius
+        for (const p of planes) {
+            if (p.normal.x * centerRender.x + p.normal.y * centerRender.y + p.normal.z * centerRender.z + p.d < -radius) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     private isPatchVisibleByHorizon(
         camPos: Vector3,
         planetCenter: Vector3,
@@ -414,6 +424,18 @@ export class ChunkTree {
             // Use bounding sphere distance instead of "min distance to center/corners"
             const { distance: distanceToPatch, radius: bsRadius } =
                 this.distanceToPatchBoundingSphere(camera.doublepos, center, corners);
+
+            // Frustum culling
+            const frustumPlanes: Plane[] = Array.from({ length: 6 }, () => new Plane(0, 0, 0, 0));
+            camera.getFrustumPlanesToRef(frustumPlanes);
+
+            const centerRender = new Vector3();
+            camera.toRenderSpace(center, centerRender);
+
+            if (!this.isSphereInFrustum(centerRender, bsRadius, frustumPlanes)) {
+                this.deactivate();
+                return;
+            }
 
             const planetCenter = this.parentEntity.doublepos;
 

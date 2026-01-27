@@ -6,6 +6,8 @@ import {
     MeshBuilder,
     Color3,
     LinesMesh,
+    Frustum,
+    Plane,
 } from "@babylonjs/core";
 import { ScaleManager } from "../scale/scale_manager";
 
@@ -211,6 +213,11 @@ export class OriginCamera extends UniversalCamera {
                 scene
             );
         }
+    }
+
+    public getFrustumPlanesToRef(out: Plane[]): Plane[] {
+        Frustum.GetPlanesToRef(this.getTransformationMatrix(), out);
+        return out;
     }
 
     /**
