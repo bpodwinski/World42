@@ -136,10 +136,16 @@ export class ChunkTree {
      */
     private getCenterChunk(): Vector3 {
         const { uMin, uMax, vMin, vMax } = this.bounds;
-        const uCenter = (uMin + uMax) / 2;
-        const vCenter = (vMin + vMax) / 2;
-        const posCube = Terrain.mapUVtoCube(uCenter, vCenter, this.face);
 
+        const angleUMin = Math.atan(uMin);
+        const angleUMax = Math.atan(uMax);
+        const angleVMin = Math.atan(vMin);
+        const angleVMax = Math.atan(vMax);
+
+        const uCenter = Math.tan((angleUMin + angleUMax) * 0.5);
+        const vCenter = Math.tan((angleVMin + angleVMax) * 0.5);
+
+        const posCube = Terrain.mapUVtoCube(uCenter, vCenter, this.face);
         return this.parentEntity.doublepos.add(posCube.normalize().scale(this.radius));
     }
 
@@ -422,34 +428,55 @@ export class ChunkTree {
             });
 
             // Use bounding sphere distance instead of "min distance to center/corners"
-            const { distance: distanceToPatch, radius: bsRadius } =
+            // Bounding sphere "fallback" basé sur la sphère de base (sans relief)
+            const { radius: bsRadiusFallback } =
                 this.distanceToPatchBoundingSphere(camera.doublepos, center, corners);
-
-            // Frustum culling
-            const frustumPlanes: Plane[] = Array.from({ length: 6 }, () => new Plane(0, 0, 0, 0));
-            camera.getFrustumPlanesToRef(frustumPlanes);
-
-            const centerRender = new Vector3();
-            camera.toRenderSpace(center, centerRender);
-
-            if (!this.isSphereInFrustum(centerRender, bsRadius, frustumPlanes)) {
-                this.deactivate();
-                return;
-            }
 
             const planetCenter = this.parentEntity.doublepos;
 
+            // --- Bounds propres (si mesh déjà généré) -------------------------
+            let centerWorld = center;               // fallback
+            let radiusForCull = bsRadiusFallback;   // fallback
+
+            const bi = (this.mesh as any)?.metadata?.boundsInfo;
+            const hasAccurateBounds = bi?.centerLocal && typeof bi.boundingRadius === "number";
+
+            if (hasAccurateBounds) {
+                const centerLocal = Vector3.FromArray(bi.centerLocal); // local planète (origine planète)
+                centerWorld = planetCenter.add(centerLocal);           // world/double
+                radiusForCull = bi.boundingRadius;                     // rayon réel (relief inclus)
+            }
+
+            // --- Frustum culling : recommandé seulement si bounds fiables -------
+            // (sinon risque de faux négatifs -> trous proches caméra)
+            if (hasAccurateBounds) {
+                const frustumPlanes: Plane[] = Array.from({ length: 6 }, () => new Plane(0, 0, 0, 0));
+                camera.getFrustumPlanesToRef(frustumPlanes);
+
+                const centerRender = new Vector3();
+                camera.toRenderSpace(centerWorld, centerRender);
+
+                if (!this.isSphereInFrustum(centerRender, radiusForCull, frustumPlanes)) {
+                    this.deactivate();
+                    return;
+                }
+            }
+
+            // --- Horizon culling (utilise aussi les bounds propres) ------------
             if (!this.isPatchVisibleByHorizon(
                 camera.doublepos,
                 planetCenter,
                 this.radius,
-                center,
-                bsRadius
+                centerWorld,
+                radiusForCull
             )) {
-                // Hidden by planet curvature -> do not load/split
                 this.deactivate();
                 return;
             }
+
+            // --- Distance pour SSE cohérente avec radiusForCull ----------------
+            const dc = Vector3.Distance(camera.doublepos, centerWorld);
+            const distanceToPatch = Math.max(0, dc - radiusForCull);
 
             // SSE decision in pixels
             const ssePx = this.computeSSEPx(camera, distanceToPatch, corners);

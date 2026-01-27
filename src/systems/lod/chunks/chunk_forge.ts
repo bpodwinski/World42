@@ -84,6 +84,11 @@ export class ChunkForge implements IChunkForge {
             params.face,
             params.level
         );
+
+        terrainMesh.metadata = terrainMesh.metadata ?? {};
+        if (meshData?.boundsInfo) {
+            terrainMesh.metadata.boundsInfo = meshData.boundsInfo;
+        }
         terrainMesh.parent = parentEntity;
         terrainMesh.checkCollisions = true;
 
@@ -94,7 +99,7 @@ export class ChunkForge implements IChunkForge {
             cameraPosition,
             params.radius,
             center,
-            true,
+            false,
             ChunkTree.debugLODEnabled
         );
         terrainMesh.alwaysSelectAsActiveMesh = true;

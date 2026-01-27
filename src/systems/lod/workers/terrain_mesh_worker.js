@@ -309,7 +309,7 @@ function computeChunkMeshData(bounds, resolution, radius, face, noise) {
     const baseAmplitude = 4.0; // Amplitude de base
     const lacunarity = 2.5; // Multiplie la fréquence d'octave en octave
     const persistence = 0.5; // Multiplie l'amplitude d'octave en octave
-    const globalTerrainAmplitude = 40.0; // Amplitude globale du relief
+    const globalTerrainAmplitude = 120.0; // Amplitude globale du relief
 
     // Calcul des angles U et V
     const angleUMin = Math.atan(bounds.uMin);
@@ -318,6 +318,27 @@ function computeChunkMeshData(bounds, resolution, radius, face, noise) {
     const angleVMax = Math.atan(bounds.vMax);
 
     const verts = [];
+
+    function computePatchCenterLocal(bounds, radius, face) {
+        const angleUMin = Math.atan(bounds.uMin);
+        const angleUMax = Math.atan(bounds.uMax);
+        const angleVMin = Math.atan(bounds.vMin);
+        const angleVMax = Math.atan(bounds.vMax);
+
+        const angleUCenter = (angleUMin + angleUMax) * 0.5;
+        const angleVCenter = (angleVMin + angleVMax) * 0.5;
+
+        const uCenter = Math.tan(angleUCenter);
+        const vCenter = Math.tan(angleVCenter);
+
+        const posCube = mapUVtoCube(uCenter, vCenter, face);
+        return posCube.normalize().scale(radius); // centre "base sphere" local (origine planète)
+    }
+
+    const centerLocal = computePatchCenterLocal(bounds, radius, face);
+    let maxDist2 = 0;
+    let minPlanetRadius = Infinity;
+    let maxPlanetRadius = -Infinity;
 
     // Étape 1 : Générer les positions et UVs
     for (let i = 0; i <= res; i++) {
@@ -358,6 +379,19 @@ function computeChunkMeshData(bounds, resolution, radius, face, noise) {
             posSphere = posSphere.scale(radius + elevation);
 
             verts.push(posSphere);
+
+            // Bounding sphere autour du centre local (base sphere)
+            const dx = posSphere.x - centerLocal.x;
+            const dy = posSphere.y - centerLocal.y;
+            const dz = posSphere.z - centerLocal.z;
+            const d2 = dx * dx + dy * dy + dz * dz;
+            if (d2 > maxDist2) maxDist2 = d2;
+
+            // Min/Max rayon (optionnel, utile debug)
+            const pr = radius + elevation;
+            if (pr < minPlanetRadius) minPlanetRadius = pr;
+            if (pr > maxPlanetRadius) maxPlanetRadius = pr;
+
             positions.push(posSphere.x, posSphere.y, posSphere.z);
 
             // Calcul de la normale (on repart du centre de la sphère vers l'extérieur).
@@ -451,7 +485,15 @@ function computeChunkMeshData(bounds, resolution, radius, face, noise) {
         }
     }
 
-    return { positions, indices, normals, uvs };
+    return {
+        positions, indices, normals, uvs,
+        boundsInfo: {
+            centerLocal: [centerLocal.x, centerLocal.y, centerLocal.z],
+            boundingRadius: Math.sqrt(maxDist2),
+            minPlanetRadius,
+            maxPlanetRadius
+        }
+    };
 }
 
 /**

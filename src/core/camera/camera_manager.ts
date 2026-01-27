@@ -216,7 +216,9 @@ export class OriginCamera extends UniversalCamera {
     }
 
     public getFrustumPlanesToRef(out: Plane[]): Plane[] {
+        while (out.length < 6) out.push(new Plane(0, 0, 0, 0));
         Frustum.GetPlanesToRef(this.getTransformationMatrix(), out);
+
         return out;
     }
 
