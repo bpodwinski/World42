@@ -203,7 +203,7 @@ export function createCDLODForAllPlanets(
                     face,
                     ent,
                     false,
-                    false
+                    true
                 )
         );
 
@@ -224,8 +224,9 @@ export async function precomputeAndRunLODLoop(
 
     async function loop() {
         while (true) {
-            for (const c of allChunks) {
-                c.updateLOD(camera, false).catch(console.error);
+            for (const chunk of allChunks) {
+                chunk.updateLOD(camera, false).catch(console.error);
+                chunk.updateDebugLOD(ChunkTree.debugLODEnabled);
             }
             await new Promise<void>(r => requestAnimationFrame(() => r()));
         }
