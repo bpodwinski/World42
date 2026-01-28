@@ -5,6 +5,7 @@ import { Terrain } from '../../../game_objects/planets/rocky_planet/terrain';
 import { Bounds, Face } from '../types';
 import { globalWorkerPool } from '../workers/global_worker_pool';
 import { computeSSEPx, distanceToPatchBoundingSphere, isPatchVisibleByHorizon, isSphereInFrustum } from './chunk_metrics';
+import { frustumCulling } from './frustum_culling';
 
 /**
  * ChunkTree represents a terrain chunk node and manages hierarchical subdivision (quadtree)
@@ -335,16 +336,16 @@ export class ChunkTree {
                 radiusForCull = bi.boundingRadius; // rayon réel (relief inclus)
             }
 
-            // Frustum culling : recommandé seulement si bounds fiables
-            // (sinon risque de faux négatifs -> trous proches caméra)
+            // Frustum culling
             if (hasAccurateBounds) {
-                const frustumPlanes: Plane[] = Array.from({ length: 6 }, () => new Plane(0, 0, 0, 0));
-                camera.getFrustumPlanesToRef(frustumPlanes);
+                const visible = frustumCulling(
+                    camera,
+                    centerWorld,
+                    radiusForCull,
+                    isSphereInFrustum,
+                );
 
-                const centerRender = new Vector3();
-                camera.toRenderSpace(centerWorld, centerRender);
-
-                if (!isSphereInFrustum(centerRender, radiusForCull, frustumPlanes)) {
+                if (!visible) {
                     this.deactivate();
                     return;
                 }
