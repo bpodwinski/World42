@@ -4,8 +4,9 @@ import { FloatingEntityInterface, OriginCamera } from '../../../core/camera/came
 import { Terrain } from '../../../game_objects/planets/rocky_planet/terrain';
 import { Bounds, Face } from '../types';
 import { globalWorkerPool } from '../workers/global_worker_pool';
-import { computeSSEPx, distanceToPatchBoundingSphere, isPatchVisibleByHorizon, isSphereInFrustum } from './chunk_metrics';
+import { computeSSEPx, distanceToPatchBoundingSphere, isSphereInFrustum } from './chunk_metrics';
 import { createFrustumCullCache, frustumCulling } from './frustum_culling';
+import { horizonCulling } from './horizon_culling';
 
 /**
  * ChunkTree represents a terrain chunk node and manages hierarchical subdivision (quadtree)
@@ -30,6 +31,7 @@ export class ChunkTree {
     face: Face;
     parentEntity: FloatingEntityInterface;
     private frustumCullingEnabled: boolean;
+    private horizonCullingEnabled: boolean;
     private chunkForge: ChunkForge;
 
     // Cache for asynchronous mesh creation to avoid duplicate generation
@@ -71,6 +73,7 @@ export class ChunkTree {
      * @param face - Cube face for the terrain chunk
      * @param parentEntity - Entity to which the mesh is attached (floating origin)
      * @param frustumCullingEnabled - Enable frustum culling
+     * @param horizonCullingEnabled - Enable horizon culling
      * @param precomputeEnabled - Enables/disables precompute mesh caching
      * @param debugLOD - Whether to enable LOD debug mode
      */
@@ -87,6 +90,7 @@ export class ChunkTree {
         parentEntity: FloatingEntityInterface,
         precomputeEnabled: boolean,
         frustumCullingEnabled: boolean = true,
+        horizonCullingEnabled: boolean = true,
         debugLOD: boolean = false
     ) {
         this.scene = scene;
@@ -104,11 +108,16 @@ export class ChunkTree {
         this.debugLOD = debugLOD;
         this.precomputeEnabled = precomputeEnabled;
         this.frustumCullingEnabled = frustumCullingEnabled;
+        this.horizonCullingEnabled = horizonCullingEnabled;
         this.chunkForge = new ChunkForge(this.scene, globalWorkerPool);
     }
 
     public setFrustumCullingEnabled(enabled: boolean): void {
         this.frustumCullingEnabled = enabled;
+    }
+
+    public setHorizonCullingEnabled(enabled: boolean): void {
+        this.horizonCullingEnabled = enabled;
     }
 
     private getPlanetRotationMatrix(): Matrix | null {
@@ -234,6 +243,7 @@ export class ChunkTree {
             this.parentEntity,
             this.precomputeEnabled,
             this.frustumCullingEnabled,
+            this.horizonCullingEnabled,
             this.debugLOD
         );
     }
@@ -365,15 +375,21 @@ export class ChunkTree {
             }
 
             // Horizon culling
-            if (!isPatchVisibleByHorizon(
-                camera.doublepos,
-                planetCenter,
-                this.radius,
-                centerWorld,
-                radiusForCull
-            )) {
-                this.deactivate();
-                return;
+            if (this.horizonCullingEnabled) {
+                if (hasAccurateBounds) {
+                    const visible = horizonCulling(
+                        camera.doublepos,
+                        planetCenter,
+                        this.radius,
+                        centerWorld,
+                        radiusForCull
+                    );
+
+                    if (!visible) {
+                        this.deactivate();
+                        return;
+                    }
+                }
             }
 
             // Distance pour SSE cohérente avec radiusForCull

@@ -205,6 +205,7 @@ export function createCDLODForAllPlanets(
                     ent,
                     false, // precompute
                     true, // frustumCulling
+                    true, // horizonCulling
                     true // debugLOD
                 )
         );
