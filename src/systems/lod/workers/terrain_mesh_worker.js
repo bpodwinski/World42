@@ -302,16 +302,15 @@ function computeChunkMeshData(bounds, resolution, radius, face, noise) {
     const uvs = [];
     const res = resolution;
 
-    // Paramètres que vous ajusterez à votre convenance
-    // ex : multiplier la fréquence de base pour mieux visualiser la différence
-    const octaves = 8; // Nombre d'octaves
-    const baseFrequency = 1.0; // Fréquence de base (on peut monter plus haut)
-    const baseAmplitude = 4.0; // Amplitude de base
-    const lacunarity = 2.5; // Multiplie la fréquence d'octave en octave
-    const persistence = 0.5; // Multiplie l'amplitude d'octave en octave
-    const globalTerrainAmplitude = 10.0; // Amplitude globale du relief
+    // Paramètres terrain
+    const octaves = 8;
+    const baseFrequency = 1.0;
+    const baseAmplitude = 4.0;
+    const lacunarity = 2.5;
+    const persistence = 0.5;
+    const globalTerrainAmplitude = 200.0;
 
-    // Calcul des angles U et V
+    // Angles U/V
     const angleUMin = Math.atan(bounds.uMin);
     const angleUMax = Math.atan(bounds.uMax);
     const angleVMin = Math.atan(bounds.vMin);
@@ -320,50 +319,42 @@ function computeChunkMeshData(bounds, resolution, radius, face, noise) {
     const verts = [];
 
     function computePatchCenterLocal(bounds, radius, face) {
-        const angleUMin = Math.atan(bounds.uMin);
-        const angleUMax = Math.atan(bounds.uMax);
-        const angleVMin = Math.atan(bounds.vMin);
-        const angleVMax = Math.atan(bounds.vMax);
+        const aUMin = Math.atan(bounds.uMin);
+        const aUMax = Math.atan(bounds.uMax);
+        const aVMin = Math.atan(bounds.vMin);
+        const aVMax = Math.atan(bounds.vMax);
 
-        const angleUCenter = (angleUMin + angleUMax) * 0.5;
-        const angleVCenter = (angleVMin + angleVMax) * 0.5;
+        const aUCenter = (aUMin + aUMax) * 0.5;
+        const aVCenter = (aVMin + aVMax) * 0.5;
 
-        const uCenter = Math.tan(angleUCenter);
-        const vCenter = Math.tan(angleVCenter);
+        const uCenter = Math.tan(aUCenter);
+        const vCenter = Math.tan(aVCenter);
 
         const posCube = mapUVtoCube(uCenter, vCenter, face);
-        return posCube.normalize().scale(radius); // centre "base sphere" local (origine planète)
+        return posCube.normalize().scale(radius); // centre "base sphere"
     }
 
     const centerLocal = computePatchCenterLocal(bounds, radius, face);
-    let maxDist2 = 0;
+    const dir = centerLocal.normalize(); // direction patch (unit)
+
     let minPlanetRadius = Infinity;
     let maxPlanetRadius = -Infinity;
 
-    // Étape 1 : Générer les positions et UVs
+    // PASS 1: génère les vertices + min/max radius
     for (let i = 0; i <= res; i++) {
         const angleV = angleVMin + (angleVMax - angleVMin) * (i / res);
 
         for (let j = 0; j <= res; j++) {
             const angleU = angleUMin + (angleUMax - angleUMin) * (j / res);
 
-            // Transform en coordonnées "cube" pour la face donnée
-            const posCube = mapUVtoCube(
-                Math.tan(angleU),
-                Math.tan(angleV),
-                face
-            );
+            const posCube = mapUVtoCube(Math.tan(angleU), Math.tan(angleV), face);
+            let unit = posCube.normalize();
 
-            // Normalise => vecteur unitaire
-            let posSphere = posCube.normalize();
-
-            // --- NOUVEL APPEL AU BRUIT FRACTAL ---
-            // On applique fractalNoise() pour obtenir une valeur entre ~-1 et +1
             const fractalValue = fractalNoise(
                 noise,
-                posSphere.x,
-                posSphere.y,
-                posSphere.z,
+                unit.x,
+                unit.y,
+                unit.z,
                 octaves,
                 baseFrequency,
                 baseAmplitude,
@@ -371,54 +362,51 @@ function computeChunkMeshData(bounds, resolution, radius, face, noise) {
                 persistence
             );
 
-            // On multiplie par l'amplitude globale pour moduler la hauteur.
-            // ex. fractalValue ~ [-1..+1], donc "elevation" ~ [-6..+6] si globalTerrainAmplitude=6
             const elevation = fractalValue * globalTerrainAmplitude;
-
-            // On "scale" le rayon de la planète par cette élévation
-            posSphere = posSphere.scale(radius + elevation);
-
-            verts.push(posSphere);
-
-            // Bounding sphere autour du centre local (base sphere)
-            const dx = posSphere.x - centerLocal.x;
-            const dy = posSphere.y - centerLocal.y;
-            const dz = posSphere.z - centerLocal.z;
-            const d2 = dx * dx + dy * dy + dz * dz;
-            if (d2 > maxDist2) maxDist2 = d2;
-
-            // Min/Max rayon (optionnel, utile debug)
             const pr = radius + elevation;
+
             if (pr < minPlanetRadius) minPlanetRadius = pr;
             if (pr > maxPlanetRadius) maxPlanetRadius = pr;
 
+            const posSphere = unit.scale(pr);
+
+            verts.push(posSphere);
+
             positions.push(posSphere.x, posSphere.y, posSphere.z);
 
-            // Calcul de la normale (on repart du centre de la sphère vers l'extérieur).
-            const adjustedRadius = radius + elevation;
+            // normale "radiale" provisoire (sera écrasée par les normales moyennées plus bas)
             normals.push(
-                posSphere.x / adjustedRadius,
-                posSphere.y / adjustedRadius,
-                posSphere.z / adjustedRadius
+                posSphere.x / pr,
+                posSphere.y / pr,
+                posSphere.z / pr
             );
 
-            // UVs
-            const u =
-                (Math.atan2(posSphere.x, posSphere.z) + Math.PI) /
-                (2 * Math.PI);
-            const v = Math.acos(posSphere.y / (radius + elevation)) / Math.PI;
-
+            const u = (Math.atan2(posSphere.x, posSphere.z) + Math.PI) / (2 * Math.PI);
+            const v = Math.acos(posSphere.y / pr) / Math.PI;
             uvs.push(u, v);
         }
     }
 
-    // Étape 2 : Tableau pour accumuler les normales et compter les contributions
+    // Centre radial au milieu du relief + rayon de bounding sphere autour de ce centre
+    const centerR = 0.5 * (minPlanetRadius + maxPlanetRadius);
+    const centerLocal2 = dir.scale(centerR);
+
+    let maxDist2b = 0;
+    for (const v of verts) {
+        const dx = v.x - centerLocal2.x;
+        const dy = v.y - centerLocal2.y;
+        const dz = v.z - centerLocal2.z;
+        const d2 = dx * dx + dy * dy + dz * dz;
+        if (d2 > maxDist2b) maxDist2b = d2;
+    }
+    const boundingRadius = Math.sqrt(maxDist2b);
+
+    // Normales moyennées (ton code existant)
     const normalAccum = new Array(verts.length)
         .fill(null)
         .map(() => new Vector3(0, 0, 0));
     const normalCount = new Array(verts.length).fill(0);
 
-    // Étape 3 : Générer les indices et calculer les normales des triangles
     for (let i = 0; i < res; i++) {
         for (let j = 0; j < res; j++) {
             const index0 = i * (res + 1) + j;
@@ -445,25 +433,21 @@ function computeChunkMeshData(bounds, resolution, radius, face, noise) {
                 indices.push(index0, index2, index1, index1, index2, index3);
             }
 
-            // Calculer les normales des deux triangles
             const tri1Normal = computeTriangleNormal(
                 v0,
                 verts[tri1Indices[1]],
                 verts[tri1Indices[2]]
             );
-
             const tri2Normal = computeTriangleNormal(
                 v0,
                 verts[tri2Indices[1]],
                 verts[tri2Indices[2]]
             );
 
-            // Ajouter les normales aux vertices concernés
             tri1Indices.forEach((idx) => {
                 normalAccum[idx] = normalAccum[idx].add(tri1Normal);
                 normalCount[idx]++;
             });
-
             tri2Indices.forEach((idx) => {
                 normalAccum[idx] = normalAccum[idx].add(tri2Normal);
                 normalCount[idx]++;
@@ -471,13 +455,9 @@ function computeChunkMeshData(bounds, resolution, radius, face, noise) {
         }
     }
 
-    // Étape 4 : Normaliser et remplir le tableau des normales
     for (let i = 0; i < verts.length; i++) {
         if (normalCount[i] > 0) {
-            const avgNormal = normalAccum[i]
-                .scale(1 / normalCount[i])
-                .normalize();
-
+            const avgNormal = normalAccum[i].scale(1 / normalCount[i]).normalize();
             const idx = i * 3;
             normals[idx] = avgNormal.x;
             normals[idx + 1] = avgNormal.y;
@@ -486,15 +466,19 @@ function computeChunkMeshData(bounds, resolution, radius, face, noise) {
     }
 
     return {
-        positions, indices, normals, uvs,
+        positions,
+        indices,
+        normals,
+        uvs,
         boundsInfo: {
-            centerLocal: [centerLocal.x, centerLocal.y, centerLocal.z],
-            boundingRadius: Math.sqrt(maxDist2),
+            centerLocal: [centerLocal2.x, centerLocal2.y, centerLocal2.z],
+            boundingRadius,
             minPlanetRadius,
             maxPlanetRadius
         }
     };
 }
+
 
 /**
  * Computes the normal of a triangle given three vertices

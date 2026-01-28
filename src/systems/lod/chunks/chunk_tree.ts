@@ -1,4 +1,4 @@
-import { Scene, Mesh, Vector3, ShaderMaterial, Plane } from '@babylonjs/core';
+import { Scene, Mesh, Vector3, ShaderMaterial, Plane, Quaternion, Matrix } from '@babylonjs/core';
 import { ChunkForge } from './chunk_forge';
 import { DeleteSemaphore } from '../workers/delete_semaphore';
 import { io, Socket } from 'socket.io-client';
@@ -129,6 +129,42 @@ export class ChunkTree {
         this.chunkForge = new ChunkForge(this.scene, globalWorkerPool);
     }
 
+    private getPlanetRotationMatrix(): Matrix | null {
+        const pe: any = this.parentEntity as any;
+
+        // cas le plus courant: rotationQuaternion exposé directement ou via un node/transform
+        const q: Quaternion | undefined =
+            pe.rotationQuaternion ??
+            pe.node?.rotationQuaternion ??
+            pe.transform?.rotationQuaternion;
+
+        if (q) {
+            const m = Matrix.Identity();
+            q.toRotationMatrix(m);
+            return m;
+        }
+
+        // fallback: extraire la rotation depuis une world matrix
+        const wm =
+            pe.getWorldMatrix?.() ??
+            pe.node?.getWorldMatrix?.() ??
+            pe.transform?.getWorldMatrix?.();
+
+        if (wm && typeof wm.getRotationMatrixToRef === "function") {
+            const m = Matrix.Identity();
+            wm.getRotationMatrixToRef(m);
+            return m;
+        }
+
+        return null;
+    }
+
+    private planetLocalToWorld(local: Vector3): Vector3 {
+        const rot = this.getPlanetRotationMatrix();
+        const rotated = rot ? Vector3.TransformCoordinates(local, rot) : local;
+        return this.parentEntity.doublepos.add(rotated);
+    }
+
     /**
      * Returns the center position of the chunk in world space.
      *
@@ -146,7 +182,9 @@ export class ChunkTree {
         const vCenter = Math.tan((angleVMin + angleVMax) * 0.5);
 
         const posCube = Terrain.mapUVtoCube(uCenter, vCenter, this.face);
-        return this.parentEntity.doublepos.add(posCube.normalize().scale(this.radius));
+        const local = posCube.normalize().scale(this.radius); // local planète (origine planète)
+
+        return this.planetLocalToWorld(local); // ✅ applique rotation + translation
     }
 
     /**
@@ -388,7 +426,7 @@ export class ChunkTree {
         const alpha = Math.acos(Math.min(1, Math.max(0, cosAlpha)));
 
         // Patch angular radius (conservative)
-        const s = patchBoundingRadius / planetRadius;
+        const s = patchBoundingRadius / pcLen;
         const beta = Math.asin(Math.min(1, Math.max(0, s)));
 
         // Angle between camera direction and patch direction
@@ -424,7 +462,8 @@ export class ChunkTree {
 
             const corners = cornersUV.map(({ u, v }) => {
                 const posCube = Terrain.mapUVtoCube(u, v, this.face);
-                return this.parentEntity.doublepos.add(posCube.normalize().scale(this.radius));
+                const local = posCube.normalize().scale(this.radius); // local planète
+                return this.planetLocalToWorld(local);
             });
 
             // Use bounding sphere distance instead of "min distance to center/corners"
@@ -439,12 +478,15 @@ export class ChunkTree {
             let radiusForCull = bsRadiusFallback;   // fallback
 
             const bi = (this.mesh as any)?.metadata?.boundsInfo;
-            const hasAccurateBounds = bi?.centerLocal && typeof bi.boundingRadius === "number";
+            const hasAccurateBounds =
+                Array.isArray(bi?.centerLocal) &&
+                bi.centerLocal.length === 3 &&
+                Number.isFinite(bi.boundingRadius);
 
             if (hasAccurateBounds) {
                 const centerLocal = Vector3.FromArray(bi.centerLocal); // local planète (origine planète)
-                centerWorld = planetCenter.add(centerLocal);           // world/double
-                radiusForCull = bi.boundingRadius;                     // rayon réel (relief inclus)
+                centerWorld = this.planetLocalToWorld(centerLocal); // world/double
+                radiusForCull = bi.boundingRadius; // rayon réel (relief inclus)
             }
 
             // --- Frustum culling : recommandé seulement si bounds fiables -------

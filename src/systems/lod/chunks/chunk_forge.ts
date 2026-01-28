@@ -91,7 +91,7 @@ export class ChunkForge implements IChunkForge {
         }
         terrainMesh.parent = parentEntity;
         terrainMesh.checkCollisions = true;
-        terrainMesh.showBoundingBox = true;
+        terrainMesh.showBoundingBox = false;
 
         terrainMesh.material = new TerrainShader(this.scene).create(
             params.resolution,
@@ -100,7 +100,7 @@ export class ChunkForge implements IChunkForge {
             cameraPosition,
             params.radius,
             center,
-            false,
+            true, // wireframe
             ChunkTree.debugLODEnabled
         );
         terrainMesh.alwaysSelectAsActiveMesh = true;
