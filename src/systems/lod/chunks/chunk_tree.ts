@@ -156,7 +156,7 @@ export class ChunkTree {
         const posCube = Terrain.mapUVtoCube(uCenter, vCenter, this.face);
         const local = posCube.normalize().scale(this.radius); // local planète (origine planète)
 
-        return this.planetLocalToWorld(local); // ✅ applique rotation + translation
+        return this.planetLocalToWorld(local); // applique rotation + translation
     }
 
     /**
