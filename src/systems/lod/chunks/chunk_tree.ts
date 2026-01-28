@@ -1,40 +1,9 @@
 import { Scene, Mesh, Vector3, ShaderMaterial, Plane, Quaternion, Matrix } from '@babylonjs/core';
 import { ChunkForge } from './chunk_forge';
-import { DeleteSemaphore } from '../workers/delete_semaphore';
-import { io, Socket } from 'socket.io-client';
 import { FloatingEntityInterface, OriginCamera } from '../../../core/camera/camera_manager';
 import { Terrain } from '../../../game_objects/planets/rocky_planet/terrain';
-import { WorkerPool } from '../workers/worker_pool';
-
-//const socket: Socket = io("***:8888");
-
-/**
- * Type defining the UV bounds of a terrain chunk
- */
-export type Bounds = {
-    uMin: number;
-    uMax: number;
-    vMin: number;
-    vMax: number;
-};
-
-/**
- * Type defining the possible cube faces
- */
-export type Face = 'front' | 'back' | 'left' | 'right' | 'top' | 'bottom';
-
-/**
- * Global worker pool for mesh chunk computation
- *
- * Instantiated with the worker script URL and using hardware concurrency
- * for both workers and concurrent tasks.
- */
-export const globalWorkerPool = new WorkerPool(
-    new URL('../workers/terrain_mesh_worker', import.meta.url).href,
-    navigator.hardwareConcurrency - 1,
-    navigator.hardwareConcurrency - 1,
-    true
-);
+import { Bounds, Face } from '../types';
+import { globalWorkerPool } from '../workers/global_worker_pool';
 
 /**
  * Global cache to store precomputed meshes (optional)

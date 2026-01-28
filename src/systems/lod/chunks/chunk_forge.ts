@@ -1,9 +1,10 @@
 import { Scene, Mesh, Vector3 } from '@babylonjs/core';
-import { Face, ChunkTree, Bounds } from './chunk_tree';
+import { ChunkTree, } from './chunk_tree';
 import { Socket } from 'socket.io-client';
 import { Terrain } from '../../../game_objects/planets/rocky_planet/terrain';
 import { TerrainShader } from '../../../game_objects/planets/rocky_planet/terrains_shader';
 import { WorkerPool } from '../workers/worker_pool';
+import { Bounds, Face } from '../types';
 
 /**
  * Interface for chunk generation parameters shared by local and server generation

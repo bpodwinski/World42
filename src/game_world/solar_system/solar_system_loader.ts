@@ -7,8 +7,9 @@ import {
     TransformNode,
 } from "@babylonjs/core";
 import { FloatingEntity, OriginCamera } from "../../core/camera/camera_manager";
-import { ChunkTree, Face } from "../../systems/lod/chunks/chunk_tree";
+import { ChunkTree } from "../../systems/lod/chunks/chunk_tree";
 import { TextureManager } from "../../core/io/texture_manager";
+import { Face } from "../../systems/lod/types";
 
 export type PlanetCDLOD = {
     entity: FloatingEntity;
