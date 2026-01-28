@@ -17,12 +17,21 @@ export function frustumCulling(
     camera: OriginCamera,
     centerWorld: Vector3,
     radius: number,
-    isSphereInFrustum: (centerRender: Vector3, radius: number, planes: Plane[]) => boolean): boolean {
-    const frustumPlanes: Plane[] = Array.from({ length: 6 }, () => new PlaneValue(0, 0, 0, 0));
-    camera.getFrustumPlanesToRef(frustumPlanes);
+    isSphereInFrustum: (centerRender: Vector3, radius: number, planes: Plane[]) => boolean,
+    cache: FrustumCullCache): boolean {
+    camera.getFrustumPlanesToRef(cache.planes);
+    camera.toRenderSpace(centerWorld as any, cache.centerRender as any);
+    return isSphereInFrustum(cache.centerRender as any, radius, cache.planes);
+}
 
-    const centerRender = new Vector3Value();
-    camera.toRenderSpace(centerWorld as any, centerRender);
+type FrustumCullCache = {
+    planes: Plane[];
+    centerRender: Vector3;
+};
 
-    return isSphereInFrustum(centerRender as any, radius, frustumPlanes);
+export function createFrustumCullCache(): FrustumCullCache {
+    return {
+        planes: Array.from({ length: 6 }, () => new PlaneValue(0, 0, 0, 0)),
+        centerRender: new Vector3Value(),
+    };
 }

@@ -5,7 +5,7 @@ import { Terrain } from '../../../game_objects/planets/rocky_planet/terrain';
 import { Bounds, Face } from '../types';
 import { globalWorkerPool } from '../workers/global_worker_pool';
 import { computeSSEPx, distanceToPatchBoundingSphere, isPatchVisibleByHorizon, isSphereInFrustum } from './chunk_metrics';
-import { frustumCulling } from './frustum_culling';
+import { createFrustumCullCache, frustumCulling } from './frustum_culling';
 
 /**
  * ChunkTree represents a terrain chunk node and manages hierarchical subdivision (quadtree)
@@ -29,7 +29,7 @@ export class ChunkTree {
     mesh: Mesh | null;
     face: Face;
     parentEntity: FloatingEntityInterface;
-
+    private frustumCullingEnabled: boolean;
     private chunkForge: ChunkForge;
 
     // Cache for asynchronous mesh creation to avoid duplicate generation
@@ -51,6 +51,8 @@ export class ChunkTree {
     // Flag to enable/disable precompute caching
     private precomputeEnabled: boolean = false;
 
+    private frustumCache = createFrustumCullCache();
+
     // Debug mode flag (passed to the shader)
     public debugLOD: boolean;
     public static debugLODEnabled: boolean = false;
@@ -68,6 +70,7 @@ export class ChunkTree {
      * @param resolution - Grid resolution used to generate the mesh
      * @param face - Cube face for the terrain chunk
      * @param parentEntity - Entity to which the mesh is attached (floating origin)
+     * @param frustumCullingEnabled - Enable frustum culling
      * @param precomputeEnabled - Enables/disables precompute mesh caching
      * @param debugLOD - Whether to enable LOD debug mode
      */
@@ -83,6 +86,7 @@ export class ChunkTree {
         face: Face,
         parentEntity: FloatingEntityInterface,
         precomputeEnabled: boolean,
+        frustumCullingEnabled: boolean = true,
         debugLOD: boolean = false
     ) {
         this.scene = scene;
@@ -99,7 +103,12 @@ export class ChunkTree {
         this.parentEntity = parentEntity;
         this.debugLOD = debugLOD;
         this.precomputeEnabled = precomputeEnabled;
+        this.frustumCullingEnabled = frustumCullingEnabled;
         this.chunkForge = new ChunkForge(this.scene, globalWorkerPool);
+    }
+
+    public setFrustumCullingEnabled(enabled: boolean): void {
+        this.frustumCullingEnabled = enabled;
     }
 
     private getPlanetRotationMatrix(): Matrix | null {
@@ -224,6 +233,7 @@ export class ChunkTree {
             this.face,
             this.parentEntity,
             this.precomputeEnabled,
+            this.frustumCullingEnabled,
             this.debugLOD
         );
     }
@@ -337,17 +347,20 @@ export class ChunkTree {
             }
 
             // Frustum culling
-            if (hasAccurateBounds) {
-                const visible = frustumCulling(
-                    camera,
-                    centerWorld,
-                    radiusForCull,
-                    isSphereInFrustum,
-                );
+            if (this.frustumCullingEnabled) {
+                if (hasAccurateBounds) {
+                    const visible = frustumCulling(
+                        camera,
+                        centerWorld,
+                        radiusForCull,
+                        isSphereInFrustum,
+                        this.frustumCache
+                    );
 
-                if (!visible) {
-                    this.deactivate();
-                    return;
+                    if (!visible) {
+                        this.deactivate();
+                        return;
+                    }
                 }
             }
 
