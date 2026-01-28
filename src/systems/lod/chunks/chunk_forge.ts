@@ -91,6 +91,7 @@ export class ChunkForge implements IChunkForge {
         }
         terrainMesh.parent = parentEntity;
         terrainMesh.checkCollisions = true;
+        terrainMesh.showBoundingBox = true;
 
         terrainMesh.material = new TerrainShader(this.scene).create(
             params.resolution,
