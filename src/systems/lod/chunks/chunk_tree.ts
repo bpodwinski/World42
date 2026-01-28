@@ -4,6 +4,7 @@ import { FloatingEntityInterface, OriginCamera } from '../../../core/camera/came
 import { Terrain } from '../../../game_objects/planets/rocky_planet/terrain';
 import { Bounds, Face } from '../types';
 import { globalWorkerPool } from '../workers/global_worker_pool';
+import { computeSSEPx, distanceToPatchBoundingSphere, isPatchVisibleByHorizon, isSphereInFrustum } from './chunk_metrics';
 
 /**
  * ChunkTree represents a terrain chunk node and manages hierarchical subdivision (quadtree)
@@ -283,131 +284,6 @@ export class ChunkTree {
     public static minDistEpsilon = 1e-3;  // avoids division by zero
 
     /**
-     * Estimates patch world size from its 4 corner positions.
-     * We use the maximum edge/diagonal length as a conservative proxy for patch diameter.
-     */
-    private estimatePatchWorldSize(corners: Vector3[]): number {
-        let max2 = 0;
-
-        const pairs: [number, number][] = [
-            [0, 1], [0, 2], [1, 3], [2, 3], // edges
-            [0, 3], [1, 2],                 // diagonals
-        ];
-
-        for (const [a, b] of pairs) {
-            const dx = corners[b].x - corners[a].x;
-            const dy = corners[b].y - corners[a].y;
-            const dz = corners[b].z - corners[a].z;
-            const d2 = dx * dx + dy * dy + dz * dz;
-            if (d2 > max2) max2 = d2;
-        }
-
-        return Math.sqrt(max2);
-    }
-
-    /**
-     * Computes camera-to-patch distance using a bounding sphere.
-     *
-     * distance = max(0, distance(camera, sphereCenter) - sphereRadius)
-     *
-     * - sphereCenter: patch center
-     * - sphereRadius: max distance from center to corners (conservative)
-     *
-     * This is more stable than using min(center/corners distance), especially near grazing angles.
-     */
-    private distanceToPatchBoundingSphere(
-        camPos: Vector3,
-        patchCenter: Vector3,
-        corners: Vector3[]
-    ): { distance: number; radius: number } {
-        let r2 = 0;
-        for (const c of corners) {
-            const dx = c.x - patchCenter.x;
-            const dy = c.y - patchCenter.y;
-            const dz = c.z - patchCenter.z;
-            const d2 = dx * dx + dy * dy + dz * dz;
-            if (d2 > r2) r2 = d2;
-        }
-        const sphereRadius = Math.sqrt(r2);
-
-        const dc = Vector3.Distance(camPos, patchCenter);
-        const distance = Math.max(0, dc - sphereRadius);
-
-        return { distance, radius: sphereRadius };
-    }
-
-    /**
-     * Computes Screen-Space Error (SSE) in pixels.
-     *
-     * SSE_px ≈ (geometricError / distanceToPatch) * K
-     * where K = viewportHeight / (2 * tan(fov/2))
-     *
-     * geometricError is approximated from patch size and mesh resolution.
-     */
-    private computeSSEPx(
-        camera: OriginCamera,
-        distanceToPatch: number,
-        corners: Vector3[]
-    ): number {
-        const engine = this.scene.getEngine();
-        const viewportH = engine.getRenderHeight(true);
-
-        // Projection factor (pixels per world-unit at distance 1)
-        const K = viewportH / (2 * Math.tan(camera.fov * 0.5));
-
-        // Approximate geometric error: patch diameter / grid resolution (scaled empirically)
-        const patchSize = this.estimatePatchWorldSize(corners);
-        const geometricError = (patchSize / this.resolution) * ChunkTree.geomErrorScale;
-
-        const d = Math.max(distanceToPatch, ChunkTree.minDistEpsilon);
-        return (geometricError / d) * K;
-    }
-
-    private isSphereInFrustum(centerRender: Vector3, radius: number, planes: Plane[]): boolean {
-        // Un point est dehors si pour une plane: n·p + d < -radius
-        for (const p of planes) {
-            if (p.normal.x * centerRender.x + p.normal.y * centerRender.y + p.normal.z * centerRender.z + p.d < -radius) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private isPatchVisibleByHorizon(
-        camPos: Vector3,
-        planetCenter: Vector3,
-        planetRadius: number,
-        patchCenter: Vector3,
-        patchBoundingRadius: number
-    ): boolean {
-        const VC = camPos.subtract(planetCenter);
-        const d = VC.length();
-
-        // If camera is inside / on the planet, disable horizon culling (everything is potentially visible)
-        if (d <= planetRadius) return true;
-
-        const dirCam = VC.scale(1 / d);
-
-        const PC = patchCenter.subtract(planetCenter);
-        const pcLen = PC.length() || 1;
-        const dirPatch = PC.scale(1 / pcLen);
-
-        // Horizon angle
-        const cosAlpha = planetRadius / d; // in (0..1)
-        const alpha = Math.acos(Math.min(1, Math.max(0, cosAlpha)));
-
-        // Patch angular radius (conservative)
-        const s = patchBoundingRadius / pcLen;
-        const beta = Math.asin(Math.min(1, Math.max(0, s)));
-
-        // Angle between camera direction and patch direction
-        const dot = Vector3.Dot(dirCam, dirPatch);
-        const angle = Math.acos(Math.min(1, Math.max(-1, dot)));
-
-        return angle <= (alpha + beta);
-    }
-
-    /**
      * Asynchronously updates the Level of Detail (LOD) for this node.
      *
      * Uses SSE (screen-space error) to decide whether to split into children or render the current mesh.
@@ -440,13 +316,12 @@ export class ChunkTree {
             // Use bounding sphere distance instead of "min distance to center/corners"
             // Bounding sphere "fallback" basé sur la sphère de base (sans relief)
             const { radius: bsRadiusFallback } =
-                this.distanceToPatchBoundingSphere(camera.doublepos, center, corners);
-
+                distanceToPatchBoundingSphere(camera.doublepos, center, corners);
             const planetCenter = this.parentEntity.doublepos;
 
-            // --- Bounds propres (si mesh déjà généré) -------------------------
-            let centerWorld = center;               // fallback
-            let radiusForCull = bsRadiusFallback;   // fallback
+            //Bounds propres
+            let centerWorld = center; // fallback
+            let radiusForCull = bsRadiusFallback; // fallback
 
             const bi = (this.mesh as any)?.metadata?.boundsInfo;
             const hasAccurateBounds =
@@ -460,7 +335,7 @@ export class ChunkTree {
                 radiusForCull = bi.boundingRadius; // rayon réel (relief inclus)
             }
 
-            // --- Frustum culling : recommandé seulement si bounds fiables -------
+            // Frustum culling : recommandé seulement si bounds fiables
             // (sinon risque de faux négatifs -> trous proches caméra)
             if (hasAccurateBounds) {
                 const frustumPlanes: Plane[] = Array.from({ length: 6 }, () => new Plane(0, 0, 0, 0));
@@ -469,14 +344,14 @@ export class ChunkTree {
                 const centerRender = new Vector3();
                 camera.toRenderSpace(centerWorld, centerRender);
 
-                if (!this.isSphereInFrustum(centerRender, radiusForCull, frustumPlanes)) {
+                if (!isSphereInFrustum(centerRender, radiusForCull, frustumPlanes)) {
                     this.deactivate();
                     return;
                 }
             }
 
-            // --- Horizon culling (utilise aussi les bounds propres) ------------
-            if (!this.isPatchVisibleByHorizon(
+            // Horizon culling
+            if (!isPatchVisibleByHorizon(
                 camera.doublepos,
                 planetCenter,
                 this.radius,
@@ -487,12 +362,20 @@ export class ChunkTree {
                 return;
             }
 
-            // --- Distance pour SSE cohérente avec radiusForCull ----------------
+            // Distance pour SSE cohérente avec radiusForCull
             const dc = Vector3.Distance(camera.doublepos, centerWorld);
             const distanceToPatch = Math.max(0, dc - radiusForCull);
 
             // SSE decision in pixels
-            const ssePx = this.computeSSEPx(camera, distanceToPatch, corners);
+            const ssePx = computeSSEPx({
+                scene: this.scene,
+                cameraFov: camera.fov,
+                distanceToPatch,
+                corners,
+                resolution: this.resolution,
+                geomErrorScale: ChunkTree.geomErrorScale,
+                minDistEpsilon: ChunkTree.minDistEpsilon,
+            });
 
             // Split when error is above threshold (and we can still increase detail)
             if (ssePx > ChunkTree.sseThresholdPx && this.level < this.maxLevel) {
