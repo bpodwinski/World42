@@ -6,11 +6,6 @@ import { Bounds, Face } from '../types';
 import { globalWorkerPool } from '../workers/global_worker_pool';
 
 /**
- * Global cache to store precomputed meshes (optional)
- */
-const precomputedChunkCache = new Map<string, Promise<Mesh>>();
-
-/**
  * ChunkTree represents a terrain chunk node and manages hierarchical subdivision (quadtree)
  *
  * Each node owns:
@@ -37,6 +32,13 @@ export class ChunkTree {
 
     // Cache for asynchronous mesh creation to avoid duplicate generation
     private meshPromise: Promise<Mesh> | null = null;
+
+    /**
+   * Global cache to store precomputed meshes (optional).
+   * Key is derived from face/level/bounds to uniquely identify a chunk.
+   * Value is a Promise<Mesh> to deduplicate concurrent precompute requests.
+   */
+    public static precomputedChunkCache = new Map<string, Promise<Mesh>>();
 
     // Guard to prevent concurrent updateLOD calls
     private updating: boolean = false;
@@ -172,7 +174,7 @@ export class ChunkTree {
         if (!this.precomputeEnabled) return;
 
         const key = this.getChunkCacheKey();
-        if (precomputedChunkCache.has(key)) {
+        if (ChunkTree.precomputedChunkCache.has(key)) {
             console.log(`Chunk ${key} already precomputed`);
             return;
         }
@@ -194,7 +196,7 @@ export class ChunkTree {
             center
         );
 
-        precomputedChunkCache.set(key, meshPromise);
+        ChunkTree.precomputedChunkCache.set(key, meshPromise);
 
         try {
             await meshPromise;
@@ -538,8 +540,8 @@ export class ChunkTree {
                 } else if (!this.mesh) {
                     // Mesh does not exist yet: build it (or load from precompute cache)
                     const key = this.getChunkCacheKey();
-                    if (this.precomputeEnabled && precomputedChunkCache.has(key)) {
-                        this.mesh = await precomputedChunkCache.get(key)!;
+                    if (this.precomputeEnabled && ChunkTree.precomputedChunkCache.has(key)) {
+                        this.mesh = await ChunkTree.precomputedChunkCache.get(key)!;
                     } else {
                         this.mesh = await this.chunkForge.worker(
                             {
