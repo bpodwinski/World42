@@ -49,6 +49,8 @@ export class ChunkTree {
     // Guard to prevent concurrent updateLOD calls
     private updating: boolean = false;
 
+    private readonly patchAngularRadius: number;
+
     // Keeps track of the LOD level for which the mesh was generated
     private currentLODLevel: number | null = null;
 
@@ -97,7 +99,7 @@ export class ChunkTree {
         precomputeEnabled: boolean,
         frustumCullingEnabled: boolean = true,
         horizonCullingEnabled: boolean = true,
-        debugLOD: boolean = false
+        debugLOD: boolean = false,
     ) {
         this.scene = scene;
         this.camera = camera;
@@ -118,6 +120,39 @@ export class ChunkTree {
         this.frustumCullingEnabled = frustumCullingEnabled;
         this.horizonCullingEnabled = horizonCullingEnabled;
         this.chunkForge = new ChunkForge(this.scene, globalWorkerPool);
+        this.patchAngularRadius = ChunkTree.computePatchAngularRadius(this.bounds, this.face);
+    }
+
+    private static computePatchAngularRadius(bounds: Bounds, face: Face): number {
+        const { uMin, uMax, vMin, vMax } = bounds;
+
+        // Center in angle-space (matches getCenterChunk)
+        const aUMin = Math.atan(uMin);
+        const aUMax = Math.atan(uMax);
+        const aVMin = Math.atan(vMin);
+        const aVMax = Math.atan(vMax);
+
+        const uCenter = Math.tan((aUMin + aUMax) * 0.5);
+        const vCenter = Math.tan((aVMin + aVMax) * 0.5);
+
+        const dirCenter = Terrain.mapUVtoCube(uCenter, vCenter, face).normalize();
+
+        const corners = [
+            Terrain.mapUVtoCube(uMin, vMin, face).normalize(),
+            Terrain.mapUVtoCube(uMin, vMax, face).normalize(),
+            Terrain.mapUVtoCube(uMax, vMin, face).normalize(),
+            Terrain.mapUVtoCube(uMax, vMax, face).normalize(),
+        ];
+
+        let beta = 0;
+        for (const d of corners) {
+            const dot = Vector3.Dot(dirCenter, d);
+            const ang = Math.acos(Math.min(1, Math.max(-1, dot)));
+            if (ang > beta) beta = ang;
+        }
+
+        // Small epsilon for stability
+        return beta + 1e-6;
     }
 
     private getPlanetRotationMatrix(): Matrix | null {
@@ -380,19 +415,17 @@ export class ChunkTree {
 
             // Horizon culling
             if (this.horizonCullingEnabled) {
-                if (hasAccurateBounds) {
-                    const visible = horizonCulling(
-                        camera.doublepos,
-                        planetCenter,
-                        this.radius,
-                        centerWorld,
-                        radiusForCull
-                    );
+                const visible = horizonCulling(
+                    camera.doublepos,
+                    planetCenter,
+                    this.radius,
+                    centerWorld,
+                    this.patchAngularRadius
+                );
 
-                    if (!visible) {
-                        this.deactivate();
-                        return;
-                    }
+                if (!visible) {
+                    this.deactivate();
+                    return;
                 }
             }
 

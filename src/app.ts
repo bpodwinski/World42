@@ -57,7 +57,7 @@ export class FloatingCameraScene {
         camera.debugMode = true;
         camera.minZ = 0.001;
         camera.maxZ = 1_000_000;
-        camera.fov = 0.8;
+        camera.fov = 1.2;
         camera.checkCollisions = true;
         camera.applyGravity = false;
         camera.ellipsoid = new Vector3(0.01, 0.01, 0.01);
@@ -119,8 +119,8 @@ export class FloatingCameraScene {
             camera,
             loadedSystem,
             {
-                maxLevel: 11,
-                resolution: 32,
+                maxLevel: 8,
+                resolution: 16,
             }
         );
 

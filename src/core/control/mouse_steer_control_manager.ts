@@ -104,7 +104,6 @@ export class MouseSteerControlManager {
         this.camera = camera;
         this.scene = scene;
         this.canvas = canvas;
-
         this.opts = {
             deadzonePx: opts.deadzonePx ?? 50,
             maxRadiusPx: opts.maxRadiusPx ?? 500,
@@ -112,11 +111,11 @@ export class MouseSteerControlManager {
             maxYawRate: opts.maxYawRate ?? 0.75,
             maxPitchRate: opts.maxPitchRate ?? 0.75,
             invertY: opts.invertY ?? false,
-            acceleration: opts.acceleration ?? 10,
-            strafeAcceleration: opts.strafeAcceleration ?? 10,
-            maxSpeed: opts.maxSpeed ?? 1500,
+            acceleration: opts.acceleration ?? 100,
+            strafeAcceleration: opts.strafeAcceleration ?? 100,
+            maxSpeed: opts.maxSpeed ?? 9000,
             damping: opts.damping ?? 0.02,
-            boostMultiplier: opts.boostMultiplier ?? 5,
+            boostMultiplier: opts.boostMultiplier ?? 10,
             brakeDamping: opts.brakeDamping ?? 0.3,
             yawAcceleration: opts.yawAcceleration ?? 10,
             pitchAcceleration: opts.pitchAcceleration ?? 10,
