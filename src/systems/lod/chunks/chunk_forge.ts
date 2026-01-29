@@ -1,6 +1,5 @@
 import { Scene, Mesh, Vector3 } from '@babylonjs/core';
 import { ChunkTree, } from './chunk_tree';
-import { Socket } from 'socket.io-client';
 import { Terrain } from '../../../game_objects/planets/rocky_planet/terrain';
 import { TerrainShader } from '../../../game_objects/planets/rocky_planet/terrains_shader';
 import { WorkerPool } from '../workers/worker_pool';
@@ -26,14 +25,8 @@ interface IChunkForge {
         params: ChunkGenerationParams,
         cameraPosition: Vector3,
         parentEntity: any,
-        center: Vector3
-    ): Promise<Mesh>;
-
-    server(
-        params: ChunkGenerationParams,
-        cameraPosition: Vector3,
-        parentEntity: any,
-        center: Vector3
+        center: Vector3,
+        wireframe: boolean
     ): Promise<Mesh>;
 }
 
@@ -45,19 +38,16 @@ interface IChunkForge {
 export class ChunkForge implements IChunkForge {
     private scene: Scene;
     private workerPool: WorkerPool;
-    private socket?: Socket;
 
     /**
      * Creates a new ChunkForge instance
      *
      * @param scene - Babylon.js scene
      * @param workerPool - WorkerPool instance
-     * @param socket - Optional Socket.IO client instance
      */
-    constructor(scene: Scene, workerPool: WorkerPool, socket?: Socket) {
+    constructor(scene: Scene, workerPool: WorkerPool) {
         this.scene = scene;
         this.workerPool = workerPool;
-        this.socket = socket;
     }
 
     /**
@@ -77,7 +67,8 @@ export class ChunkForge implements IChunkForge {
         params: ChunkGenerationParams,
         cameraPosition: Vector3,
         parentEntity: any,
-        center: Vector3
+        center: Vector3,
+        wireframe: boolean
     ): Mesh {
         const terrainMesh = Terrain.createMesh(
             this.scene,
@@ -101,7 +92,7 @@ export class ChunkForge implements IChunkForge {
             cameraPosition,
             params.radius,
             center,
-            true, // wireframe
+            wireframe,
             ChunkTree.debugLODEnabled
         );
         terrainMesh.alwaysSelectAsActiveMesh = true;
@@ -115,13 +106,15 @@ export class ChunkForge implements IChunkForge {
      * @param cameraPosition - Camera position for priority calculation and shader creation
      * @param parentEntity - Parent entity to attach the mesh
      * @param center - Pre-calculated center of the chunk
+     * @param wireframe - Whether to render the mesh in wireframe mode
      * @returns A promise resolving to the generated Mesh
      */
     async worker(
         params: ChunkGenerationParams,
         cameraPosition: Vector3,
         parentEntity: any,
-        center: Vector3
+        center: Vector3,
+        wireframe: boolean
     ): Promise<Mesh> {
         return new Promise<Mesh>((resolve) => {
             const priority = Vector3.Distance(center, cameraPosition);
@@ -134,53 +127,11 @@ export class ChunkForge implements IChunkForge {
                         params,
                         cameraPosition,
                         parentEntity,
-                        center
+                        center,
+                        wireframe
                     );
                     resolve(mesh);
                 }
-            });
-        });
-    }
-
-    /**
-     * Forges a mesh for a chunk using server-side generation via Socket.IO
-     *
-     * @param params - Chunk generation parameters
-     * @param cameraPosition - Camera position for shader creation
-     * @param parentEntity - Parent entity to attach the mesh
-     * @param center - Pre-calculated center of the chunk
-     * @returns A promise resolving to the generated Mesh
-     */
-    async server(
-        params: ChunkGenerationParams,
-        cameraPosition: Vector3,
-        parentEntity: any,
-        center: Vector3
-    ): Promise<Mesh> {
-        return new Promise<Mesh>((resolve, reject) => {
-            if (!this.socket) {
-                reject(new Error('Socket instance not available'));
-                return;
-            }
-            this.socket.emit('generateChunk', params);
-            this.socket.once('chunkData', (meshData: any) => {
-                try {
-                    const mesh = this.buildMesh(
-                        meshData,
-                        params,
-                        cameraPosition,
-                        parentEntity,
-                        center
-                    );
-                    resolve(mesh);
-                } catch (error) {
-                    reject(error);
-                }
-            });
-            this.socket.once('chunkError', (error: any) => {
-                reject(
-                    new Error(error.message || 'Server chunk generation failed')
-                );
             });
         });
     }
