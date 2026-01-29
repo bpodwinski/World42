@@ -26,7 +26,8 @@ interface IChunkForge {
         cameraPosition: Vector3,
         parentEntity: any,
         center: Vector3,
-        wireframe: boolean
+        wireframe: boolean,
+        boundingBox: boolean
     ): Promise<Mesh>;
 }
 
@@ -60,6 +61,8 @@ export class ChunkForge implements IChunkForge {
      * @param cameraPosition - Camera position for shader creation
      * @param parentEntity - Parent entity to attach the mesh
      * @param center - Pre-calculated center of the chunk
+     * @param wireframe - Whether to render the mesh in wireframe mode
+     * @param boundingBox - Whether to show the bounding box for the mesh
      * @returns The generated Mesh
      */
     private buildMesh(
@@ -68,7 +71,8 @@ export class ChunkForge implements IChunkForge {
         cameraPosition: Vector3,
         parentEntity: any,
         center: Vector3,
-        wireframe: boolean
+        wireframe: boolean,
+        boundingBox: boolean
     ): Mesh {
         const terrainMesh = Terrain.createMesh(
             this.scene,
@@ -83,7 +87,7 @@ export class ChunkForge implements IChunkForge {
         }
         terrainMesh.parent = parentEntity;
         terrainMesh.checkCollisions = true;
-        terrainMesh.showBoundingBox = false;
+        terrainMesh.showBoundingBox = boundingBox;
 
         terrainMesh.material = new TerrainShader(this.scene).create(
             params.resolution,
@@ -114,7 +118,8 @@ export class ChunkForge implements IChunkForge {
         cameraPosition: Vector3,
         parentEntity: any,
         center: Vector3,
-        wireframe: boolean
+        wireframe: boolean,
+        boundingBox: boolean
     ): Promise<Mesh> {
         return new Promise<Mesh>((resolve) => {
             const priority = Vector3.Distance(center, cameraPosition);
@@ -128,7 +133,8 @@ export class ChunkForge implements IChunkForge {
                         cameraPosition,
                         parentEntity,
                         center,
-                        wireframe
+                        wireframe,
+                        boundingBox
                     );
                     resolve(mesh);
                 }

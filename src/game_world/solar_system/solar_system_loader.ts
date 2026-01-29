@@ -204,6 +204,7 @@ export function createCDLODForAllPlanets(
                     face,
                     ent,
                     true, // wireframe
+                    true, // boundingBox
                     false, // precompute
                     false, // frustumCulling
                     false, // horizonCulling

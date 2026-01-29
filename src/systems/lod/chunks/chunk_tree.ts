@@ -31,6 +31,7 @@ export class ChunkTree {
     face: Face;
     parentEntity: FloatingEntityInterface;
     private wireframe: boolean;
+    private boundingBox: boolean;
     private frustumCullingEnabled: boolean;
     private horizonCullingEnabled: boolean;
     private chunkForge: ChunkForge;
@@ -74,6 +75,7 @@ export class ChunkTree {
      * @param face - Cube face for the terrain chunk
      * @param parentEntity - Entity to which the mesh is attached (floating origin)
      * @param wireframe - Whether to render the mesh in wireframe mode
+     * @param boundingBox - Whether to show the bounding box for the mesh
      * @param frustumCullingEnabled - Enable frustum culling
      * @param horizonCullingEnabled - Enable horizon culling
      * @param precomputeEnabled - Enables/disables precompute mesh caching
@@ -91,6 +93,7 @@ export class ChunkTree {
         face: Face,
         parentEntity: FloatingEntityInterface,
         wireframe: boolean = false,
+        boundingBox: boolean = false,
         precomputeEnabled: boolean,
         frustumCullingEnabled: boolean = true,
         horizonCullingEnabled: boolean = true,
@@ -109,6 +112,7 @@ export class ChunkTree {
         this.mesh = null;
         this.parentEntity = parentEntity;
         this.wireframe = wireframe;
+        this.boundingBox = boundingBox;
         this.debugLOD = debugLOD;
         this.precomputeEnabled = precomputeEnabled;
         this.frustumCullingEnabled = frustumCullingEnabled;
@@ -210,7 +214,8 @@ export class ChunkTree {
             this.camera.doublepos,
             this.parentEntity,
             center,
-            this.wireframe
+            this.wireframe,
+            this.boundingBox
         );
 
         ChunkTree.precomputedChunkCache.set(key, meshPromise);
@@ -239,6 +244,7 @@ export class ChunkTree {
             this.face,
             this.parentEntity,
             this.wireframe,
+            this.boundingBox,
             this.precomputeEnabled,
             this.frustumCullingEnabled,
             this.horizonCullingEnabled,
@@ -425,7 +431,8 @@ export class ChunkTree {
                                 this.camera.doublepos,
                                 child.parentEntity,
                                 child.getCenterChunk(),
-                                child.wireframe
+                                child.wireframe,
+                                child.boundingBox
                             );
                         })
                     );
@@ -467,7 +474,8 @@ export class ChunkTree {
                             this.camera.doublepos,
                             this.parentEntity,
                             center,
-                            this.wireframe
+                            this.wireframe,
+                            this.boundingBox
                         );
                     }
                     this.currentLODLevel = this.level;
@@ -488,7 +496,8 @@ export class ChunkTree {
                         this.camera.doublepos,
                         this.parentEntity,
                         center,
-                        this.wireframe
+                        this.wireframe,
+                        this.boundingBox
                     );
 
                     this.mesh.setEnabled(true);
