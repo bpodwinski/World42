@@ -308,7 +308,7 @@ function computeChunkMeshData(bounds, resolution, radius, face, noise) {
     const baseAmplitude = 4.0;
     const lacunarity = 2.5;
     const persistence = 0.5;
-    const globalTerrainAmplitude = 300.0;
+    const globalTerrainAmplitude = 100.0;
 
     // Angles U/V
     const angleUMin = Math.atan(bounds.uMin);

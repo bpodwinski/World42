@@ -113,7 +113,6 @@ export class FloatingCameraScene {
 
         });
 
-
         const allCDLOD = createCDLODForAllPlanets(
             scene,
             camera,

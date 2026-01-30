@@ -199,12 +199,11 @@ export function createCDLODForAllPlanets(
                     0,
                     maxLevel,
                     (body.diameter * 0.5),
-                    body.node.position, // position "double" pour le LOD
                     resolution,
                     face,
                     ent,
                     false, // wireframe
-                    true, // boundingBox
+                    false, // boundingBox
                     false, // precompute
                     true, // frustumCulling
                     true, // horizonCulling
@@ -224,8 +223,6 @@ export async function precomputeAndRunLODLoop(
     all: Map<string, PlanetCDLOD>
 ) {
     const allChunks = Array.from(all.values()).flatMap(v => v.chunks);
-
-    await Promise.all(allChunks.map(c => c.precomputeMesh()));
 
     async function loop() {
         while (true) {
