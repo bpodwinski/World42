@@ -1,4 +1,4 @@
-import { Scene, Mesh, Vector3, ShaderMaterial, Quaternion, Matrix } from '@babylonjs/core';
+import { Scene, Mesh, Vector3, ShaderMaterial } from '@babylonjs/core';
 import { ChunkForge } from './chunk_forge';
 import { FloatingEntityInterface, OriginCamera } from '../../../core/camera/camera_manager';
 import { Terrain } from '../../../game_objects/planets/rocky_planet/terrain';
@@ -29,29 +29,19 @@ export class ChunkTree {
     mesh: Mesh | null;
     face: Face;
     parentEntity: FloatingEntityInterface;
-    private wireframe: boolean;
-    private boundingBox: boolean;
-    private frustumCullingEnabled: boolean;
-    private horizonCullingEnabled: boolean;
-    private chunkForge: ChunkForge;
-
-    /**
-   * Global cache to store precomputed meshes (optional).
-   * Key is derived from face/level/bounds to uniquely identify a chunk.
-   * Value is a Promise<Mesh> to deduplicate concurrent precompute requests.
-   */
-    public static precomputedChunkCache = new Map<string, Promise<Mesh>>();
+    wireframe: boolean;
+    boundingBox: boolean;
+    frustumCullingEnabled: boolean;
+    horizonCullingEnabled: boolean;
+    chunkForge: ChunkForge;
 
     // Guard to prevent concurrent updateLOD calls
-    private updating: boolean = false;
+    updating: boolean = false;
 
     // Keeps track of the LOD level for which the mesh was generated
-    private currentLODLevel: number | null = null;
+    currentLODLevel: number | null = null;
 
-    // Flag to enable/disable precompute caching
-    private precomputeEnabled: boolean = false;
-
-    private frustumCache = createFrustumCullCache();
+    frustumCache = createFrustumCullCache();
 
     // Debug mode flag (passed to the shader)
     public debugLOD: boolean;
@@ -73,7 +63,6 @@ export class ChunkTree {
      * @param boundingBox - Whether to show the bounding box for the mesh
      * @param frustumCullingEnabled - Enable frustum culling
      * @param horizonCullingEnabled - Enable horizon culling
-     * @param precomputeEnabled - Enables/disables precompute mesh caching
      * @param debugLOD - Whether to enable LOD debug mode
      */
     constructor(
@@ -88,7 +77,6 @@ export class ChunkTree {
         parentEntity: FloatingEntityInterface,
         wireframe: boolean = false,
         boundingBox: boolean = false,
-        precomputeEnabled: boolean,
         frustumCullingEnabled: boolean = true,
         horizonCullingEnabled: boolean = true,
         debugLOD: boolean = false,
@@ -107,46 +95,9 @@ export class ChunkTree {
         this.wireframe = wireframe;
         this.boundingBox = boundingBox;
         this.debugLOD = debugLOD;
-        this.precomputeEnabled = precomputeEnabled;
         this.frustumCullingEnabled = frustumCullingEnabled;
         this.horizonCullingEnabled = horizonCullingEnabled;
         this.chunkForge = new ChunkForge(this.scene, globalWorkerPool);
-    }
-
-    private getPlanetRotationMatrix(): Matrix | null {
-        const pe: any = this.parentEntity as any;
-
-        // cas le plus courant: rotationQuaternion exposé directement ou via un node/transform
-        const q: Quaternion | undefined =
-            pe.rotationQuaternion ??
-            pe.node?.rotationQuaternion ??
-            pe.transform?.rotationQuaternion;
-
-        if (q) {
-            const m = Matrix.Identity();
-            q.toRotationMatrix(m);
-            return m;
-        }
-
-        // fallback: extraire la rotation depuis une world matrix
-        const wm =
-            pe.getWorldMatrix?.() ??
-            pe.node?.getWorldMatrix?.() ??
-            pe.transform?.getWorldMatrix?.();
-
-        if (wm && typeof wm.getRotationMatrixToRef === "function") {
-            const m = Matrix.Identity();
-            wm.getRotationMatrixToRef(m);
-            return m;
-        }
-
-        return null;
-    }
-
-    private planetLocalToWorld(local: Vector3): Vector3 {
-        const rot = this.getPlanetRotationMatrix();
-        const rotated = rot ? Vector3.TransformCoordinates(local, rot) : local;
-        return this.parentEntity.doublepos.add(rotated);
     }
 
     /**
@@ -166,17 +117,9 @@ export class ChunkTree {
         const vCenter = Math.tan((angleVMin + angleVMax) * 0.5);
 
         const posCube = Terrain.mapUVtoCube(uCenter, vCenter, this.face);
-        const local = posCube.normalize().scale(this.radius); // local planète (origine planète)
+        const local = posCube.normalize();
 
-        return this.planetLocalToWorld(local); // applique rotation + translation
-    }
-
-    /**
-     * Returns a unique key for caching this chunk mesh.
-     */
-    private getChunkCacheKey(): string {
-        const { uMin, uMax, vMin, vMax } = this.bounds;
-        return `${this.face}_${this.level}_${uMin}_${uMax}_${vMin}_${vMax}`;
+        return this.parentEntity.doublepos.add(local);
     }
 
     /**
@@ -195,7 +138,6 @@ export class ChunkTree {
             this.parentEntity,
             this.wireframe,
             this.boundingBox,
-            this.precomputeEnabled,
             this.frustumCullingEnabled,
             this.horizonCullingEnabled,
             this.debugLOD
@@ -253,10 +195,10 @@ export class ChunkTree {
         }
     }
 
-    // --- SSE tuning knobs (adjust to taste)
-    public static sseThresholdPx = 6.0;   // 1..3 = very detailed, 3..6 = better perf
-    public static geomErrorScale = 0.6;   // empirical scale factor (depends on terrain)
-    public static minDistEpsilon = 1e-3;  // avoids division by zero
+    // SSE tuning knobs (adjust to taste)
+    public static sseThresholdPx = 16.0; // 1..3 = very detailed, 3..6 = better perf
+    public static geomErrorScale = 0.4; // empirical scale factor (depends on terrain)
+    public static minDistEpsilon = 1e-3; // avoids division by zero
 
     /**
      * Asynchronously updates the Level of Detail (LOD) for this node.
@@ -284,8 +226,8 @@ export class ChunkTree {
 
             const corners = cornersUV.map(({ u, v }) => {
                 const posCube = Terrain.mapUVtoCube(u, v, this.face);
-                const local = posCube.normalize().scale(this.radius); // local planète
-                return this.planetLocalToWorld(local);
+                const local = posCube.normalize().scale(this.radius);
+                return this.parentEntity.doublepos.add(local);
             });
 
             // Use bounding sphere distance instead of "min distance to center/corners"
@@ -294,7 +236,7 @@ export class ChunkTree {
                 distanceToPatchBoundingSphere(camera.doublepos, center, corners);
             const planetCenter = this.parentEntity.doublepos;
 
-            //Bounds propres
+            // Bounds propres
             let centerWorld = center; // fallback
             let radiusForCull = bsRadiusFallback; // fallback
 
@@ -306,40 +248,44 @@ export class ChunkTree {
 
             if (hasAccurateBounds) {
                 const centerLocal = Vector3.FromArray(bi.centerLocal); // local planète (origine planète)
-                centerWorld = this.planetLocalToWorld(centerLocal); // world/double
+                centerWorld = this.parentEntity.doublepos.add(centerLocal); // world/double
                 radiusForCull = bi.boundingRadius; // rayon réel (relief inclus)
             }
 
             // Frustum culling
             if (this.frustumCullingEnabled) {
-                const visible = frustumCulling(
-                    camera,
-                    centerWorld,
-                    radiusForCull,
-                    isSphereInFrustum,
-                    this.frustumCache
-                );
+                if (hasAccurateBounds) {
+                    const visible = frustumCulling(
+                        camera,
+                        centerWorld,
+                        radiusForCull,
+                        isSphereInFrustum,
+                        this.frustumCache
+                    );
 
-                if (!visible) {
-                    this.deactivate();
-                    return;
+                    if (!visible) {
+                        this.deactivate();
+                        return;
+                    }
                 }
             }
 
             // Horizon culling
-            // if (this.horizonCullingEnabled) {
-            //     const visible = backsideCulling(
-            //         camera.doublepos,
-            //         planetCenter,
-            //         centerWorld,
-            //         radiusForCull
-            //     );
+            if (this.horizonCullingEnabled) {
+                if (hasAccurateBounds) {
+                    const visible = backsideCulling(
+                        camera.doublepos,
+                        planetCenter,
+                        centerWorld,
+                        radiusForCull
+                    );
 
-            //     if (!visible) {
-            //         this.deactivate();
-            //         return;
-            //     }
-            // }
+                    if (!visible) {
+                        this.deactivate();
+                        return;
+                    }
+                }
+            }
 
             // Distance pour SSE cohérente avec radiusForCull
             const dc = Vector3.Distance(camera.doublepos, centerWorld);
@@ -402,27 +348,21 @@ export class ChunkTree {
                 if (this.mesh && this.currentLODLevel === this.level) {
                     // Mesh already up-to-date
                 } else if (!this.mesh) {
-                    // Mesh does not exist yet: build it (or load from precompute cache)
-                    const key = this.getChunkCacheKey();
-                    if (this.precomputeEnabled && ChunkTree.precomputedChunkCache.has(key)) {
-                        this.mesh = await ChunkTree.precomputedChunkCache.get(key)!;
-                    } else {
-                        this.mesh = await this.chunkForge.worker(
-                            {
-                                bounds: this.bounds,
-                                resolution: this.resolution,
-                                radius: this.radius,
-                                face: this.face,
-                                level: this.level,
-                                maxLevel: this.maxLevel
-                            },
-                            this.camera.doublepos,
-                            this.parentEntity,
-                            center,
-                            this.wireframe,
-                            this.boundingBox
-                        );
-                    }
+                    this.mesh = await this.chunkForge.worker(
+                        {
+                            bounds: this.bounds,
+                            resolution: this.resolution,
+                            radius: this.radius,
+                            face: this.face,
+                            level: this.level,
+                            maxLevel: this.maxLevel
+                        },
+                        this.camera.doublepos,
+                        this.parentEntity,
+                        center,
+                        this.wireframe,
+                        this.boundingBox
+                    );
                     this.currentLODLevel = this.level;
                 } else {
                     // Mesh exists but considered out-of-date: rebuild and swap

@@ -6,10 +6,7 @@
     "moduleResolution": "Node",
     "strict": true,
     "sourceMap": true,
-    "lib": [
-      "dom",
-      "ESNext"
-    ],
+    "lib": ["dom", "ESNext"],
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "esModuleInterop": true,
@@ -18,9 +15,5 @@
     "noUnusedParameters": false,
     "noImplicitReturns": true
   },
-  "include": [
-    "src",
-    "types",
-    "rspack.config.js"
-  ]
+  "include": ["src", "types", "rspack.config.js"]
 }

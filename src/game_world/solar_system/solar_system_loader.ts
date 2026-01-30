@@ -174,8 +174,8 @@ export function createCDLODForAllPlanets(
     opts: CDLODOptions = {}
 ): Map<string, PlanetCDLOD> {
     const {
-        maxLevel = 8,
-        resolution = 64,
+        maxLevel = 4,
+        resolution = 32,
         faces = ["front", "back", "left", "right", "top", "bottom"],
         skip = (_name: string, body: LoadedBody) => body.bodyType === "star",
     } = opts;
@@ -202,9 +202,8 @@ export function createCDLODForAllPlanets(
                     resolution,
                     face,
                     ent,
-                    false, // wireframe
+                    true, // wireframe
                     false, // boundingBox
-                    false, // precompute
                     true, // frustumCulling
                     true, // horizonCulling
                     true // debugLOD

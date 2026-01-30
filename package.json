@@ -22,14 +22,13 @@
     "vitest": "^4.0.5"
   },
   "dependencies": {
-    "@babylonjs/core": "^8.46.2",
-    "@babylonjs/gui": "^8.46.2",
-    "@babylonjs/inspector": "^8.46.2",
-    "@babylonjs/ktx2decoder": "^8.46.2",
-    "@babylonjs/loaders": "^8.46.2",
-    "@babylonjs/materials": "^8.46.2",
+    "@babylonjs/core": "^8.49.3",
+    "@babylonjs/gui": "^8.49.3",
+    "@babylonjs/inspector": "^8.49.3",
+    "@babylonjs/ktx2decoder": "^8.49.3",
+    "@babylonjs/loaders": "^8.49.3",
+    "@babylonjs/materials": "^8.49.3",
     "cors": "^2.8.5",
-    "dotenv": "^17.2.3",
-    "socket.io-client": "^4.8.1"
+    "dotenv": "^17.2.3"
   }
 }

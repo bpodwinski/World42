@@ -57,7 +57,7 @@ export class FloatingCameraScene {
         camera.debugMode = true;
         camera.minZ = 0.001;
         camera.maxZ = 1_000_000;
-        camera.fov = 1.2;
+        camera.fov = 0.8;
         camera.checkCollisions = true;
         camera.applyGravity = false;
         camera.ellipsoid = new Vector3(0.01, 0.01, 0.01);
@@ -67,7 +67,7 @@ export class FloatingCameraScene {
         const control = new MouseSteerControlManager(camera, scene, canvas);
         control.gui = gui;
 
-        // --- Debug camera (n'influence pas le LOD) -----------------------
+        // Debug camera
         const debugCam = new UniversalCamera('debugCam', Vector3.Zero(), scene);
         debugCam.minZ = camera.minZ;
         debugCam.maxZ = camera.maxZ;
