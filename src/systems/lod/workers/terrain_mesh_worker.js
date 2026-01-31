@@ -165,7 +165,8 @@ function computeChunkMeshData(bounds, resolution, radius, face, noise) {
     const positions = new Float32Array(vertCount * 3);
     const normals = new Float32Array(vertCount * 3);
     const uvs = new Float32Array(vertCount * 2);
-    const indices = new Uint32Array(indexCount);
+    const useUint32 = vertCount > 65535;
+    const indices = useUint32 ? new Uint32Array(indexCount) : new Uint16Array(indexCount);
     let indexWrite = 0;
 
     const octaves = 8;
@@ -414,7 +415,7 @@ function toArrays(meshDataTyped) {
         positions: Array.from(meshDataTyped.positions),
         normals: Array.from(meshDataTyped.normals),
         uvs: Array.from(meshDataTyped.uvs),
-        indices: Array.from(meshDataTyped.indices)
+        indices: Array.from(meshDataTyped.indices),
     };
 }
 

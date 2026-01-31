@@ -135,7 +135,7 @@ export class ChunkForge implements IChunkForge {
                 payload: {
                     ...params,
                     noise: { seed: 1 },
-                    meshFormat: "arrays",
+                    meshFormat: "typed",
                 },
             };
 

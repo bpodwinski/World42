@@ -122,7 +122,11 @@ export class WorkerPool {
             if (msg.kind === "chunk_result") {
                 task.callback(msg.payload.meshData);
             } else if (msg.kind === "error") {
-                (task.onError ?? console.error)("[Worker Task Error]", msg.payload);
+                if (task.onError) task.onError(msg.payload);
+                else console.error("[Worker Task Error]", msg.payload);
+                this.updateWorkerStatus();
+                this.scheduleNext();
+                return;
             }
 
             this.updateWorkerStatus();
@@ -143,8 +147,14 @@ export class WorkerPool {
     }
 
     private handleWorkerError(worker: WorkerWithTask) {
+        const task = worker.currentTask;
+        delete worker.currentTask;
+
         this.markWorkerAvailable(worker);
         this.activeTaskCount--;
+
+        if (task?.onError) task.onError({ code: "worker_error", message: "Worker crashed" });
+
         this.updateWorkerStatus();
         this.scheduleNext();
     }
