@@ -4,6 +4,11 @@ import { Terrain } from '../../../game_objects/planets/rocky_planet/terrain';
 import { TerrainShader } from '../../../game_objects/planets/rocky_planet/terrains_shader';
 import { WorkerPool } from '../workers/worker_pool';
 import { Bounds, Face } from '../types';
+import { MeshKernelBuildChunkRequest } from '../workers/worker-protocol';
+
+function makeJobId(): string {
+    return (globalThis.crypto?.randomUUID?.() ?? `job-${Date.now()}-${Math.random()}`);
+}
 
 /**
  * Interface for chunk generation parameters shared by local and server generation
@@ -121,11 +126,22 @@ export class ChunkForge implements IChunkForge {
         wireframe: boolean,
         boundingBox: boolean
     ): Promise<Mesh> {
-        return new Promise<Mesh>((resolve) => {
+        return new Promise<Mesh>((resolve, reject) => {
             const priority = Vector3.Distance(center, cameraPosition);
+            const job: MeshKernelBuildChunkRequest = {
+                protocol: "mesh-kernel/1",
+                kind: "build_chunk",
+                id: makeJobId(),
+                payload: {
+                    ...params,
+                    noise: { seed: 1 },
+                    meshFormat: "arrays",
+                },
+            };
+
             this.workerPool.enqueueTask({
-                data: params,
-                priority: priority,
+                data: job,
+                priority,
                 callback: (meshData: any) => {
                     const mesh = this.buildMesh(
                         meshData,
@@ -137,7 +153,8 @@ export class ChunkForge implements IChunkForge {
                         boundingBox
                     );
                     resolve(mesh);
-                }
+                },
+                onError: (e: any) => reject(e),
             });
         });
     }
