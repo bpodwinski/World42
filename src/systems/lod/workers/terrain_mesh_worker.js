@@ -40,9 +40,7 @@ class Vector3 {
      * @returns {Vector3} New normalized vector
      */
     normalize() {
-        const len = Math.sqrt(
-            this.x * this.x + this.y * this.y + this.z * this.z
-        );
+        const len = Math.sqrt(this.x * this.x + this.y * this.y + this.z * this.z);
         if (len === 0) {
             // Avoid division by zero
             return new Vector3(0, 0, 0);
@@ -112,19 +110,13 @@ function fractalNoise(
     let amplitude = baseAmplitude;
 
     for (let i = 0; i < octaves; i++) {
-        // Pour chaque octave, on calcule le bruit, puis on l'ajoute au sum
         const value = noise.noise(x * frequency, y * frequency, z * frequency);
         sum += value * amplitude;
-
-        // On additionne l'amplitude de l'octave courante pour la normalisation
         maxPossible += amplitude;
-
-        // On passe à l'octave suivante
         frequency *= lacunarity;
         amplitude *= persistence;
     }
 
-    // Normalise pour garder le résultat final dans ~[-1..1]
     return sum / maxPossible;
 }
 
@@ -189,49 +181,25 @@ class SimplexNoise {
         let i2, j2, k2;
         if (x0 >= y0) {
             if (y0 >= z0) {
-                i1 = 1;
-                j1 = 0;
-                k1 = 0;
-                i2 = 1;
-                j2 = 1;
-                k2 = 0;
+                i1 = 1; j1 = 0; k1 = 0;
+                i2 = 1; j2 = 1; k2 = 0;
             } else if (x0 >= z0) {
-                i1 = 1;
-                j1 = 0;
-                k1 = 0;
-                i2 = 1;
-                j2 = 0;
-                k2 = 1;
+                i1 = 1; j1 = 0; k1 = 0;
+                i2 = 1; j2 = 0; k2 = 1;
             } else {
-                i1 = 0;
-                j1 = 0;
-                k1 = 1;
-                i2 = 1;
-                j2 = 0;
-                k2 = 1;
+                i1 = 0; j1 = 0; k1 = 1;
+                i2 = 1; j2 = 0; k2 = 1;
             }
         } else {
             if (y0 < z0) {
-                i1 = 0;
-                j1 = 0;
-                k1 = 1;
-                i2 = 0;
-                j2 = 1;
-                k2 = 1;
+                i1 = 0; j1 = 0; k1 = 1;
+                i2 = 0; j2 = 1; k2 = 1;
             } else if (x0 < z0) {
-                i1 = 0;
-                j1 = 1;
-                k1 = 0;
-                i2 = 0;
-                j2 = 1;
-                k2 = 1;
+                i1 = 0; j1 = 1; k1 = 0;
+                i2 = 0; j2 = 1; k2 = 1;
             } else {
-                i1 = 0;
-                j1 = 1;
-                k1 = 0;
-                i2 = 1;
-                j2 = 1;
-                k2 = 0;
+                i1 = 0; j1 = 1; k1 = 0;
+                i2 = 1; j2 = 1; k2 = 0;
             }
         }
 
@@ -249,29 +217,23 @@ class SimplexNoise {
         j &= 255;
         k &= 255;
         const gi0 = this.perm[i + this.perm[j + this.perm[k]]] % 12;
-        const gi1 =
-            this.perm[i + i1 + this.perm[j + j1 + this.perm[k + k1]]] % 12;
-        const gi2 =
-            this.perm[i + i2 + this.perm[j + j2 + this.perm[k + k2]]] % 12;
+        const gi1 = this.perm[i + i1 + this.perm[j + j1 + this.perm[k + k1]]] % 12;
+        const gi2 = this.perm[i + i2 + this.perm[j + j2 + this.perm[k + k2]]] % 12;
         const gi3 = this.perm[i + 1 + this.perm[j + 1 + this.perm[k + 1]]] % 12;
 
         const t0 = 0.6 - x0 * x0 - y0 * y0 - z0 * z0;
-        n0 =
-            t0 < 0 ? 0 : t0 * t0 * (t0 * t0) * this.dot(grad3[gi0], x0, y0, z0);
+        n0 = t0 < 0 ? 0 : t0 * t0 * (t0 * t0) * this.dot(grad3[gi0], x0, y0, z0);
 
         const t1 = 0.6 - x1 * x1 - y1 * y1 - z1 * z1;
-        n1 =
-            t1 < 0 ? 0 : t1 * t1 * (t1 * t1) * this.dot(grad3[gi1], x1, y1, z1);
+        n1 = t1 < 0 ? 0 : t1 * t1 * (t1 * t1) * this.dot(grad3[gi1], x1, y1, z1);
 
         const t2 = 0.6 - x2 * x2 - y2 * y2 - z2 * z2;
-        n2 =
-            t2 < 0 ? 0 : t2 * t2 * (t2 * t2) * this.dot(grad3[gi2], x2, y2, z2);
+        n2 = t2 < 0 ? 0 : t2 * t2 * (t2 * t2) * this.dot(grad3[gi2], x2, y2, z2);
 
         const t3 = 0.6 - x3 * x3 - y3 * y3 - z3 * z3;
-        n3 =
-            t3 < 0 ? 0 : t3 * t3 * (t3 * t3) * this.dot(grad3[gi3], x3, y3, z3);
+        n3 = t3 < 0 ? 0 : t3 * t3 * (t3 * t3) * this.dot(grad3[gi3], x3, y3, z3);
 
-        return 32 * (n0 + n1 + n2 + n3); // valeur entre -1 et 1
+        return 32 * (n0 + n1 + n2 + n3);
     }
 }
 
@@ -291,16 +253,26 @@ function seedrandom(seed) {
  * @param {number} resolution - The resolution of the grid
  * @param {number} radius - The radius of the sphere
  * @param {"front" | "back" | "left" | "right" | "top" | "bottom"} face - The face of the cube
- * @param {number} level - The current level of detail
- * @param {number} maxLevel - The maximum level of detail
- * @returns {{ positions: number[]; indices: number[]; normals: number[]; uvs: number[] }} The computed mesh data
+ * @param {SimplexNoise} noise - Noise generator instance
+ * @returns {{
+ *   positions: Float32Array;
+ *   indices: Uint32Array;
+ *   normals: Float32Array;
+ *   uvs: Float32Array;
+ *   boundsInfo: { centerLocal: [number, number, number]; boundingRadius: number; minPlanetRadius: number; maxPlanetRadius: number }
+ * }}
  */
 function computeChunkMeshData(bounds, resolution, radius, face, noise) {
-    const positions = [];
-    const indices = [];
-    const normals = [];
-    const uvs = [];
     const res = resolution;
+
+    const vertCount = (res + 1) * (res + 1);
+    const indexCount = res * res * 6;
+
+    const positions = new Float32Array(vertCount * 3);
+    const normals = new Float32Array(vertCount * 3);
+    const uvs = new Float32Array(vertCount * 2);
+    const indices = new Uint32Array(indexCount);
+    let indexWrite = 0;
 
     // Paramètres terrain
     const octaves = 8;
@@ -331,16 +303,16 @@ function computeChunkMeshData(bounds, resolution, radius, face, noise) {
         const vCenter = Math.tan(aVCenter);
 
         const posCube = mapUVtoCube(uCenter, vCenter, face);
-        return posCube.normalize().scale(radius); // centre "base sphere"
+        return posCube.normalize().scale(radius);
     }
 
     const centerLocal = computePatchCenterLocal(bounds, radius, face);
-    const dir = centerLocal.normalize(); // direction patch (unit)
+    const dir = centerLocal.normalize();
 
     let minPlanetRadius = Infinity;
     let maxPlanetRadius = -Infinity;
 
-    // PASS 1: génère les vertices + min/max radius
+    // PASS 1: vertices + min/max radius
     for (let i = 0; i <= res; i++) {
         const angleV = angleVMin + (angleVMax - angleVMin) * (i / res);
 
@@ -348,7 +320,7 @@ function computeChunkMeshData(bounds, resolution, radius, face, noise) {
             const angleU = angleUMin + (angleUMax - angleUMin) * (j / res);
 
             const posCube = mapUVtoCube(Math.tan(angleU), Math.tan(angleV), face);
-            let unit = posCube.normalize();
+            const unit = posCube.normalize();
 
             const fractalValue = fractalNoise(
                 noise,
@@ -369,25 +341,29 @@ function computeChunkMeshData(bounds, resolution, radius, face, noise) {
             if (pr > maxPlanetRadius) maxPlanetRadius = pr;
 
             const posSphere = unit.scale(pr);
-
             verts.push(posSphere);
 
-            positions.push(posSphere.x, posSphere.y, posSphere.z);
+            const vIndex = i * (res + 1) + j;
+            const pOff = vIndex * 3;
+            const uvOff = vIndex * 2;
 
-            // normale "radiale" provisoire (sera écrasée par les normales moyennées plus bas)
-            normals.push(
-                posSphere.x / pr,
-                posSphere.y / pr,
-                posSphere.z / pr
-            );
+            positions[pOff + 0] = posSphere.x;
+            positions[pOff + 1] = posSphere.y;
+            positions[pOff + 2] = posSphere.z;
+
+            // radial normal initial (will be replaced by averaged normals)
+            normals[pOff + 0] = posSphere.x / pr;
+            normals[pOff + 1] = posSphere.y / pr;
+            normals[pOff + 2] = posSphere.z / pr;
 
             const u = (Math.atan2(posSphere.x, posSphere.z) + Math.PI) / (2 * Math.PI);
             const v = Math.acos(posSphere.y / pr) / Math.PI;
-            uvs.push(u, v);
+            uvs[uvOff + 0] = u;
+            uvs[uvOff + 1] = v;
         }
     }
 
-    // Centre radial au milieu du relief + rayon de bounding sphere autour de ce centre
+    // Bounding sphere info
     const centerR = 0.5 * (minPlanetRadius + maxPlanetRadius);
     const centerLocal2 = dir.scale(centerR);
 
@@ -401,10 +377,8 @@ function computeChunkMeshData(bounds, resolution, radius, face, noise) {
     }
     const boundingRadius = Math.sqrt(maxDist2b);
 
-    // Normales moyennées (ton code existant)
-    const normalAccum = new Array(verts.length)
-        .fill(null)
-        .map(() => new Vector3(0, 0, 0));
+    // Averaged normals (existing logic, but indices go into Uint32Array)
+    const normalAccum = new Array(verts.length).fill(null).map(() => new Vector3(0, 0, 0));
     const normalCount = new Array(verts.length).fill(0);
 
     for (let i = 0; i < res; i++) {
@@ -426,11 +400,23 @@ function computeChunkMeshData(bounds, resolution, radius, face, noise) {
             if (d1 < d2) {
                 tri1Indices = [index0, index3, index1];
                 tri2Indices = [index0, index2, index3];
-                indices.push(index0, index3, index1, index0, index2, index3);
+
+                indices[indexWrite++] = index0;
+                indices[indexWrite++] = index3;
+                indices[indexWrite++] = index1;
+                indices[indexWrite++] = index0;
+                indices[indexWrite++] = index2;
+                indices[indexWrite++] = index3;
             } else {
                 tri1Indices = [index0, index2, index1];
                 tri2Indices = [index1, index2, index3];
-                indices.push(index0, index2, index1, index1, index2, index3);
+
+                indices[indexWrite++] = index0;
+                indices[indexWrite++] = index2;
+                indices[indexWrite++] = index1;
+                indices[indexWrite++] = index1;
+                indices[indexWrite++] = index2;
+                indices[indexWrite++] = index3;
             }
 
             const tri1Normal = computeTriangleNormal(
@@ -459,7 +445,7 @@ function computeChunkMeshData(bounds, resolution, radius, face, noise) {
         if (normalCount[i] > 0) {
             const avgNormal = normalAccum[i].scale(1 / normalCount[i]).normalize();
             const idx = i * 3;
-            normals[idx] = avgNormal.x;
+            normals[idx + 0] = avgNormal.x;
             normals[idx + 1] = avgNormal.y;
             normals[idx + 2] = avgNormal.z;
         }
@@ -479,7 +465,6 @@ function computeChunkMeshData(bounds, resolution, radius, face, noise) {
     };
 }
 
-
 /**
  * Computes the normal of a triangle given three vertices
  * @param {Vector3} v0 - First vertex
@@ -490,7 +475,6 @@ function computeChunkMeshData(bounds, resolution, radius, face, noise) {
 function computeTriangleNormal(v0, v1, v2) {
     const edge1 = new Vector3(v1.x - v0.x, v1.y - v0.y, v1.z - v0.z);
     const edge2 = new Vector3(v2.x - v0.x, v2.y - v0.y, v2.z - v0.z);
-
     return edge2.cross(edge1).normalize();
 }
 
@@ -504,45 +488,33 @@ function computeTriangleNormal(v0, v1, v2) {
  */
 function mapUVtoCube(u, v, face) {
     switch (face) {
-        case 'front':
-            return new Vector3(u, v, 1);
-        case 'back':
-            return new Vector3(-u, v, -1);
-        case 'left':
-            return new Vector3(-1, v, u);
-        case 'right':
-            return new Vector3(1, v, -u);
-        case 'top':
-            return new Vector3(u, 1, -v);
-        case 'bottom':
-            return new Vector3(u, -1, v);
-        default:
-            return new Vector3(u, v, 1);
+        case "front": return new Vector3(u, v, 1);
+        case "back": return new Vector3(-u, v, -1);
+        case "left": return new Vector3(-1, v, u);
+        case "right": return new Vector3(1, v, -u);
+        case "top": return new Vector3(u, 1, -v);
+        case "bottom": return new Vector3(u, -1, v);
+        default: return new Vector3(u, v, 1);
     }
 }
 
 /**
  * Handles incoming messages to the worker
- * Expects a message with properties: bounds, resolution, radius, face, level, and maxLevel
- * Computes the mesh data and posts the result back
- *
- * @param {MessageEvent} event - The message event containing the mesh parameters
  */
 self.onmessage = (event) => {
-    //const start = performance.now();
-
+    const start = performance.now();
     const { bounds, resolution, radius, face, seed } = event.data;
     const noiseInstance = new SimplexNoise(seed || 1);
 
-    const meshData = computeChunkMeshData(
-        bounds,
-        resolution,
-        radius,
-        face,
-        noiseInstance
-    );
+    const meshData = computeChunkMeshData(bounds, resolution, radius, face, noiseInstance);
 
-    self.postMessage(meshData);
+    // Zero-copy transfer of large buffers
+    self.postMessage(meshData, [
+        meshData.positions.buffer,
+        meshData.normals.buffer,
+        meshData.uvs.buffer,
+        meshData.indices.buffer
+    ]);
 
-    //console.log('Chunk created at: ' + (performance.now() - start) + 'ms');
+    console.log('Chunk created at: ' + (performance.now() - start) + 'ms');
 };
