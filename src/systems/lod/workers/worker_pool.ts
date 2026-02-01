@@ -4,7 +4,7 @@ import type { MeshKernelResponse, MeshKernelRequest } from "./worker-protocol";
 export interface WorkerTask {
     data: any; // MeshKernelRequest (ou legacy)
     priority: number;
-    callback: (result: any) => void;
+    callback: (result: any, stats?: any) => void;
     onError?: (err: any) => void;
 }
 
@@ -25,7 +25,7 @@ export class WorkerPool {
     private workerStatusTimeout: number | null = null;
 
     constructor(
-        workerScriptURL: string,
+        createWorker: () => Worker,
         maxWorkers: number,
         maxConcurrentTasks: number = maxWorkers,
         displayStatus: boolean = false
@@ -37,7 +37,7 @@ export class WorkerPool {
         this.taskQueue = new PriorityQueue<WorkerTask>((a, b) => a.priority - b.priority);
 
         for (let i = 0; i < maxWorkers; i++) {
-            const worker = new Worker(workerScriptURL, { type: "module" }) as WorkerWithTask;
+            const worker = createWorker() as WorkerWithTask;
             worker.isReady = false;
 
             worker.onmessage = (event: MessageEvent) => {
@@ -120,17 +120,19 @@ export class WorkerPool {
             }
 
             if (msg.kind === "chunk_result") {
-                task.callback(msg.payload.meshData);
+                task.callback(msg.payload.meshData, msg.payload.stats);
             } else if (msg.kind === "error") {
                 if (task.onError) task.onError(msg.payload);
                 else console.error("[Worker Task Error]", msg.payload);
                 this.updateWorkerStatus();
                 this.scheduleNext();
+
                 return;
             }
 
             this.updateWorkerStatus();
             this.scheduleNext();
+
             return;
         }
 
@@ -140,7 +142,7 @@ export class WorkerPool {
 
         const task = worker.currentTask;
         delete worker.currentTask;
-        if (task) task.callback(data);
+        if (task) task.callback(data, undefined);
 
         this.updateWorkerStatus();
         this.scheduleNext();

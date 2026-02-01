@@ -1,18 +1,17 @@
-import { Scene, Mesh, Vector3 } from '@babylonjs/core';
-import { ChunkTree, } from './chunk_tree';
-import { Terrain } from '../../../game_objects/planets/rocky_planet/terrain';
-import { TerrainShader } from '../../../game_objects/planets/rocky_planet/terrains_shader';
-import { WorkerPool } from '../workers/worker_pool';
-import { Bounds, Face } from '../types';
-import { MeshKernelBuildChunkRequest } from '../workers/worker-protocol';
+import { Scene, Mesh, Vector3 } from "@babylonjs/core";
+import { ChunkTree } from "./chunk_tree";
+import { Terrain } from "../../../game_objects/planets/rocky_planet/terrain";
+import { TerrainShader } from "../../../game_objects/planets/rocky_planet/terrains_shader";
+import { WorkerPool } from "../workers/worker_pool";
+import type { Bounds, Face } from "../types";
+import type { MeshKernelBuildChunkRequest } from "../workers/worker-protocol";
+
+const DEBUG_MESH_TIMINGS = true;
 
 function makeJobId(): string {
-    return (globalThis.crypto?.randomUUID?.() ?? `job-${Date.now()}-${Math.random()}`);
+    return globalThis.crypto?.randomUUID?.() ?? `job-${Date.now()}-${Math.random()}`;
 }
 
-/**
- * Interface for chunk generation parameters shared by local and server generation
- */
 interface ChunkGenerationParams {
     bounds: Bounds;
     resolution: number;
@@ -22,54 +21,15 @@ interface ChunkGenerationParams {
     maxLevel: number;
 }
 
-/**
- * Interface defining the shared methods for chunk forging
- */
-interface IChunkForge {
-    worker(
-        params: ChunkGenerationParams,
-        cameraPosition: Vector3,
-        parentEntity: any,
-        center: Vector3,
-        wireframe: boolean,
-        boundingBox: boolean
-    ): Promise<Mesh>;
-}
-
-/**
- * Class for forging chunk meshes using Web Worker or server via Socket.IO
- *
- * Implements IChunkForge; both worker() and server() share the same parameters via ChunkGenerationParams
- */
-export class ChunkForge implements IChunkForge {
+export class ChunkForge {
     private scene: Scene;
     private workerPool: WorkerPool;
 
-    /**
-     * Creates a new ChunkForge instance
-     *
-     * @param scene - Babylon.js scene
-     * @param workerPool - WorkerPool instance
-     */
     constructor(scene: Scene, workerPool: WorkerPool) {
         this.scene = scene;
         this.workerPool = workerPool;
     }
 
-    /**
-     * Builds a terrain mesh from computed mesh data
-     *
-     * Used by both worker() and server()
-     *
-     * @param meshData - Computed mesh data (positions, indices, normals, uvs)
-     * @param params - Chunk generation parameters
-     * @param cameraPosition - Camera position for shader creation
-     * @param parentEntity - Parent entity to attach the mesh
-     * @param center - Pre-calculated center of the chunk
-     * @param wireframe - Whether to render the mesh in wireframe mode
-     * @param boundingBox - Whether to show the bounding box for the mesh
-     * @returns The generated Mesh
-     */
     private buildMesh(
         meshData: any,
         params: ChunkGenerationParams,
@@ -79,21 +39,18 @@ export class ChunkForge implements IChunkForge {
         wireframe: boolean,
         boundingBox: boolean
     ): Mesh {
-        const terrainMesh = Terrain.createMesh(
-            this.scene,
-            meshData,
-            params.face,
-            params.level
-        );
+        const tMesh0 = performance.now();
+        const terrainMesh = Terrain.createMesh(this.scene, meshData, params.face, params.level);
+        const tMesh1 = performance.now();
 
         terrainMesh.metadata = terrainMesh.metadata ?? {};
-        if (meshData?.boundsInfo) {
-            terrainMesh.metadata.boundsInfo = meshData.boundsInfo;
-        }
+        if (meshData?.boundsInfo) terrainMesh.metadata.boundsInfo = meshData.boundsInfo;
+
         terrainMesh.parent = parentEntity;
         terrainMesh.checkCollisions = true;
         terrainMesh.showBoundingBox = boundingBox;
 
+        const tMat0 = performance.now();
         terrainMesh.material = new TerrainShader(this.scene).create(
             params.resolution,
             params.level,
@@ -104,20 +61,20 @@ export class ChunkForge implements IChunkForge {
             wireframe,
             ChunkTree.debugLODEnabled
         );
+        const tMat1 = performance.now();
+
+        if (DEBUG_MESH_TIMINGS) {
+            console.log(
+                `[mesh] babylon mesh=${(tMesh1 - tMesh0).toFixed(2)}ms material=${(tMat1 - tMat0).toFixed(2)}ms`
+                + ` face=${params.face} level=${params.level} res=${params.resolution}`
+            );
+        }
+
         terrainMesh.alwaysSelectAsActiveMesh = true;
+
         return terrainMesh;
     }
 
-    /**
-     * Forges a mesh for a chunk using a worker
-     *
-     * @param params - Chunk generation parameters
-     * @param cameraPosition - Camera position for priority calculation and shader creation
-     * @param parentEntity - Parent entity to attach the mesh
-     * @param center - Pre-calculated center of the chunk
-     * @param wireframe - Whether to render the mesh in wireframe mode
-     * @returns A promise resolving to the generated Mesh
-     */
     async worker(
         params: ChunkGenerationParams,
         cameraPosition: Vector3,
@@ -128,10 +85,13 @@ export class ChunkForge implements IChunkForge {
     ): Promise<Mesh> {
         return new Promise<Mesh>((resolve, reject) => {
             const priority = Vector3.Distance(center, cameraPosition);
+            const jobId = makeJobId();
+            const t0 = performance.now();
+
             const job: MeshKernelBuildChunkRequest = {
                 protocol: "mesh-kernel/1",
                 kind: "build_chunk",
-                id: makeJobId(),
+                id: jobId,
                 payload: {
                     ...params,
                     noise: { seed: 1 },
@@ -142,19 +102,33 @@ export class ChunkForge implements IChunkForge {
             this.workerPool.enqueueTask({
                 data: job,
                 priority,
-                callback: (meshData: any) => {
-                    const mesh = this.buildMesh(
-                        meshData,
-                        params,
-                        cameraPosition,
-                        parentEntity,
-                        center,
-                        wireframe,
-                        boundingBox
-                    );
-                    resolve(mesh);
+                callback: (meshData: any, stats?: any) => {
+                    try {
+                        const tBuild0 = performance.now();
+                        const mesh = this.buildMesh(meshData, params, cameraPosition, parentEntity, center, wireframe, boundingBox);
+                        const tBuild1 = performance.now();
+                        const t1 = performance.now();
+
+                        if (DEBUG_MESH_TIMINGS) {
+                            const workerMs = stats?.ms ?? NaN;
+                            const vtx = stats?.vertexCount ?? ((meshData?.positions?.length ?? 0) / 3);
+                            const idx = stats?.indexCount ?? (meshData?.indices?.length ?? 0);
+
+                            console.log(
+                                `[mesh] job=${jobId} total=${(t1 - t0).toFixed(2)}ms`
+                                + ` worker=${isNaN(workerMs) ? "?" : workerMs.toFixed(2)}ms`
+                                + ` build=${(tBuild1 - tBuild0).toFixed(2)}ms`
+                                + ` vtx=${vtx} idx=${idx}`
+                                + ` face=${params.face} level=${params.level} res=${params.resolution}`
+                            );
+                        }
+
+                        resolve(mesh);
+                    } catch (e) {
+                        reject(e);
+                    }
                 },
-                onError: (e: any) => reject(e),
+                onError: reject,
             });
         });
     }

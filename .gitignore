@@ -23,3 +23,6 @@ package-lock.json
 !public/**/*.tiff
 !public/**/*.hdr
 !public/**/*.exr
+
+terrain/target/
+Cargo.lock

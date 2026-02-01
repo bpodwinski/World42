@@ -1,6 +1,14 @@
 import { Scene, Mesh, Vector3, VertexData } from "@babylonjs/core";
 import { Face } from "../../../systems/lod/types";
 
+export type MeshDataLike = {
+    positions: number[] | Float32Array;
+    normals: number[] | Float32Array;
+    uvs: number[] | Float32Array;
+    indices: number[] | Uint16Array | Uint32Array;
+    boundsInfo?: any;
+};
+
 /**
  * Terrain handles geometry creation for terrain chunks
  *
@@ -50,24 +58,21 @@ export class Terrain {
      */
     static createMesh(
         scene: Scene,
-        meshData: {
-            positions: number[];
-            indices: number[];
-            normals: number[];
-            uvs: number[];
-        },
+        meshData: MeshDataLike,
         face: Face,
         level: number
     ): Mesh {
-        const mesh = new Mesh("chunk_" + level + "_" + face, scene);
+        const mesh = new Mesh(`chunk_${face}_${level}`, scene);
 
-        const vertexData = new VertexData();
-        vertexData.positions = meshData.positions;
-        vertexData.indices = meshData.indices;
-        vertexData.normals = meshData.normals;
-        vertexData.uvs = meshData.uvs;
-        vertexData.applyToMesh(mesh, true);
+        const vd = new VertexData();
 
+        // Babylon accepts typed arrays; cast to any to avoid TS friction.
+        vd.positions = meshData.positions as any;
+        vd.normals = meshData.normals as any;
+        vd.uvs = meshData.uvs as any;
+        vd.indices = meshData.indices as any;
+
+        vd.applyToMesh(mesh, true);
         return mesh;
     }
 }
