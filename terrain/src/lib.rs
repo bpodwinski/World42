@@ -4,20 +4,20 @@ use wasm_bindgen::prelude::*;
 
 const PI: f64 = core::f64::consts::PI;
 
-fn saturate(x: f64) -> f64 {
-    if x < 0.0 {
-        0.0
-    } else if x > 1.0 {
-        1.0
-    } else {
-        x
-    }
-}
+// fn saturate(x: f64) -> f64 {
+//     if x < 0.0 {
+//         0.0
+//     } else if x > 1.0 {
+//         1.0
+//     } else {
+//         x
+//     }
+// }
 
-fn smoothstep(t: f64) -> f64 {
-    // 3t^2 - 2t^3
-    t * t * (3.0 - 2.0 * t)
-}
+// fn smoothstep(t: f64) -> f64 {
+//     // 3t^2 - 2t^3
+//     t * t * (3.0 - 2.0 * t)
+// }
 
 fn map_uv_to_cube(u: f64, v: f64, face: &str) -> [f64; 3] {
     match face {
@@ -119,6 +119,8 @@ pub fn build_chunk(
     persistence: f64,
     global_amp: f64,
 ) -> Result<JsValue, JsValue> {
+    console_error_panic_hook::set_once();
+
     let res = resolution as usize;
     let vert_count = (res + 1) * (res + 1);
     let index_count = res * res * 6;
