@@ -57,14 +57,32 @@ export class FloatingCameraScene {
         camera.debugMode = true;
         camera.minZ = 0.001;
         camera.maxZ = 1_000_000;
-        camera.fov = 0.9;
-        camera.checkCollisions = true;
+        camera.fov = 1.2;
         camera.applyGravity = false;
-        camera.ellipsoid = new Vector3(0.01, 0.01, 0.01);
         camera.inertia = 0;
         camera.inputs.clear();
+        camera.checkCollisions = false;
 
-        const control = new MouseSteerControlManager(camera, scene, canvas);
+        // Collider mesh invisible (Render-space)
+        const camCollider = MeshBuilder.CreateSphere("camCollider", { segments: 64, diameter: 0.05 }, scene);
+        // diamètre 6 => rayon 3 (à ajuster)
+        camCollider.isVisible = false;
+        camCollider.isPickable = false;
+        camCollider.checkCollisions = true;
+        camCollider.position.set(0, 0, 0);
+        // Taille collision (demi-axes). Ici 0.005 => rayon 0.005 si ton monde est en "km" => 5m
+        camCollider.ellipsoid = new Vector3(0.05, 0.05, 0.05);
+        // Optionnel: décale l’ellipsoïde vers le bas/haut pour simuler “pieds”
+        camCollider.ellipsoidOffset = new Vector3(0.05, 0.05, 0.05);
+
+        // Reset collider après l'intégration floating-origin (évite de ré-intégrer le même offset)
+        scene.onAfterActiveMeshesEvaluationObservable.add(() => {
+            // OriginCamera fait: doublepos += camera.position; camera.position = 0
+            // donc on recentre aussi le collider
+            camCollider.position.set(0, 0, 0);
+        });
+
+        const control = new MouseSteerControlManager(camera, scene, canvas, camCollider, {});
         control.gui = gui;
 
         // Debug camera

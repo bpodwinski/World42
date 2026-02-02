@@ -1,4 +1,4 @@
-import { Scene, Vector3, Quaternion, KeyboardEventTypes } from "@babylonjs/core";
+import { Scene, Vector3, Quaternion, KeyboardEventTypes, AbstractMesh } from "@babylonjs/core";
 import { OriginCamera } from "../camera/camera_manager";
 import { GuiManager } from "../gui/gui_manager";
 
@@ -100,10 +100,14 @@ export class MouseSteerControlManager {
     private _steerX = 0;   // -1..1 (yaw)
     private _steerY = 0;   // -1..1 (pitch)
 
-    constructor(camera: OriginCamera, scene: Scene, canvas: HTMLCanvasElement, opts: SpaceFlightOpts = {}) {
+    private collider?: AbstractMesh;
+    private _delta = new Vector3();
+
+    constructor(camera: OriginCamera, scene: Scene, canvas: HTMLCanvasElement, collider?: AbstractMesh, opts: SpaceFlightOpts = {}) {
         this.camera = camera;
         this.scene = scene;
         this.canvas = canvas;
+        this.collider = collider;
         this.opts = {
             deadzonePx: opts.deadzonePx ?? 50,
             maxRadiusPx: opts.maxRadiusPx ?? 500,
@@ -111,11 +115,11 @@ export class MouseSteerControlManager {
             maxYawRate: opts.maxYawRate ?? 0.75,
             maxPitchRate: opts.maxPitchRate ?? 0.75,
             invertY: opts.invertY ?? false,
-            acceleration: opts.acceleration ?? 100,
-            strafeAcceleration: opts.strafeAcceleration ?? 100,
-            maxSpeed: opts.maxSpeed ?? 9000,
+            acceleration: opts.acceleration ?? 2,
+            strafeAcceleration: opts.strafeAcceleration ?? 2,
+            maxSpeed: opts.maxSpeed ?? 1000,
             damping: opts.damping ?? 0.02,
-            boostMultiplier: opts.boostMultiplier ?? 10,
+            boostMultiplier: opts.boostMultiplier ?? 5,
             brakeDamping: opts.brakeDamping ?? 0.3,
             yawAcceleration: opts.yawAcceleration ?? 10,
             pitchAcceleration: opts.pitchAcceleration ?? 10,
@@ -135,6 +139,38 @@ export class MouseSteerControlManager {
 
         this.bindInputs();
         this.beforeRenderObserver = this.scene.onBeforeRenderObservable.add(this.update);
+    }
+
+    private _deltaFrame = new Vector3();
+    private _deltaStep = new Vector3();
+    private _moveWithSubSteps(deltaRender: Vector3): void {
+        const collider = this.collider;
+        if (!collider) {
+            this.camera.position.addInPlace(deltaRender);
+            return;
+        }
+
+        // Copier le delta (NE PAS réutiliser le même vecteur en input/output)
+        this._deltaFrame.copyFrom(deltaRender);
+
+        const ell = (collider as any).ellipsoid as Vector3 | undefined;
+        const radiusApprox = ell ? Math.max(ell.x, ell.y, ell.z) : 3;
+        const maxStep = Math.max(0.25, radiusApprox * 0.25);
+
+        const dist = this._deltaFrame.length();
+        if (dist <= 1e-9) return;
+
+        const steps = Math.min(32, Math.max(1, Math.ceil(dist / maxStep)));
+        const inv = 1 / steps;
+
+        // step = deltaFrame / steps (constant)
+        this._deltaFrame.scaleToRef(inv, this._deltaStep);
+
+        for (let i = 0; i < steps; i++) {
+            collider.moveWithCollisions(this._deltaStep);
+        }
+
+        this.camera.position.copyFrom(collider.position);
     }
 
     public dispose(): void {
@@ -393,9 +429,10 @@ export class MouseSteerControlManager {
         const speed = this.velocity.length();
         if (speed > this.opts.maxSpeed) this.velocity.scaleInPlace(this.opts.maxSpeed / speed);
 
-        // 6) Move in world (floating-origin)
+        // 6) Move (Render-space)
         if (this.velocity.lengthSquared() > 0) {
-            this.camera.doublepos.addInPlace(this.velocity.scale(dt));
+            this.velocity.scaleToRef(dt, this._delta); // deltaRender = v * dt
+            this._moveWithSubSteps(this._delta);
         }
     };
 }
