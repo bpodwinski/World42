@@ -202,11 +202,11 @@ export function createCDLODForAllPlanets(
                     resolution,
                     face,
                     ent,
-                    false, // wireframe
-                    false, // boundingBox
-                    true, // frustumCulling
-                    true, // backsideCulling
-                    true // debugLOD
+                    false,
+                    false,
+                    true,
+                    true,
+                    true
                 )
         );
 

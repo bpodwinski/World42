@@ -4,7 +4,7 @@ import { Terrain } from "../../../game_objects/planets/rocky_planet/terrain";
 import { TerrainShader } from "../../../game_objects/planets/rocky_planet/terrains_shader";
 import { WorkerPool } from "../workers/worker_pool";
 import type { Bounds, Face } from "../types";
-import type { MeshKernelBuildChunkRequest } from "../workers/worker-protocol";
+import type { MeshKernelBuildChunkRequest } from "../workers/worker_protocol";
 
 const DEBUG_MESH_TIMINGS = true;
 

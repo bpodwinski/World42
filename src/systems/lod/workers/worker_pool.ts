@@ -1,5 +1,5 @@
 import { PriorityQueue } from "./priority_queue";
-import type { MeshKernelResponse, MeshKernelRequest } from "./worker-protocol";
+import type { MeshKernelResponse, MeshKernelRequest } from "./worker_protocol";
 
 /**
  * A unit of work scheduled for a {@link WorkerPool}.

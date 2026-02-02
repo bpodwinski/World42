@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 
-import type { MeshKernelRequest, MeshKernelResponse, MeshKernelBuildChunkRequest } from "./worker-protocol";
-import { MESH_KERNEL_PROTOCOL } from "./worker-protocol";
+import type { MeshKernelRequest, MeshKernelResponse, MeshKernelBuildChunkRequest } from "./worker_protocol";
+import { MESH_KERNEL_PROTOCOL } from "./worker_protocol";
 
 // IMPORTANT: importer le glue JS, pas le .wasm
 import initWasm, { build_chunk } from "../../../../terrain/pkg/mesh_kernel_wasm.js";
