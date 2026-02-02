@@ -10,24 +10,8 @@
  * Minimal implementation of a 3D vector
  */
 class Vector3 {
-    /**
-     * Creates new instance of Vector3
-     * @param {number} x - X component
-     * @param {number} y - Y component
-     * @param {number} z - Z component
-     */
-    constructor(x, y, z) {
-        this.x = x;
-        this.y = y;
-        this.z = z;
-    }
+    constructor(x, y, z) { this.x = x; this.y = y; this.z = z; }
 
-    /**
-     * Calculates distance between two vectors
-     * @param {Vector3} v1 - First vector
-     * @param {Vector3} v2 - Second vector
-     * @returns {number} Euclidean distance between v1 and v2
-     */
     static Distance(v1, v2) {
         const dx = v2.x - v1.x;
         const dy = v2.y - v1.y;
@@ -35,35 +19,14 @@ class Vector3 {
         return Math.sqrt(dx * dx + dy * dy + dz * dz);
     }
 
-    /**
-     * Normalizes vector
-     * @returns {Vector3} New normalized vector
-     */
     normalize() {
-        const len = Math.sqrt(
-            this.x * this.x + this.y * this.y + this.z * this.z
-        );
-        if (len === 0) {
-            // Avoid division by zero
-            return new Vector3(0, 0, 0);
-        }
+        const len = Math.sqrt(this.x * this.x + this.y * this.y + this.z * this.z);
+        if (len === 0) return new Vector3(0, 0, 0);
         return new Vector3(this.x / len, this.y / len, this.z / len);
     }
 
-    /**
-     * Scales vector by a given scalar
-     * @param {number} s - Scalar value to multiply
-     * @returns {Vector3} New scaled vector
-     */
-    scale(s) {
-        return new Vector3(this.x * s, this.y * s, this.z * s);
-    }
+    scale(s) { return new Vector3(this.x * s, this.y * s, this.z * s); }
 
-    /**
-     * Computes the cross product of two vectors
-     * @param {Vector3} v - The other vector
-     * @returns {Vector3} The resulting cross product vector
-     */
     cross(v) {
         return new Vector3(
             this.y * v.z - this.z * v.y,
@@ -72,29 +35,9 @@ class Vector3 {
         );
     }
 
-    /**
-     * Adds another vector to this one
-     * @param {Vector3} v - The vector to add
-     * @returns {Vector3} The resulting vector
-     */
-    add(v) {
-        return new Vector3(this.x + v.x, this.y + v.y, this.z + v.z);
-    }
+    add(v) { return new Vector3(this.x + v.x, this.y + v.y, this.z + v.z); }
 }
 
-/**
- * Calcule un bruit fractal multi-octaves à partir d'un générateur de bruit 3D (SimplexNoise)
- * @param {SimplexNoise} noise - Instance du générateur SimplexNoise
- * @param {number} x - Coordonnée X
- * @param {number} y - Coordonnée Y
- * @param {number} z - Coordonnée Z
- * @param {number} octaves - Nombre d'octaves (4, 5, 6, ...)
- * @param {number} baseFrequency - Fréquence de départ
- * @param {number} baseAmplitude - Amplitude de départ
- * @param {number} lacunarity - Facteur de multiplication de la fréquence à chaque octave (souvent ~2.0)
- * @param {number} persistence - Facteur de multiplication de l'amplitude à chaque octave (souvent ~0.5)
- * @returns {number} Valeur normalisée du bruit fractal (≈ entre -1 et 1)
- */
 function fractalNoise(
     noise,
     x,
@@ -107,66 +50,42 @@ function fractalNoise(
     persistence = 0.5
 ) {
     let sum = 0;
-    let maxPossible = 0; // pour normaliser le résultat final
+    let maxPossible = 0;
     let frequency = baseFrequency;
     let amplitude = baseAmplitude;
 
     for (let i = 0; i < octaves; i++) {
-        // Pour chaque octave, on calcule le bruit, puis on l'ajoute au sum
         const value = noise.noise(x * frequency, y * frequency, z * frequency);
         sum += value * amplitude;
-
-        // On additionne l'amplitude de l'octave courante pour la normalisation
         maxPossible += amplitude;
-
-        // On passe à l'octave suivante
         frequency *= lacunarity;
         amplitude *= persistence;
     }
 
-    // Normalise pour garder le résultat final dans ~[-1..1]
     return sum / maxPossible;
 }
 
-// Simplex Noise 3D (adapté pour le worker)
 class SimplexNoise {
     constructor(seed = 0) {
         this.p = new Uint8Array(512);
         this.perm = new Uint8Array(512);
-        for (let i = 0; i < 256; i++) {
-            this.p[i] = i;
-        }
+        for (let i = 0; i < 256; i++) this.p[i] = i;
 
-        // Fisher-Yates shuffle
         let rng = seedrandom(seed);
         for (let i = 255; i > 0; i--) {
             const n = Math.floor(rng() * (i + 1));
             [this.p[i], this.p[n]] = [this.p[n], this.p[i]];
         }
-
-        for (let i = 0; i < 512; i++) {
-            this.perm[i] = this.p[i & 255];
-        }
+        for (let i = 0; i < 512; i++) this.perm[i] = this.p[i & 255];
     }
 
-    dot(g, x, y, z) {
-        return g[0] * x + g[1] * y + g[2] * z;
-    }
+    dot(g, x, y, z) { return g[0] * x + g[1] * y + g[2] * z; }
 
     noise(xin, yin, zin) {
         const grad3 = [
-            [1, 1, 0],
-            [-1, 1, 0],
-            [1, -1, 0],
-            [-1, -1, 0],
-            [1, 0, 1],
-            [-1, 0, 1],
-            [1, 0, -1],
-            [-1, 0, -1],
-            [0, 1, 1],
-            [0, -1, 1],
-            [0, 1, -1],
-            [0, -1, -1]
+            [1, 1, 0], [-1, 1, 0], [1, -1, 0], [-1, -1, 0],
+            [1, 0, 1], [-1, 0, 1], [1, 0, -1], [-1, 0, -1],
+            [0, 1, 1], [0, -1, 1], [0, 1, -1], [0, -1, -1]
         ];
 
         const F3 = 1 / 3;
@@ -188,51 +107,13 @@ class SimplexNoise {
         let i1, j1, k1;
         let i2, j2, k2;
         if (x0 >= y0) {
-            if (y0 >= z0) {
-                i1 = 1;
-                j1 = 0;
-                k1 = 0;
-                i2 = 1;
-                j2 = 1;
-                k2 = 0;
-            } else if (x0 >= z0) {
-                i1 = 1;
-                j1 = 0;
-                k1 = 0;
-                i2 = 1;
-                j2 = 0;
-                k2 = 1;
-            } else {
-                i1 = 0;
-                j1 = 0;
-                k1 = 1;
-                i2 = 1;
-                j2 = 0;
-                k2 = 1;
-            }
+            if (y0 >= z0) { i1 = 1; j1 = 0; k1 = 0; i2 = 1; j2 = 1; k2 = 0; }
+            else if (x0 >= z0) { i1 = 1; j1 = 0; k1 = 0; i2 = 1; j2 = 0; k2 = 1; }
+            else { i1 = 0; j1 = 0; k1 = 1; i2 = 1; j2 = 0; k2 = 1; }
         } else {
-            if (y0 < z0) {
-                i1 = 0;
-                j1 = 0;
-                k1 = 1;
-                i2 = 0;
-                j2 = 1;
-                k2 = 1;
-            } else if (x0 < z0) {
-                i1 = 0;
-                j1 = 1;
-                k1 = 0;
-                i2 = 0;
-                j2 = 1;
-                k2 = 1;
-            } else {
-                i1 = 0;
-                j1 = 1;
-                k1 = 0;
-                i2 = 1;
-                j2 = 1;
-                k2 = 0;
-            }
+            if (y0 < z0) { i1 = 0; j1 = 0; k1 = 1; i2 = 0; j2 = 1; k2 = 1; }
+            else if (x0 < z0) { i1 = 0; j1 = 1; k1 = 0; i2 = 0; j2 = 1; k2 = 1; }
+            else { i1 = 0; j1 = 1; k1 = 0; i2 = 1; j2 = 1; k2 = 0; }
         }
 
         let x1 = x0 - i1 + G3;
@@ -245,37 +126,28 @@ class SimplexNoise {
         let y3 = y0 - 1 + 3 * G3;
         let z3 = z0 - 1 + 3 * G3;
 
-        i &= 255;
-        j &= 255;
-        k &= 255;
+        i &= 255; j &= 255; k &= 255;
         const gi0 = this.perm[i + this.perm[j + this.perm[k]]] % 12;
-        const gi1 =
-            this.perm[i + i1 + this.perm[j + j1 + this.perm[k + k1]]] % 12;
-        const gi2 =
-            this.perm[i + i2 + this.perm[j + j2 + this.perm[k + k2]]] % 12;
+        const gi1 = this.perm[i + i1 + this.perm[j + j1 + this.perm[k + k1]]] % 12;
+        const gi2 = this.perm[i + i2 + this.perm[j + j2 + this.perm[k + k2]]] % 12;
         const gi3 = this.perm[i + 1 + this.perm[j + 1 + this.perm[k + 1]]] % 12;
 
         const t0 = 0.6 - x0 * x0 - y0 * y0 - z0 * z0;
-        n0 =
-            t0 < 0 ? 0 : t0 * t0 * (t0 * t0) * this.dot(grad3[gi0], x0, y0, z0);
+        n0 = t0 < 0 ? 0 : t0 * t0 * (t0 * t0) * this.dot(grad3[gi0], x0, y0, z0);
 
         const t1 = 0.6 - x1 * x1 - y1 * y1 - z1 * z1;
-        n1 =
-            t1 < 0 ? 0 : t1 * t1 * (t1 * t1) * this.dot(grad3[gi1], x1, y1, z1);
+        n1 = t1 < 0 ? 0 : t1 * t1 * (t1 * t1) * this.dot(grad3[gi1], x1, y1, z1);
 
         const t2 = 0.6 - x2 * x2 - y2 * y2 - z2 * z2;
-        n2 =
-            t2 < 0 ? 0 : t2 * t2 * (t2 * t2) * this.dot(grad3[gi2], x2, y2, z2);
+        n2 = t2 < 0 ? 0 : t2 * t2 * (t2 * t2) * this.dot(grad3[gi2], x2, y2, z2);
 
         const t3 = 0.6 - x3 * x3 - y3 * y3 - z3 * z3;
-        n3 =
-            t3 < 0 ? 0 : t3 * t3 * (t3 * t3) * this.dot(grad3[gi3], x3, y3, z3);
+        n3 = t3 < 0 ? 0 : t3 * t3 * (t3 * t3) * this.dot(grad3[gi3], x3, y3, z3);
 
-        return 32 * (n0 + n1 + n2 + n3); // valeur entre -1 et 1
+        return 32 * (n0 + n1 + n2 + n3);
     }
 }
 
-// Seedable RNG
 function seedrandom(seed) {
     let x = Math.sin(seed) * 10000;
     return () => {
@@ -284,25 +156,19 @@ function seedrandom(seed) {
     };
 }
 
-/**
- * Computes mesh data for terrain chunk
- *
- * @param {{ uMin: number; uMax: number; vMin: number; vMax: number }} bounds - The UV bounds of the chunk
- * @param {number} resolution - The resolution of the grid
- * @param {number} radius - The radius of the sphere
- * @param {"front" | "back" | "left" | "right" | "top" | "bottom"} face - The face of the cube
- * @param {number} level - The current level of detail
- * @param {number} maxLevel - The maximum level of detail
- * @returns {{ positions: number[]; indices: number[]; normals: number[]; uvs: number[] }} The computed mesh data
- */
 function computeChunkMeshData(bounds, resolution, radius, face, noise) {
-    const positions = [];
-    const indices = [];
-    const normals = [];
-    const uvs = [];
     const res = resolution;
 
-    // Paramètres terrain
+    const vertCount = (res + 1) * (res + 1);
+    const indexCount = res * res * 6;
+
+    const positions = new Float32Array(vertCount * 3);
+    const normals = new Float32Array(vertCount * 3);
+    const uvs = new Float32Array(vertCount * 2);
+    const useUint32 = vertCount > 65535;
+    const indices = useUint32 ? new Uint32Array(indexCount) : new Uint16Array(indexCount);
+    let indexWrite = 0;
+
     const octaves = 8;
     const baseFrequency = 1.0;
     const baseAmplitude = 4.0;
@@ -310,7 +176,6 @@ function computeChunkMeshData(bounds, resolution, radius, face, noise) {
     const persistence = 0.5;
     const globalTerrainAmplitude = 100.0;
 
-    // Angles U/V
     const angleUMin = Math.atan(bounds.uMin);
     const angleUMax = Math.atan(bounds.uMax);
     const angleVMin = Math.atan(bounds.vMin);
@@ -331,16 +196,15 @@ function computeChunkMeshData(bounds, resolution, radius, face, noise) {
         const vCenter = Math.tan(aVCenter);
 
         const posCube = mapUVtoCube(uCenter, vCenter, face);
-        return posCube.normalize().scale(radius); // centre "base sphere"
+        return posCube.normalize().scale(radius);
     }
 
     const centerLocal = computePatchCenterLocal(bounds, radius, face);
-    const dir = centerLocal.normalize(); // direction patch (unit)
+    const dir = centerLocal.normalize();
 
     let minPlanetRadius = Infinity;
     let maxPlanetRadius = -Infinity;
 
-    // PASS 1: génère les vertices + min/max radius
     for (let i = 0; i <= res; i++) {
         const angleV = angleVMin + (angleVMax - angleVMin) * (i / res);
 
@@ -348,13 +212,11 @@ function computeChunkMeshData(bounds, resolution, radius, face, noise) {
             const angleU = angleUMin + (angleUMax - angleUMin) * (j / res);
 
             const posCube = mapUVtoCube(Math.tan(angleU), Math.tan(angleV), face);
-            let unit = posCube.normalize();
+            const unit = posCube.normalize();
 
             const fractalValue = fractalNoise(
                 noise,
-                unit.x,
-                unit.y,
-                unit.z,
+                unit.x, unit.y, unit.z,
                 octaves,
                 baseFrequency,
                 baseAmplitude,
@@ -369,25 +231,27 @@ function computeChunkMeshData(bounds, resolution, radius, face, noise) {
             if (pr > maxPlanetRadius) maxPlanetRadius = pr;
 
             const posSphere = unit.scale(pr);
-
             verts.push(posSphere);
 
-            positions.push(posSphere.x, posSphere.y, posSphere.z);
+            const vIndex = i * (res + 1) + j;
+            const pOff = vIndex * 3;
+            const uvOff = vIndex * 2;
 
-            // normale "radiale" provisoire (sera écrasée par les normales moyennées plus bas)
-            normals.push(
-                posSphere.x / pr,
-                posSphere.y / pr,
-                posSphere.z / pr
-            );
+            positions[pOff + 0] = posSphere.x;
+            positions[pOff + 1] = posSphere.y;
+            positions[pOff + 2] = posSphere.z;
+
+            normals[pOff + 0] = posSphere.x / pr;
+            normals[pOff + 1] = posSphere.y / pr;
+            normals[pOff + 2] = posSphere.z / pr;
 
             const u = (Math.atan2(posSphere.x, posSphere.z) + Math.PI) / (2 * Math.PI);
             const v = Math.acos(posSphere.y / pr) / Math.PI;
-            uvs.push(u, v);
+            uvs[uvOff + 0] = u;
+            uvs[uvOff + 1] = v;
         }
     }
 
-    // Centre radial au milieu du relief + rayon de bounding sphere autour de ce centre
     const centerR = 0.5 * (minPlanetRadius + maxPlanetRadius);
     const centerLocal2 = dir.scale(centerR);
 
@@ -401,10 +265,7 @@ function computeChunkMeshData(bounds, resolution, radius, face, noise) {
     }
     const boundingRadius = Math.sqrt(maxDist2b);
 
-    // Normales moyennées (ton code existant)
-    const normalAccum = new Array(verts.length)
-        .fill(null)
-        .map(() => new Vector3(0, 0, 0));
+    const normalAccum = new Array(verts.length).fill(null).map(() => new Vector3(0, 0, 0));
     const normalCount = new Array(verts.length).fill(0);
 
     for (let i = 0; i < res; i++) {
@@ -426,32 +287,30 @@ function computeChunkMeshData(bounds, resolution, radius, face, noise) {
             if (d1 < d2) {
                 tri1Indices = [index0, index3, index1];
                 tri2Indices = [index0, index2, index3];
-                indices.push(index0, index3, index1, index0, index2, index3);
+
+                indices[indexWrite++] = index0;
+                indices[indexWrite++] = index3;
+                indices[indexWrite++] = index1;
+                indices[indexWrite++] = index0;
+                indices[indexWrite++] = index2;
+                indices[indexWrite++] = index3;
             } else {
                 tri1Indices = [index0, index2, index1];
                 tri2Indices = [index1, index2, index3];
-                indices.push(index0, index2, index1, index1, index2, index3);
+
+                indices[indexWrite++] = index0;
+                indices[indexWrite++] = index2;
+                indices[indexWrite++] = index1;
+                indices[indexWrite++] = index1;
+                indices[indexWrite++] = index2;
+                indices[indexWrite++] = index3;
             }
 
-            const tri1Normal = computeTriangleNormal(
-                v0,
-                verts[tri1Indices[1]],
-                verts[tri1Indices[2]]
-            );
-            const tri2Normal = computeTriangleNormal(
-                v0,
-                verts[tri2Indices[1]],
-                verts[tri2Indices[2]]
-            );
+            const tri1Normal = computeTriangleNormal(v0, verts[tri1Indices[1]], verts[tri1Indices[2]]);
+            const tri2Normal = computeTriangleNormal(v0, verts[tri2Indices[1]], verts[tri2Indices[2]]);
 
-            tri1Indices.forEach((idx) => {
-                normalAccum[idx] = normalAccum[idx].add(tri1Normal);
-                normalCount[idx]++;
-            });
-            tri2Indices.forEach((idx) => {
-                normalAccum[idx] = normalAccum[idx].add(tri2Normal);
-                normalCount[idx]++;
-            });
+            tri1Indices.forEach((idx) => { normalAccum[idx] = normalAccum[idx].add(tri1Normal); normalCount[idx]++; });
+            tri2Indices.forEach((idx) => { normalAccum[idx] = normalAccum[idx].add(tri2Normal); normalCount[idx]++; });
         }
     }
 
@@ -459,7 +318,7 @@ function computeChunkMeshData(bounds, resolution, radius, face, noise) {
         if (normalCount[i] > 0) {
             const avgNormal = normalAccum[i].scale(1 / normalCount[i]).normalize();
             const idx = i * 3;
-            normals[idx] = avgNormal.x;
+            normals[idx + 0] = avgNormal.x;
             normals[idx + 1] = avgNormal.y;
             normals[idx + 2] = avgNormal.z;
         }
@@ -479,70 +338,171 @@ function computeChunkMeshData(bounds, resolution, radius, face, noise) {
     };
 }
 
-
-/**
- * Computes the normal of a triangle given three vertices
- * @param {Vector3} v0 - First vertex
- * @param {Vector3} v1 - Second vertex
- * @param {Vector3} v2 - Third vertex
- * @returns {Vector3} The normalized normal vector of the triangle
- */
 function computeTriangleNormal(v0, v1, v2) {
     const edge1 = new Vector3(v1.x - v0.x, v1.y - v0.y, v1.z - v0.z);
     const edge2 = new Vector3(v2.x - v0.x, v2.y - v0.y, v2.z - v0.z);
-
     return edge2.cross(edge1).normalize();
 }
 
-/**
- * Maps UV coordinates to cube coordinates based on the specified face
- *
- * @param {number} u - U coordinate
- * @param {number} v - V coordinate
- * @param {"front" | "back" | "left" | "right" | "top" | "bottom"} face - Face of cube
- * @returns {Vector3} Corresponding 3D vector on the cube
- */
 function mapUVtoCube(u, v, face) {
     switch (face) {
-        case 'front':
-            return new Vector3(u, v, 1);
-        case 'back':
-            return new Vector3(-u, v, -1);
-        case 'left':
-            return new Vector3(-1, v, u);
-        case 'right':
-            return new Vector3(1, v, -u);
-        case 'top':
-            return new Vector3(u, 1, -v);
-        case 'bottom':
-            return new Vector3(u, -1, v);
-        default:
-            return new Vector3(u, v, 1);
+        case "front": return new Vector3(u, v, 1);
+        case "back": return new Vector3(-u, v, -1);
+        case "left": return new Vector3(-1, v, u);
+        case "right": return new Vector3(1, v, -u);
+        case "top": return new Vector3(u, 1, -v);
+        case "bottom": return new Vector3(u, -1, v);
+        default: return new Vector3(u, v, 1);
     }
 }
 
-/**
- * Handles incoming messages to the worker
- * Expects a message with properties: bounds, resolution, radius, face, level, and maxLevel
- * Computes the mesh data and posts the result back
- *
- * @param {MessageEvent} event - The message event containing the mesh parameters
- */
-self.onmessage = (event) => {
-    //const start = performance.now();
+/* ===========================
+   Phase 1: Stable worker protocol
+   =========================== */
 
-    const { bounds, resolution, radius, face, seed } = event.data;
-    const noiseInstance = new SimplexNoise(seed || 1);
+const PROTOCOL = "mesh-kernel/1";
 
-    const meshData = computeChunkMeshData(
-        bounds,
-        resolution,
-        radius,
-        face,
-        noiseInstance
+let currentJobId = null;
+let cancelCurrent = false;
+
+function postReady(id) {
+    self.postMessage({
+        protocol: PROTOCOL,
+        kind: "ready",
+        id,
+        payload: { impl: "js", meshFormats: ["arrays", "typed"] }
+    });
+}
+
+function postError(id, code, message) {
+    self.postMessage({
+        protocol: PROTOCOL,
+        kind: "error",
+        id,
+        payload: { code, message }
+    });
+}
+
+function transferMeshDataTyped(id, meshData, stats) {
+    self.postMessage(
+        {
+            protocol: PROTOCOL,
+            kind: "chunk_result",
+            id,
+            payload: { meshData, stats }
+        },
+        [
+            meshData.positions.buffer,
+            meshData.normals.buffer,
+            meshData.uvs.buffer,
+            meshData.indices.buffer
+        ]
     );
+}
 
-    self.postMessage(meshData);
+function postMeshDataArrays(id, meshData, stats) {
+    self.postMessage({
+        protocol: PROTOCOL,
+        kind: "chunk_result",
+        id,
+        payload: { meshData, stats }
+    });
+}
 
-    //console.log('Chunk created at: ' + (performance.now() - start) + 'ms');
+function toArrays(meshDataTyped) {
+    return {
+        ...meshDataTyped,
+        positions: Array.from(meshDataTyped.positions),
+        normals: Array.from(meshDataTyped.normals),
+        uvs: Array.from(meshDataTyped.uvs),
+        indices: Array.from(meshDataTyped.indices),
+    };
+}
+
+self.onmessage = (event) => {
+    const msg = event.data;
+
+    // Legacy (pre-protocol) support:
+    // expects { bounds, resolution, radius, face, seed } and returns typed arrays + transfer.
+    if (!msg || typeof msg !== "object" || msg.protocol !== PROTOCOL) {
+        const start = performance.now();
+        const { bounds, resolution, radius, face, seed } = msg;
+        const noiseInstance = new SimplexNoise(seed || 1);
+
+        const meshData = computeChunkMeshData(bounds, resolution, radius, face, noiseInstance);
+
+        self.postMessage(meshData, [
+            meshData.positions.buffer,
+            meshData.normals.buffer,
+            meshData.uvs.buffer,
+            meshData.indices.buffer
+        ]);
+
+        console.log("Chunk created at: " + (performance.now() - start) + "ms");
+        return;
+    }
+
+    // Protocol messages
+    if (msg.kind === "init") {
+        postReady(msg.id);
+        return;
+    }
+
+    if (msg.kind === "cancel") {
+        const cancelId = msg.payload?.cancelId;
+        if (cancelId && currentJobId === cancelId) cancelCurrent = true;
+        return;
+    }
+
+    if (msg.kind !== "build_chunk") {
+        postError(msg.id ?? "unknown", "bad_request", "Unknown message kind");
+        return;
+    }
+
+    // build_chunk
+    const start = performance.now();
+    const id = msg.id;
+
+    try {
+        currentJobId = id;
+        cancelCurrent = false;
+
+        const p = msg.payload;
+
+        const seed = (p?.noise?.seed ?? 1) | 0;
+        const noiseInstance = new SimplexNoise(seed);
+
+        const meshDataTyped = computeChunkMeshData(
+            p.bounds,
+            p.resolution,
+            p.radius,
+            p.face,
+            noiseInstance
+        );
+
+        if (cancelCurrent) {
+            postError(id, "cancelled", "Job cancelled");
+            return;
+        }
+
+        const stats = {
+            ms: performance.now() - start,
+            vertexCount: meshDataTyped.positions.length / 3,
+            indexCount: meshDataTyped.indices.length
+        };
+
+        const meshFormat = p.meshFormat || "typed";
+
+        if (meshFormat === "arrays") {
+            const meshDataArrays = toArrays(meshDataTyped);
+            postMeshDataArrays(id, meshDataArrays, stats);
+        } else {
+            transferMeshDataTyped(id, meshDataTyped, stats);
+        }
+    } catch (e) {
+        postError(id, "exception", String(e?.message || e));
+    } finally {
+        currentJobId = null;
+        cancelCurrent = false;
+    }
 };

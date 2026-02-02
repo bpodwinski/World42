@@ -23,3 +23,6 @@ public/**/*.ktx2
 !public/**/*.tiff
 !public/**/*.hdr
 !public/**/*.exr
+
+terrain/target/
+Cargo.lock
