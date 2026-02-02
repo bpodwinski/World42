@@ -12,6 +12,7 @@ package-lock.json
 *.tif
 *.hdr
 *.exr
+*.env
 
 public/**/*.jpg
 !public/**/*.jpeg
