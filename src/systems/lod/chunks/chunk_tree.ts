@@ -32,7 +32,7 @@ export class ChunkTree {
     wireframe: boolean;
     boundingBox: boolean;
     frustumCullingEnabled: boolean;
-    horizonCullingEnabled: boolean;
+    backsideCullingEnabled: boolean;
     chunkForge: ChunkForge;
 
     // Guard to prevent concurrent updateLOD calls
@@ -62,7 +62,7 @@ export class ChunkTree {
      * @param wireframe - Whether to render the mesh in wireframe mode
      * @param boundingBox - Whether to show the bounding box for the mesh
      * @param frustumCullingEnabled - Enable frustum culling
-     * @param horizonCullingEnabled - Enable horizon culling
+     * @param backsideCullingEnabled - Enable horizon culling
      * @param debugLOD - Whether to enable LOD debug mode
      */
     constructor(
@@ -78,7 +78,7 @@ export class ChunkTree {
         wireframe: boolean = false,
         boundingBox: boolean = false,
         frustumCullingEnabled: boolean = true,
-        horizonCullingEnabled: boolean = true,
+        backsideCullingEnabled: boolean = true,
         debugLOD: boolean = false,
     ) {
         this.scene = scene;
@@ -96,7 +96,7 @@ export class ChunkTree {
         this.boundingBox = boundingBox;
         this.debugLOD = debugLOD;
         this.frustumCullingEnabled = frustumCullingEnabled;
-        this.horizonCullingEnabled = horizonCullingEnabled;
+        this.backsideCullingEnabled = backsideCullingEnabled;
         this.chunkForge = new ChunkForge(this.scene, globalWorkerPool);
     }
 
@@ -139,7 +139,7 @@ export class ChunkTree {
             this.wireframe,
             this.boundingBox,
             this.frustumCullingEnabled,
-            this.horizonCullingEnabled,
+            this.backsideCullingEnabled,
             this.debugLOD
         );
     }
@@ -270,8 +270,8 @@ export class ChunkTree {
                 }
             }
 
-            // Horizon culling
-            if (this.horizonCullingEnabled) {
+            // Backside culling
+            if (this.backsideCullingEnabled) {
                 if (hasAccurateBounds) {
                     const visible = backsideCulling(
                         camera.doublepos,
