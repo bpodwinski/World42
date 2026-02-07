@@ -18,7 +18,11 @@ import { PostProcess } from './core/render/postprocess_manager';
 import { OriginCamera } from './core/camera/camera_manager';
 import { MouseSteerControlManager } from './core/control/mouse_steer_control_manager';
 import { GuiManager } from './core/gui/gui_manager';
-import { createCDLODForAllPlanets, loadSolarSystemFromJSON, precomputeAndRunLODLoop, type SystemJSON } from './game_world/solar_system/solar_system_loader';
+import {
+    createCDLODForAllPlanets,
+    loadSolarSystemFromJSON,
+    precomputeAndRunLODLoop,
+} from './game_world/solar_system/solar_system_loader';
 import planetsJson from './game_world/solar_system/data.json';
 import { teleportToEntity } from './core/camera/teleport_entity';
 import { ScaleManager } from './core/scale/scale_manager';
@@ -28,21 +32,18 @@ export class FloatingCameraScene {
         engine: Engine | WebGPUEngine,
         canvas: HTMLCanvasElement
     ): Promise<Scene> {
-        let scene = new Scene(engine);
+        const scene = new Scene(engine);
         scene.clearColor.set(0, 0, 0, 1);
         scene.collisionsEnabled = true;
 
-        // rework to params
         const loadedSystem = await loadSolarSystemFromJSON(scene, planetsJson);
         const systemBodies = loadedSystem.bodies;
-        const body = systemBodies.get('Mercury');
 
+        const body = systemBodies.get('Mercury');
         if (!body) {
-            throw new Error('Bodies JSON must at least contain "Sun" and "Body"');
+            throw new Error('Bodies JSON must at least contain "Mercury"');
         }
 
-        scene.clearColor.set(0, 0, 0, 1);
-        scene.collisionsEnabled = true;
         scene.textures.forEach((texture) => {
             texture.anisotropicFilteringLevel = 16;
         });
@@ -51,10 +52,15 @@ export class FloatingCameraScene {
         const gui = new GuiManager(scene);
         gui.setMouseCrosshairVisible(true);
 
-        let planetTarget = body.node.position.clone();
-        planetTarget.y += body.diameter * 0.52;
+        // -------------------------
+        // IMPORTANT (P0):
+        // node.position est en Render-space (souvent 0),
+        // la vraie position est body.positionWorldDouble (WorldDouble).
+        // -------------------------
+        const planetTargetWorldDouble = body.positionWorldDouble.clone();
+        planetTargetWorldDouble.y += body.diameter * 0.52;
 
-        let camera = new OriginCamera('camera_player', planetTarget, scene);
+        const camera = new OriginCamera('camera_player', planetTargetWorldDouble, scene);
         camera.debugMode = true;
         camera.minZ = 0.001;
         camera.maxZ = 1_000_000;
@@ -64,22 +70,22 @@ export class FloatingCameraScene {
         camera.inputs.clear();
         camera.checkCollisions = false;
 
+        // Optionnel mais utile: viser la planète au spawn
+        const tmpTargetRender = new Vector3();
+        camera.toRenderSpace(body.positionWorldDouble, tmpTargetRender);
+        camera.setTarget(tmpTargetRender);
+
         // Collider mesh invisible (Render-space)
         const camCollider = MeshBuilder.CreateSphere("camCollider", { segments: 64, diameter: 0.05 }, scene);
-        // diamètre 6 => rayon 3 (à ajuster)
         camCollider.isVisible = false;
         camCollider.isPickable = false;
         camCollider.checkCollisions = true;
         camCollider.position.set(0, 0, 0);
-        // Taille collision (demi-axes). Ici 0.005 => rayon 0.005 si ton monde est en "km" => 5m
         camCollider.ellipsoid = new Vector3(0.05, 0.05, 0.05);
-        // Optionnel: décale l’ellipsoïde vers le bas/haut pour simuler “pieds”
         camCollider.ellipsoidOffset = new Vector3(0.05, 0.05, 0.05);
 
-        // Reset collider après l'intégration floating-origin (évite de ré-intégrer le même offset)
+        // Reset collider après l'intégration floating-origin
         scene.onAfterActiveMeshesEvaluationObservable.add(() => {
-            // OriginCamera fait: doublepos += camera.position; camera.position = 0
-            // donc on recentre aussi le collider
             camCollider.position.set(0, 0, 0);
         });
 
@@ -91,21 +97,18 @@ export class FloatingCameraScene {
         debugCam.minZ = camera.minZ;
         debugCam.maxZ = camera.maxZ;
         debugCam.fov = camera.fov;
-        debugCam.inputs.clear(); // on la contrôle manuellement (optionnel)
+        debugCam.inputs.clear();
 
-        // Position "monde" (double precision) pour la debug cam
+        // WorldDouble debug cam
         let debugDoublePos = camera.doublepos.clone().add(new Vector3(0, 0, body.diameter * 1.5));
-        let debugDoubleTgt = body.node.position.clone();
+        let debugDoubleTgt = body.positionWorldDouble.clone();
 
-        // Affichage en picture-in-picture (en haut à droite)
         camera.viewport = new Viewport(0, 0, 1, 1);
         debugCam.viewport = new Viewport(0.5, 0.5, 0.5, 0.5);
         scene.activeCameras = [camera, debugCam];
 
-        // Mise à jour de la debugCam en render-space via l'origine (floating origin) de "camera"
         const tmpTgtRender = new Vector3();
         scene.onBeforeRenderObservable.add(() => {
-            // renderPos = worldPos - camera.doublepos
             camera.toRenderSpace(debugDoublePos, debugCam.position);
             camera.toRenderSpace(debugDoubleTgt, tmpTgtRender);
             debugCam.setTarget(tmpTgtRender);
@@ -129,18 +132,12 @@ export class FloatingCameraScene {
             if (keys.has('j')) debugDoublePos.addInPlace(right.scale(-speed));
             if (keys.has('u')) debugDoublePos.addInPlace(up.scale(speed));
             if (keys.has('o')) debugDoublePos.addInPlace(up.scale(-speed));
-
         });
 
-        const allCDLOD = createCDLODForAllPlanets(
-            scene,
-            camera,
-            loadedSystem,
-            {
-                maxLevel: 16,
-                resolution: 64,
-            }
-        );
+        const allCDLOD = createCDLODForAllPlanets(scene, camera, loadedSystem, {
+            maxLevel: 16,
+            resolution: 64,
+        });
 
         precomputeAndRunLODLoop(scene, camera, allCDLOD);
 
@@ -155,7 +152,7 @@ export class FloatingCameraScene {
 
                 teleportToEntity(
                     camera,
-                    pluto.node.position,
+                    pluto.positionWorldDouble, // P0: WorldDouble
                     pluto.diameter,
                     20
                 );
@@ -171,16 +168,13 @@ export class FloatingCameraScene {
         skyboxMaterial.disableLighting = true;
         skybox.material = skyboxMaterial;
         skybox.infiniteDistance = true;
-        skyboxMaterial.reflectionTexture = new CubeTexture(
-            `${process.env.ASSETS_URL}/skybox`,
-            scene
-        );
+        skyboxMaterial.reflectionTexture = new CubeTexture(`${process.env.ASSETS_URL}/skybox`, scene);
         skyboxMaterial.reflectionTexture.coordinatesMode = Texture.SKYBOX_MODE;
         skyboxMaterial.disableDepthWrite = true;
         skybox.isPickable = false;
         skybox.renderingGroupId = 0;
 
-        // --- HUD Vitesse (lissé + throttlé) -----------------------------------------
+        // --- HUD Vitesse + distance -----------------------------------------
         let emaMS = 0;
         let lastHudUpdate = performance.now();
         const TAU = 0.1;
@@ -191,15 +185,13 @@ export class FloatingCameraScene {
         scene.onBeforeRenderObservable.add(() => {
             const now = performance.now();
             if (now - lastDistLog >= DIST_LOG_RATE_MS) {
-                const dSim = camera.distanceToSim(body.node.position);
-
+                // P0: distance vers la vraie position WorldDouble
+                const dSim = camera.distanceToSim(body.positionWorldDouble);
                 const dKm = ScaleManager.toRealUnits(dSim);
                 console.log(`${body.name}: ${dKm.toFixed(0)} km`);
-
                 lastDistLog = now;
             }
 
-            // ... le reste de ton code HUD vitesse
             const dt = scene.getEngine().getDeltaTime() / 1000;
             const alpha = 1 - Math.exp(-dt / TAU);
             const speedMS = ScaleManager.simSpeedToMetersPerSec(camera.speedSim);
@@ -213,7 +205,6 @@ export class FloatingCameraScene {
             }
         });
 
-        // Render loop
         engine.runRenderLoop(() => {
             scene.render();
         });

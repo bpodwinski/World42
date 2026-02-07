@@ -48,7 +48,7 @@ export type LoadSystemOptions = {
     /** Matériau par défaut (si non fourni, un PBR simple est créé) */
     makeMaterial?: (name: string, isStar: boolean, scene: Scene) => PBRMetallicRoughnessMaterial;
 
-    /** Attacher tous les corps sous ce node (facile à déplacer/centrer) */
+    /** Attacher tous les corps sous ce node (organisation) */
     parent?: TransformNode;
 
     /** Activer une animation de rotation au render loop */
@@ -58,10 +58,26 @@ export type LoadSystemOptions = {
 export type LoadedBody = {
     bodyType: string;
     name: string;
-    node: TransformNode;    // racine du corps
-    meshName: string;       // nom de la mesh (si créée)
-    diameter: number;       // diamètre en simulation units
+
+    /**
+     * Pivot du corps en Render-space.
+     * IMPORTANT: on le laisse à (0,0,0) et on le parent sous une FloatingEntity.
+     */
+    node: TransformNode;
+
+    /** Nom de la mesh (si créée) */
+    meshName: string;
+
+    /** Position vraie du corps en WorldDouble (simulation units) */
+    positionWorldDouble: Vector3;
+
+    /** Diamètre en simulation units */
+    diameter: number;
+
     rotationPeriodDays: number | null;
+
+    /** Entité flottante associée (créée plus tard quand on a la caméra) */
+    entity?: FloatingEntity;
 };
 
 export type LoadedSystem = {
@@ -70,10 +86,9 @@ export type LoadedSystem = {
 };
 
 /**
- * Charge un JSON (URL, chemin relatif ou string JSON) et crée les corps dans la scène.
- * - Position en kilomètres dans le JSON -> convertie en simulation units via ScaleManager
- * - diameter_km -> sphère (rayon = diameter/2) en simulation units ; "Sun" est traité comme étoile (émissif)
- * - rotation_period_days anime la rotation Y si animateRotation = true
+ * Charge un JSON et crée les pivots/meshes.
+ * - Les positions en km sont converties en simulation units, stockées dans positionWorldDouble
+ * - Les nodes Babylon restent à (0,0,0) (Render-space), en attente d’un parent FloatingEntity
  */
 export async function loadSolarSystemFromJSON(
     scene: Scene,
@@ -84,17 +99,13 @@ export async function loadSolarSystemFromJSON(
         animateRotation = true,
         parent,
         makeMaterial = (name: string, isStar: boolean, scene: Scene) => {
-            // Un seul mat, paramétré selon isStar
             const mat = new PBRMetallicRoughnessMaterial(`mat_${name}`, scene);
 
             if (isStar) {
-                // Texture émissive (KTX2 ok si le loader est importé quelque part dans l’app)
-                mat.emissiveTexture = new TextureManager('sun_surface_albedo.ktx2', scene);
+                mat.emissiveTexture = new TextureManager("sun_surface_albedo.ktx2", scene);
                 mat.emissiveColor = new Color3(1, 1, 1);
                 mat.metallic = 0.0;
                 mat.roughness = 0.0;
-                // Optionnel : visible de l'intérieur si tu te téléportes dedans
-                // mat.backFaceCulling = false;
             } else {
                 mat.baseColor = new Color3(0.6, 0.6, 0.65);
                 mat.metallic = 0.0;
@@ -102,7 +113,7 @@ export async function loadSolarSystemFromJSON(
             }
 
             return mat;
-        }
+        },
     } = opts;
 
     const root = new TransformNode("SolarSystem", scene);
@@ -111,22 +122,25 @@ export async function loadSolarSystemFromJSON(
     const system: SystemJSON = normalizeSystemJSON(jsonSource);
     const bodies = new Map<string, LoadedBody>();
 
-    // Création des corps
-    Object.entries(system).forEach(([name, data]) => {
+    for (const [name, data] of Object.entries(system)) {
         const node = new TransformNode(`node_${name}`, scene);
         node.parent = root;
 
-        // Normalise le type (star/planet/...)
+        // Canonique: "sun" est normalisé en "star"
         const isStar = data.type === "star";
 
-        // Position (km -> m)
+        // Position vraie (km -> simulation units) stockée en WorldDouble
         const [xKm, yKm, zKm] = data.position_km;
         const posKm = new Vector3(xKm, yKm, zKm);
-        node.position = ScaleManager.toSimulationVector(posKm);
+        const positionWorldDouble = ScaleManager.toSimulationVector(posKm);
 
-        let meshName = `mesh_${name}`;
+        // Pivot Babylon en render-space (sera placé via FloatingEntity)
+        node.position.set(0, 0, 0);
+
         const diameterSim = ScaleManager.toSimulationUnits(data.diameter_km);
 
+        // (Optionnel) mesh pour les étoiles
+        let meshName = `mesh_${name}`;
         if (isStar) {
             const sphere = MeshBuilder.CreateSphere(
                 meshName,
@@ -134,15 +148,7 @@ export async function loadSolarSystemFromJSON(
                 scene
             );
             sphere.parent = node;
-
-            const mat = makeMaterial(name, isStar, scene);
-
-            mat.emissiveColor = new Color3(1, 1, 1);
-            mat.metallic = 0.0;
-            mat.roughness = 0.0;
-
-            sphere.material = mat;
-
+            sphere.material = makeMaterial(name, true, scene);
             meshName = sphere.name;
         }
 
@@ -151,20 +157,18 @@ export async function loadSolarSystemFromJSON(
             name,
             node,
             meshName,
+            positionWorldDouble,
             diameter: diameterSim,
-            rotationPeriodDays: data.rotation_period_days
+            rotationPeriodDays: data.rotation_period_days,
         });
-    });
+    }
 
-    // Animation des rotations (simple Yaw)
     if (animateRotation) {
         scene.onBeforeRenderObservable.add(() => {
-            const dt = scene.getEngine().getDeltaTime() / 1000; // s
+            const dt = scene.getEngine().getDeltaTime() / 1000;
             bodies.forEach((b) => {
                 const T = b.rotationPeriodDays;
                 if (!T || !isFinite(T) || T === 0) return;
-
-                // vitesse angulaire = 2π / période (en secondes)
                 const omega = (2 * Math.PI) / (T * 86400);
                 b.node.rotation.y += omega * dt;
             });
@@ -174,6 +178,10 @@ export async function loadSolarSystemFromJSON(
     return { root, bodies };
 }
 
+/**
+ * P0: crée/attache une FloatingEntity à chaque corps (y compris les étoiles),
+ * puis ne génère le CDLOD que pour ceux qui ne sont pas skip.
+ */
 export function createCDLODForAllPlanets(
     scene: Scene,
     camera: OriginCamera,
@@ -187,15 +195,33 @@ export function createCDLODForAllPlanets(
         skip = (_name: string, body: LoadedBody) => body.bodyType === "star",
     } = opts;
 
+    // 1) P0: attacher toutes les bodies sous une FloatingEntity (même si skip)
+    for (const [name, body] of loaded.bodies) {
+        if (!body.entity) {
+            const ent = new FloatingEntity(`ent_${name}`, scene);
+            ent.doublepos.copyFrom(body.positionWorldDouble); // WorldDouble en simulation units
+            camera.add(ent);
+
+            body.node.parent = ent;       // pivot en Render-space sous l’entité flottante
+            body.node.position.set(0, 0, 0);
+
+            body.entity = ent;
+        } else {
+            // s’assure de la cohérence si déjà existante
+            body.entity.doublepos.copyFrom(body.positionWorldDouble);
+            body.node.parent = body.entity;
+            body.node.position.set(0, 0, 0);
+        }
+    }
+
+    // 2) Générer CDLOD uniquement pour les planètes (ou non skip)
     const out = new Map<string, PlanetCDLOD>();
 
     for (const [name, body] of loaded.bodies) {
         if (skip(name, body)) continue;
 
-        // Entité flottante
-        const ent = new FloatingEntity(`ent_${name}`, scene);
-        ent.doublepos.set(body.node.position.x, body.node.position.y, body.node.position.z);
-        camera.add(ent);
+        const ent = body.entity!;
+        const radius = body.diameter * 0.5;
 
         const chunks = faces.map(
             (face) =>
@@ -205,7 +231,7 @@ export function createCDLODForAllPlanets(
                     { uMin: -1, uMax: 1, vMin: -1, vMax: 1 },
                     0,
                     maxLevel,
-                    (body.diameter * 0.5),
+                    radius,
                     resolution,
                     face,
                     ent,
@@ -217,60 +243,68 @@ export function createCDLODForAllPlanets(
                 )
         );
 
-        out.set(name, { entity: ent, chunks, radius: (body.diameter * 0.5), maxLevel, resolution });
+        out.set(name, { entity: ent, chunks, radius, maxLevel, resolution });
     }
 
     return out;
 }
 
-export async function precomputeAndRunLODLoop(
-    scene: Scene,
-    camera: OriginCamera,
-    all: Map<string, PlanetCDLOD>
-) {
+// (P1) Cette boucle sera supprimée/remplacée par LodController.tick() budgété.
+// Ici inchangé pour P0.
+export function precomputeAndRunLODLoop(scene: Scene, camera: OriginCamera, all: Map<string, PlanetCDLOD>) {
     const allChunks = Array.from(all.values()).flatMap(v => v.chunks);
+    let inFlight = false;
 
-    async function loop() {
-        while (true) {
-            for (const chunk of allChunks) {
-                chunk.updateLOD(camera, false).catch(console.error);
-                chunk.updateDebugLOD(ChunkTree.debugLODEnabled);
-            }
-            await new Promise<void>(r => requestAnimationFrame(() => r()));
-        }
-    }
+    scene.onBeforeRenderObservable.add(() => {
+        if (inFlight) return;
+        inFlight = true;
 
-    loop();
+        Promise.all(allChunks.map(c => c.updateLOD(camera, false)))
+            .catch(console.error)
+            .finally(() => { inFlight = false; });
+
+        for (const c of allChunks) c.updateDebugLOD(ChunkTree.debugLODEnabled);
+    });
 }
 
 function normalizeSystemJSON(raw: unknown): SystemJSON {
     const out: SystemJSON = {};
-
     if (typeof raw !== "object" || raw === null) return out;
 
     for (const [name, vAny] of Object.entries(raw as Record<string, any>)) {
         const v = vAny ?? {};
 
-        // type: accepte "star"/"sun"/"planet", insensible à la casse, défaut "planet"
+        // type: accepte "star"/"sun"/"planet" (insensible à la casse), défaut "planet"
         const typeRaw =
-            typeof v.type === "string" ? v.type :
-                typeof v.Type === "string" ? v.Type :
-                    "planet";
-        const type = String(typeRaw).toLowerCase().trim();
+            typeof v.type === "string"
+                ? v.type
+                : typeof v.Type === "string"
+                    ? v.Type
+                    : "planet";
+
+        let type = String(typeRaw).toLowerCase().trim();
+        if (type === "sun") type = "star"; // canonicalisation P0
 
         // position: préfère position_km: [x,y,z], sinon fallback 0,0,0
-        let x = 0, y = 0, z = 0;
+        let x = 0,
+            y = 0,
+            z = 0;
         if (Array.isArray(v.position_km)) {
             [x = 0, y = 0, z = 0] = v.position_km as number[];
-        } else if (typeof v.x === "number" || typeof v.y === "number" || typeof v.z === "number") {
-            x = Number(v.x ?? 0); y = Number(v.y ?? 0); z = Number(v.z ?? 0);
+        } else if (
+            typeof v.x === "number" ||
+            typeof v.y === "number" ||
+            typeof v.z === "number"
+        ) {
+            x = Number(v.x ?? 0);
+            y = Number(v.y ?? 0);
+            z = Number(v.z ?? 0);
         }
 
         // diamètre: accepte diameter_km ou diameter
         const diameter_km = Number(v.diameter_km ?? v.diameter ?? 0);
         const rot = v.rotation_period_days;
-        const rotation_period_days =
-            rot === null || rot === undefined ? null : Number(rot);
+        const rotation_period_days = rot === null || rot === undefined ? null : Number(rot);
 
         out[name] = {
             type,
