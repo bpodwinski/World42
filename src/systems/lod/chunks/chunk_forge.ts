@@ -50,6 +50,9 @@ export class ChunkForge {
         terrainMesh.checkCollisions = true;
         terrainMesh.showBoundingBox = boundingBox;
 
+        const planetCenterWorld = (parentEntity as any).doublepos ?? parentEntity.position ?? Vector3.Zero();
+        const patchCenterLocal = center.subtract(planetCenterWorld);
+
         const tMat0 = performance.now();
         terrainMesh.material = new TerrainShader(this.scene).create(
             params.resolution,
@@ -57,7 +60,8 @@ export class ChunkForge {
             params.maxLevel,
             cameraPosition,
             params.radius,
-            center,
+            planetCenterWorld,
+            patchCenterLocal,
             wireframe,
             ChunkTree.debugLODEnabled
         );

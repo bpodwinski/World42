@@ -34,7 +34,8 @@ export class TerrainShader {
      * @param {number} maxLevel - Maximum level of detail
      * @param {Vector3} cameraPosition - Camera position in world space
      * @param {number} planetRadius - Radius of the planet
-     * @param {Vector3} planetCenter - Center position of the planet
+     * @param {Vector3} planetCenter - Center position of the planet in world space
+     * @param {Vector3} patchCenterLocal - Center of the patch in planet-local space
      * @param {boolean} [wireframe=false] - Enable or disable wireframe mode
      * @param {boolean} [debugLOD=false] - Enable or disable debug mode for LOD
      * @returns {ShaderMaterial} Configured ShaderMaterial for terrain
@@ -46,6 +47,7 @@ export class TerrainShader {
         cameraPosition: Vector3,
         planetRadius: number,
         planetCenter: Vector3,
+        patchCenterLocal: Vector3,
         wireframe: boolean = false,
         debugLOD: boolean = false
     ): ShaderMaterial {
@@ -63,12 +65,18 @@ export class TerrainShader {
                     'frequency',
                     'mesh_dim',
                     'lodLevel',
+                    'lodMaxLevel',
                     'lodRangesLUT',
                     'cameraPosition',
                     'uPlanetCenter',
-                    'showUV',
+                    'uPatchCenter',
                     'debugUV',
-                    'lightDirection'
+                    'debugLOD',
+                    'textureScale',
+                    'detailScale',
+                    'detailBlend',
+                    'lightDirection',
+                    'lightIntensity',
                 ],
                 samplers: ['diffuseTexture', 'detailTexture']
             }
@@ -91,7 +99,9 @@ export class TerrainShader {
                 planetRadius * Math.pow(2, i);
         }
         shader.setFloats('lodRangesLUT', lodRanges);
-        shader.setVector3('uPlanetCenter', planetCenter);
+        // Mesh vertices are in planet-local space (origin = planet center)
+        shader.setVector3('uPlanetCenter', Vector3.Zero());
+        shader.setVector3('uPatchCenter', patchCenterLocal);
 
         // Diffuse
         shader.setTexture(
