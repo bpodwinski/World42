@@ -7,6 +7,7 @@ import {
     TransformNode,
 } from "@babylonjs/core";
 import { FloatingEntity, OriginCamera } from "../../core/camera/camera_manager";
+import { ScaleManager } from "../../core/scale/scale_manager";
 import { ChunkTree } from "../../systems/lod/chunks/chunk_tree";
 import { TextureManager } from "../../core/io/texture_manager";
 import { Face } from "../../systems/lod/types";
@@ -59,7 +60,7 @@ export type LoadedBody = {
     name: string;
     node: TransformNode;    // racine du corps
     meshName: string;       // nom de la mesh (si créée)
-    diameter: number;       // diamètre utilisé pour la mesh
+    diameter: number;       // diamètre en simulation units
     rotationPeriodDays: number | null;
 };
 
@@ -70,8 +71,8 @@ export type LoadedSystem = {
 
 /**
  * Charge un JSON (URL, chemin relatif ou string JSON) et crée les corps dans la scène.
- * - Position interprétée en kilomètres dans le JSON -> convertie en mètres via metersPerKm
- * - diameter_km -> sphère (rayon = diameter/2) avec PBR de base ; "Sun" est traité comme étoile (émissif)
+ * - Position en kilomètres dans le JSON -> convertie en simulation units via ScaleManager
+ * - diameter_km -> sphère (rayon = diameter/2) en simulation units ; "Sun" est traité comme étoile (émissif)
  * - rotation_period_days anime la rotation Y si animateRotation = true
  */
 export async function loadSolarSystemFromJSON(
@@ -120,12 +121,18 @@ export async function loadSolarSystemFromJSON(
 
         // Position (km -> m)
         const [xKm, yKm, zKm] = data.position_km;
-        node.position = new Vector3(xKm, yKm, zKm);
+        const posKm = new Vector3(xKm, yKm, zKm);
+        node.position = ScaleManager.toSimulationVector(posKm);
 
         let meshName = `mesh_${name}`;
+        const diameterSim = ScaleManager.toSimulationUnits(data.diameter_km);
 
         if (isStar) {
-            const sphere = MeshBuilder.CreateSphere(meshName, { diameter: data.diameter_km, segments: 64 }, scene);
+            const sphere = MeshBuilder.CreateSphere(
+                meshName,
+                { diameter: diameterSim, segments: 64 },
+                scene
+            );
             sphere.parent = node;
 
             const mat = makeMaterial(name, isStar, scene);
@@ -144,7 +151,7 @@ export async function loadSolarSystemFromJSON(
             name,
             node,
             meshName,
-            diameter: data.diameter_km,
+            diameter: diameterSim,
             rotationPeriodDays: data.rotation_period_days
         });
     });

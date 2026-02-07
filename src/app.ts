@@ -21,6 +21,7 @@ import { GuiManager } from './core/gui/gui_manager';
 import { createCDLODForAllPlanets, loadSolarSystemFromJSON, precomputeAndRunLODLoop, type SystemJSON } from './game_world/solar_system/solar_system_loader';
 import planetsJson from './game_world/solar_system/data.json';
 import { teleportToEntity } from './core/camera/teleport_entity';
+import { ScaleManager } from './core/scale/scale_manager';
 
 export class FloatingCameraScene {
     public static async CreateScene(
@@ -192,7 +193,8 @@ export class FloatingCameraScene {
             if (now - lastDistLog >= DIST_LOG_RATE_MS) {
                 const dSim = camera.distanceToSim(body.node.position);
 
-                console.log(`${body.name}: ${dSim.toFixed(0)} km`);
+                const dKm = ScaleManager.toRealUnits(dSim);
+                console.log(`${body.name}: ${dKm.toFixed(0)} km`);
 
                 lastDistLog = now;
             }
@@ -200,7 +202,8 @@ export class FloatingCameraScene {
             // ... le reste de ton code HUD vitesse
             const dt = scene.getEngine().getDeltaTime() / 1000;
             const alpha = 1 - Math.exp(-dt / TAU);
-            emaMS += (camera.speedSim - emaMS) * alpha;
+            const speedMS = ScaleManager.simSpeedToMetersPerSec(camera.speedSim);
+            emaMS += (speedMS - emaMS) * alpha;
 
             const nowHud = performance.now();
             if (nowHud - lastHudUpdate >= HUD_RATE_MS) {
