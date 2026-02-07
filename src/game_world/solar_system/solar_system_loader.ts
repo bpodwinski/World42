@@ -199,6 +199,7 @@ export function createCDLODForAllPlanets(
     for (const [name, body] of loaded.bodies) {
         if (!body.entity) {
             const ent = new FloatingEntity(`ent_${name}`, scene);
+            ent.parent = loaded.root;
             ent.doublepos.copyFrom(body.positionWorldDouble); // WorldDouble en simulation units
             camera.add(ent);
 
@@ -208,6 +209,7 @@ export function createCDLODForAllPlanets(
             body.entity = ent;
         } else {
             // s’assure de la cohérence si déjà existante
+            body.entity.parent = loaded.root;
             body.entity.doublepos.copyFrom(body.positionWorldDouble);
             body.node.parent = body.entity;
             body.node.position.set(0, 0, 0);
