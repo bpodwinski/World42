@@ -1,7 +1,8 @@
-import { Scene, Mesh, Vector3 } from "@babylonjs/core";
+import { Scene, Mesh, Vector3, TransformNode, Matrix } from "@babylonjs/core";
 import { ChunkTree } from "./chunk_tree";
 import { Terrain } from "../../../game_objects/planets/rocky_planet/terrain";
 import { TerrainShader } from "../../../game_objects/planets/rocky_planet/terrains_shader";
+import type { FloatingEntityInterface } from "../../../core/camera/camera_manager";
 import { WorkerPool } from "../workers/worker_pool";
 import type { Bounds, Face } from "../types";
 import type { MeshKernelBuildChunkRequest } from "../workers/worker_protocol";
@@ -25,6 +26,10 @@ export class ChunkForge {
     private scene: Scene;
     private workerPool: WorkerPool;
 
+    private _invWorld = new Matrix();
+    private _rotatedLocal = new Vector3();
+    private _patchCenterLocal = new Vector3();
+
     constructor(scene: Scene, workerPool: WorkerPool) {
         this.scene = scene;
         this.workerPool = workerPool;
@@ -33,9 +38,10 @@ export class ChunkForge {
     private buildMesh(
         meshData: any,
         params: ChunkGenerationParams,
-        cameraPosition: Vector3,
-        parentEntity: any,
-        center: Vector3,
+        cameraWorldDouble: Vector3,
+        planetEntity: FloatingEntityInterface,
+        renderParent: TransformNode,
+        patchCenterWorldDouble: Vector3,
         wireframe: boolean,
         boundingBox: boolean
     ): Mesh {
@@ -46,49 +52,55 @@ export class ChunkForge {
         terrainMesh.metadata = terrainMesh.metadata ?? {};
         if (meshData?.boundsInfo) terrainMesh.metadata.boundsInfo = meshData.boundsInfo;
 
-        terrainMesh.parent = parentEntity;
+        // ✅ chunks sous node_* (rotation planète)
+        terrainMesh.parent = renderParent;
         terrainMesh.checkCollisions = true;
         terrainMesh.showBoundingBox = boundingBox;
+        terrainMesh.alwaysSelectAsActiveMesh = true;
 
-        const planetCenterWorld = (parentEntity as any).doublepos ?? parentEntity.position ?? Vector3.Zero();
-        const patchCenterLocal = center.subtract(planetCenterWorld);
+        // ✅ planet center en WorldDouble (évite lightDirection=0)
+        const planetCenterWorldDouble = planetEntity.doublepos;
+
+        // patchCenterLocal = inverse(rotation(node_*)) * (patchCenterWorld - planetCenterWorld)
+        patchCenterWorldDouble.subtractToRef(planetCenterWorldDouble, this._rotatedLocal);
+        renderParent.getWorldMatrix().invertToRef(this._invWorld);
+        Vector3.TransformNormalToRef(this._rotatedLocal, this._invWorld, this._patchCenterLocal);
 
         const tMat0 = performance.now();
         terrainMesh.material = new TerrainShader(this.scene).create(
             params.resolution,
             params.level,
             params.maxLevel,
-            cameraPosition,
-            params.radius,
-            planetCenterWorld,
-            patchCenterLocal,
-            wireframe,
-            ChunkTree.debugLODEnabled
+            cameraWorldDouble,          // Vector3
+            params.radius,              // number
+            planetCenterWorldDouble,    // Vector3
+            this._patchCenterLocal,     // ✅ Vector3 attendu (corrige ton TS2345)
+            wireframe,                  // boolean
+            ChunkTree.debugLODEnabled   // boolean
         );
         const tMat1 = performance.now();
 
         if (DEBUG_MESH_TIMINGS) {
             console.log(
-                `[mesh] babylon mesh=${(tMesh1 - tMesh0).toFixed(2)}ms material=${(tMat1 - tMat0).toFixed(2)}ms`
-                + ` face=${params.face} level=${params.level} res=${params.resolution}`
+                `[mesh] babylon mesh=${(tMesh1 - tMesh0).toFixed(2)}ms material=${(tMat1 - tMat0).toFixed(2)}ms` +
+                ` face=${params.face} level=${params.level} res=${params.resolution}`
             );
         }
-
-        terrainMesh.alwaysSelectAsActiveMesh = true;
 
         return terrainMesh;
     }
 
     async worker(
         params: ChunkGenerationParams,
-        cameraPosition: Vector3,
-        parentEntity: any,
-        center: Vector3,
+        cameraWorldDouble: Vector3,
+        planetEntity: FloatingEntityInterface,
+        renderParent: TransformNode,
+        patchCenterWorldDouble: Vector3,
         wireframe: boolean,
         boundingBox: boolean
     ): Promise<Mesh> {
         return new Promise<Mesh>((resolve, reject) => {
-            const priority = Vector3.Distance(center, cameraPosition);
+            const priority = Vector3.Distance(patchCenterWorldDouble, cameraWorldDouble);
             const jobId = makeJobId();
             const t0 = performance.now();
 
@@ -98,7 +110,15 @@ export class ChunkForge {
                 id: jobId,
                 payload: {
                     ...params,
-                    noise: { seed: 1 },
+                    noise: {
+                        seed: 1,
+                        octaves: 12,
+                        baseFrequency: 20.0,
+                        baseAmplitude: 10.0,
+                        lacunarity: 2.0,
+                        persistence: 0.5,
+                        globalTerrainAmplitude: 80.0
+                    },
                     meshFormat: "typed",
                 },
             };
@@ -109,7 +129,16 @@ export class ChunkForge {
                 callback: (meshData: any, stats?: any) => {
                     try {
                         const tBuild0 = performance.now();
-                        const mesh = this.buildMesh(meshData, params, cameraPosition, parentEntity, center, wireframe, boundingBox);
+                        const mesh = this.buildMesh(
+                            meshData,
+                            params,
+                            cameraWorldDouble,
+                            planetEntity,
+                            renderParent,
+                            patchCenterWorldDouble,
+                            wireframe,
+                            boundingBox
+                        );
                         const tBuild1 = performance.now();
                         const t1 = performance.now();
 
@@ -119,11 +148,11 @@ export class ChunkForge {
                             const idx = stats?.indexCount ?? (meshData?.indices?.length ?? 0);
 
                             console.log(
-                                `[mesh] job=${jobId} total=${(t1 - t0).toFixed(2)}ms`
-                                + ` worker=${isNaN(workerMs) ? "?" : workerMs.toFixed(2)}ms`
-                                + ` build=${(tBuild1 - tBuild0).toFixed(2)}ms`
-                                + ` vtx=${vtx} idx=${idx}`
-                                + ` face=${params.face} level=${params.level} res=${params.resolution}`
+                                `[mesh] job=${jobId} total=${(t1 - t0).toFixed(2)}ms` +
+                                ` worker=${isNaN(workerMs) ? "?" : workerMs.toFixed(2)}ms` +
+                                ` build=${(tBuild1 - tBuild0).toFixed(2)}ms` +
+                                ` vtx=${vtx} idx=${idx}` +
+                                ` face=${params.face} level=${params.level} res=${params.resolution}`
                             );
                         }
 

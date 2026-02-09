@@ -237,6 +237,7 @@ export function createCDLODForAllPlanets(
                     resolution,
                     face,
                     ent,
+                    body.node,
                     false,
                     false,
                     true,
