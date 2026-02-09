@@ -4,7 +4,7 @@ import type { MeshKernelRequest, MeshKernelResponse, MeshKernelBuildChunkRequest
 import { MESH_KERNEL_PROTOCOL } from "./worker_protocol";
 
 // IMPORTANT: importer le glue JS, pas le .wasm
-import initWasm, { build_chunk } from "../../../../terrain/pkg/mesh_kernel_wasm.js";
+import initWasm, { build_chunk } from "../../../../terrain/pkg/terrain_generator.js";
 
 const PROTOCOL = MESH_KERNEL_PROTOCOL;
 
@@ -13,7 +13,7 @@ let wasmReady: Promise<void> | null = null;
 function ensureWasmReady() {
     if (!wasmReady) {
         const wasmUrl = new URL(
-            "../../../../terrain/pkg/mesh_kernel_wasm_bg.wasm",
+            "../../../../terrain/pkg/terrain_generator_bg.wasm",
             import.meta.url
         );
         wasmReady = (initWasm as any)(wasmUrl);
@@ -82,11 +82,11 @@ function post(msg: MeshKernelResponse, transfer?: Transferable[]) {
 
         const seed = (p.noise?.seed ?? 1) | 0;
         const octaves = p.noise?.octaves ?? 8;
-        const baseFrequency = p.noise?.baseFrequency ?? 1.0;
-        const baseAmplitude = p.noise?.baseAmplitude ?? 4.0;
-        const lacunarity = p.noise?.lacunarity ?? 2.5;
-        const persistence = p.noise?.persistence ?? 0.5;
-        const globalAmp = p.noise?.globalTerrainAmplitude ?? 100.0;
+        const baseFrequency = p.noise?.baseFrequency ?? 0.0;
+        const baseAmplitude = p.noise?.baseAmplitude ?? 0.0;
+        const lacunarity = p.noise?.lacunarity ?? 0.0;
+        const persistence = p.noise?.persistence ?? 0.0;
+        const globalAmp = p.noise?.globalTerrainAmplitude ?? 10.0;
 
         // NOTE: cast any pour ne pas bloquer sur l’arity tant que Rust n’est pas figé
         const meshData: any = (build_chunk as any)(
