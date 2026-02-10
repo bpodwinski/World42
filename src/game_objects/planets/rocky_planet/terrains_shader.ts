@@ -3,7 +3,6 @@ import terrainDebugLODShader from '../../../assets/shaders/terrain/_terrainDebug
 import terrainVertexShader from '../../../assets/shaders/terrain/terrainVertexShader.glsl';
 import terrainFragmentShader from '../../../assets/shaders/terrain/terrainFragmentShader.glsl';
 import { TextureManager } from '../../../core/io/texture_manager';
-import { PlanetData } from '../../../game_world/solar_system/planet_data';
 
 Effect.IncludesShadersStore['debugLOD'] = terrainDebugLODShader;
 Effect.ShadersStore['terrainVertexShader'] = terrainVertexShader;
@@ -11,34 +10,47 @@ Effect.ShadersStore['terrainFragmentShader'] = terrainFragmentShader;
 
 /**
  * TerrainShader creates and configures ShaderMaterial for terrain rendering
- *
- * Centralizes shader configuration and makes it reusable across terrain chunks
  */
 export class TerrainShader {
     private scene: Scene;
 
-    /**
-     * Creates new TerrainShader instance using provided scene
-     *
-     * @param {Scene} scene - Babylon.js scene for shader creation
-     */
+    // Cache textures per-scene to avoid re-creating them for every chunk material
+    private static _texCache = new WeakMap<Scene, { diffuse: TextureManager; detail: TextureManager }>();
+
     constructor(scene: Scene) {
         this.scene = scene;
     }
 
     /**
+     * Optional: set the primary star position for lighting (WorldDouble, simulation units)
+     * Store it in scene.metadata to avoid globals like PlanetData.
+     */
+    public static setPrimaryStarWorldDouble(scene: Scene, starPosWorldDouble: Vector3, intensity: number = 1.0) {
+        scene.metadata = scene.metadata ?? {};
+        scene.metadata.terrainLighting = {
+            starPosWorldDouble: starPosWorldDouble.clone(),
+            intensity,
+        };
+    }
+
+    private static getTextures(scene: Scene) {
+        const cached = this._texCache.get(scene);
+        if (cached) return cached;
+
+        const tex = {
+            diffuse: new TextureManager('terrain_diffuse.ktx2', scene),
+            detail: new TextureManager('terrain_detail.ktx2', scene),
+        };
+        this._texCache.set(scene, tex);
+        return tex;
+    }
+
+    /**
      * Creates and configures a ShaderMaterial for terrain rendering
      *
-     * @param {number} resolution - Grid resolution for terrain chunk
-     * @param {number} lodLevel - Current level of detail
-     * @param {number} maxLevel - Maximum level of detail
-     * @param {Vector3} cameraPosition - Camera position in world space
-     * @param {number} planetRadius - Radius of the planet
-     * @param {Vector3} planetCenter - Center position of the planet in world space
-     * @param {Vector3} patchCenterLocal - Center of the patch in planet-local space
-     * @param {boolean} [wireframe=false] - Enable or disable wireframe mode
-     * @param {boolean} [debugLOD=false] - Enable or disable debug mode for LOD
-     * @returns {ShaderMaterial} Configured ShaderMaterial for terrain
+     * @param cameraPosition - Camera position in WorldDouble (simulation units)
+     * @param planetCenter - Planet center in WorldDouble (simulation units)
+     * @param patchCenterLocal - Center of the patch in planet-local space (before rotation)
      */
     create(
         resolution: number,
@@ -78,7 +90,7 @@ export class TerrainShader {
                     'lightDirection',
                     'lightIntensity',
                 ],
-                samplers: ['diffuseTexture', 'detailTexture']
+                samplers: ['diffuseTexture', 'detailTexture'],
             }
         );
 
@@ -95,38 +107,41 @@ export class TerrainShader {
 
         const lodRanges: number[] = [];
         for (let i = 0; i < maxLevel; i++) {
-            lodRanges[i] =
-                planetRadius * Math.pow(2, i);
+            lodRanges[i] = planetRadius * Math.pow(2, i);
         }
         shader.setFloats('lodRangesLUT', lodRanges);
+
         // Mesh vertices are in planet-local space (origin = planet center)
         shader.setVector3('uPlanetCenter', Vector3.Zero());
         shader.setVector3('uPatchCenter', patchCenterLocal);
 
-        // Diffuse
-        shader.setTexture(
-            'diffuseTexture',
-            new TextureManager('terrain_diffuse.ktx2', this.scene)
-        );
+        // Textures (cached)
+        const tex = TerrainShader.getTextures(this.scene);
+        shader.setTexture('diffuseTexture', tex.diffuse);
         shader.setFloat('textureScale', 0.0001);
 
-        // Detail
-        shader.setTexture(
-            'detailTexture',
-            new TextureManager('terrain_detail.ktx2', this.scene)
-        );
+        shader.setTexture('detailTexture', tex.detail);
         shader.setFloat('detailScale', 1.0);
         shader.setFloat('detailBlend', 0.5);
 
-        // Light
-        shader.setVector3(
-            'lightDirection',
-            PlanetData.get('Sun').position.subtract(planetCenter).normalize()
-        );
-        shader.setFloat('lightIntensity', 1.0);
+        // Lighting: compute direction from a per-scene "primary star" if provided
+        const meta = (this.scene.metadata as any)?.terrainLighting;
+        const starPosWorldDouble: Vector3 | undefined = meta?.starPosWorldDouble;
+        const intensity: number = Number.isFinite(meta?.intensity) ? meta.intensity : 10.0;
+
+        const lightDir = new Vector3(1, 0, 0);
+        if (starPosWorldDouble) {
+            starPosWorldDouble.subtractToRef(planetCenter, lightDir);
+            if (lightDir.lengthSquared() < 1e-12) {
+                lightDir.set(1, 0, 0);
+            } else {
+                lightDir.normalize();
+            }
+        }
+        shader.setVector3('lightDirection', lightDir);
+        shader.setFloat('lightIntensity', intensity);
 
         shader.wireframe = wireframe;
-
         return shader;
     }
 }

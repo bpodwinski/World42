@@ -18,14 +18,10 @@ import { PostProcess } from './core/render/postprocess_manager';
 import { OriginCamera } from './core/camera/camera_manager';
 import { MouseSteerControlManager } from './core/control/mouse_steer_control_manager';
 import { GuiManager } from './core/gui/gui_manager';
-import {
-    createCDLODForAllPlanets,
-    loadSolarSystemFromJSON,
-    precomputeAndRunLODLoop,
-} from './game_world/solar_system/solar_system_loader';
-import planetsJson from './game_world/solar_system/data.json';
+import planetsJson from './game_world/stellar_system/data.json';
 import { teleportToEntity } from './core/camera/teleport_entity';
 import { ScaleManager } from './core/scale/scale_manager';
+import { createCDLODForSystem, listStellarSystems, loadStellarSystemFromCatalog, PlanetCDLOD, runCDLODLoop } from './game_world/stellar_system/stellar_catalog_loader';
 
 export class FloatingCameraScene {
     public static async CreateScene(
@@ -36,12 +32,27 @@ export class FloatingCameraScene {
         scene.clearColor.set(0, 0, 0, 1);
         scene.collisionsEnabled = true;
 
-        const loadedSystem = await loadSolarSystemFromJSON(scene, planetsJson);
-        const systemBodies = loadedSystem.bodies;
+        const systemIds = listStellarSystems(planetsJson);
 
-        const body = systemBodies.get('Mercury');
+        // Charge tout
+        const loadedSystemsArr = await Promise.all(
+            systemIds.map((id) => loadStellarSystemFromCatalog(scene, planetsJson, id))
+        );
+        const loadedSystems = new Map(loadedSystemsArr.map((s) => [s.systemId, s]));
+
+        // Choisit le système actif (Sol si présent, sinon le 1er)
+        const activeSystem =
+            loadedSystems.get("Sol") ?? loadedSystemsArr[0];
+
+        const systemBodies = activeSystem.bodies;
+
+        // Choisit un corps de spawn (Mercury si présent, sinon 1re planète non-star)
+        const body =
+            systemBodies.get("Mercury") ??
+            Array.from(systemBodies.values()).find((b) => b.bodyType !== "star");
+
         if (!body) {
-            throw new Error('Bodies JSON must at least contain "Mercury"');
+            throw new Error("Aucun corps (planète) trouvé dans le système actif.");
         }
 
         scene.textures.forEach((texture) => {
@@ -134,28 +145,29 @@ export class FloatingCameraScene {
             if (keys.has('o')) debugDoublePos.addInPlace(up.scale(-speed));
         });
 
-        const allCDLOD = createCDLODForAllPlanets(scene, camera, loadedSystem, {
-            maxLevel: 16,
-            resolution: 64,
-        });
+        const mergedCDLOD = new Map<string, PlanetCDLOD>();
 
-        precomputeAndRunLODLoop(scene, camera, allCDLOD);
+        for (const sys of loadedSystems.values()) {
+            const cdlod = createCDLODForSystem(scene, camera, sys, {
+                maxLevel: 12,
+                resolution: 96,
+            });
+
+            for (const [name, planet] of cdlod.entries()) {
+                mergedCDLOD.set(`${sys.systemId}:${name}`, planet);
+            }
+        }
+
+        runCDLODLoop(scene, camera, mergedCDLOD);
 
         // RACCOURCI: T pour se téléporter
         window.addEventListener('keydown', (e) => {
             if (e.key.toLowerCase() === 't') {
-                const pluto = systemBodies.get('Pluto');
-                if (!pluto) {
-                    console.warn("[teleport] La planète 'Pluto' est introuvable dans systemBodies.");
-                    return;
-                }
+                const sol = loadedSystems.get("Sol");
+                const pluto = sol?.bodies.get("Pluto");
+                if (!pluto) return;
 
-                teleportToEntity(
-                    camera,
-                    pluto.positionWorldDouble, // P0: WorldDouble
-                    pluto.diameter,
-                    20
-                );
+                teleportToEntity(camera, pluto.positionWorldDouble, pluto.diameter, 20);
             }
         });
 
@@ -174,7 +186,7 @@ export class FloatingCameraScene {
         skybox.isPickable = false;
         skybox.renderingGroupId = 0;
 
-        // --- HUD Vitesse + distance -----------------------------------------
+        // --- HUD Vitesse + distance
         let emaMS = 0;
         let lastHudUpdate = performance.now();
         const TAU = 0.1;

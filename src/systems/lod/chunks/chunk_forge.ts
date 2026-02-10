@@ -1,4 +1,4 @@
-import { Scene, Mesh, Vector3, TransformNode, Matrix } from "@babylonjs/core";
+import { Scene, Mesh, Vector3, TransformNode, Matrix, ShaderMaterial } from "@babylonjs/core";
 import { ChunkTree } from "./chunk_tree";
 import { Terrain } from "../../../game_objects/planets/rocky_planet/terrain";
 import { TerrainShader } from "../../../game_objects/planets/rocky_planet/terrains_shader";
@@ -7,7 +7,7 @@ import { WorkerPool } from "../workers/worker_pool";
 import type { Bounds, Face } from "../types";
 import type { MeshKernelBuildChunkRequest } from "../workers/worker_protocol";
 
-const DEBUG_MESH_TIMINGS = true;
+const DEBUG_MESH_TIMINGS = false;
 
 function makeJobId(): string {
     return globalThis.crypto?.randomUUID?.() ?? `job-${Date.now()}-${Math.random()}`;
@@ -29,6 +29,7 @@ export class ChunkForge {
     private _invWorld = new Matrix();
     private _rotatedLocal = new Vector3();
     private _patchCenterLocal = new Vector3();
+    private _lightDir = new Vector3();
 
     constructor(scene: Scene, workerPool: WorkerPool) {
         this.scene = scene;
@@ -42,6 +43,7 @@ export class ChunkForge {
         planetEntity: FloatingEntityInterface,
         renderParent: TransformNode,
         patchCenterWorldDouble: Vector3,
+        starPosWorldDouble: Vector3 | null,     // ✅ NEW (par système)
         wireframe: boolean,
         boundingBox: boolean
     ): Mesh {
@@ -58,7 +60,6 @@ export class ChunkForge {
         terrainMesh.showBoundingBox = boundingBox;
         terrainMesh.alwaysSelectAsActiveMesh = true;
 
-        // ✅ planet center en WorldDouble (évite lightDirection=0)
         const planetCenterWorldDouble = planetEntity.doublepos;
 
         // patchCenterLocal = inverse(rotation(node_*)) * (patchCenterWorld - planetCenterWorld)
@@ -67,17 +68,38 @@ export class ChunkForge {
         Vector3.TransformNormalToRef(this._rotatedLocal, this._invWorld, this._patchCenterLocal);
 
         const tMat0 = performance.now();
-        terrainMesh.material = new TerrainShader(this.scene).create(
+
+        const mat = new TerrainShader(this.scene).create(
             params.resolution,
             params.level,
             params.maxLevel,
-            cameraWorldDouble,          // Vector3
-            params.radius,              // number
-            planetCenterWorldDouble,    // Vector3
-            this._patchCenterLocal,     // ✅ Vector3 attendu (corrige ton TS2345)
-            wireframe,                  // boolean
-            ChunkTree.debugLODEnabled   // boolean
-        );
+            cameraWorldDouble,
+            params.radius,
+            planetCenterWorldDouble,
+            this._patchCenterLocal,
+            wireframe,
+            ChunkTree.debugLODEnabled
+        ) as ShaderMaterial;
+
+        // ✅ IMPORTANT: lighting PER-CHUNK (multi-systèmes)
+        // On override les uniforms du mat, sans dépendre de scene.metadata (qui est global).
+        if (starPosWorldDouble) {
+            starPosWorldDouble.subtractToRef(planetCenterWorldDouble, this._lightDir);
+
+            if (this._lightDir.lengthSquared() < 1e-12) {
+                this._lightDir.set(1, 0, 0);
+            } else {
+                this._lightDir.normalize();
+            }
+
+            mat.setVector3("lightDirection", this._lightDir);
+
+            // intensity: fixe pour l’instant (tu peux le passer aussi si tu veux par système)
+            mat.setFloat("lightIntensity", 1.0);
+        }
+
+        terrainMesh.material = mat;
+
         const tMat1 = performance.now();
 
         if (DEBUG_MESH_TIMINGS) {
@@ -96,6 +118,7 @@ export class ChunkForge {
         planetEntity: FloatingEntityInterface,
         renderParent: TransformNode,
         patchCenterWorldDouble: Vector3,
+        starPosWorldDouble: Vector3 | null,     // ✅ NEW
         wireframe: boolean,
         boundingBox: boolean
     ): Promise<Mesh> {
@@ -112,7 +135,7 @@ export class ChunkForge {
                     ...params,
                     noise: {
                         seed: 1,
-                        octaves: 12,
+                        octaves: 8,
                         baseFrequency: 20.0,
                         baseAmplitude: 10.0,
                         lacunarity: 2.0,
@@ -136,6 +159,7 @@ export class ChunkForge {
                             planetEntity,
                             renderParent,
                             patchCenterWorldDouble,
+                            starPosWorldDouble, // ✅
                             wireframe,
                             boundingBox
                         );

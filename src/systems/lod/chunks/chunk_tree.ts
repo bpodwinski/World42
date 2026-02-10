@@ -32,6 +32,8 @@ export class ChunkTree {
     /** Planet anchor in WorldDouble (floating origin) */
     parentEntity: FloatingEntityInterface;
 
+    starPosWorldDouble: Vector3 | null;
+
     /**
      * Parent node in Render-space that carries the planet rotation (node_Jupiter).
      * Chunks will be parented under this node to inherit rotation.
@@ -81,6 +83,7 @@ export class ChunkTree {
         face: Face,
         parentEntity: FloatingEntityInterface,
         renderParent: TransformNode,
+        starPosWorldDouble: Vector3 | null,
         wireframe: boolean = false,
         boundingBox: boolean = false,
         frustumCullingEnabled: boolean = true,
@@ -100,6 +103,7 @@ export class ChunkTree {
 
         this.parentEntity = parentEntity;
         this.renderParent = renderParent;
+        this.starPosWorldDouble = starPosWorldDouble;
 
         this.wireframe = wireframe;
         this.boundingBox = boundingBox;
@@ -159,6 +163,7 @@ export class ChunkTree {
             this.face,
             this.parentEntity,
             this.renderParent,
+            this.starPosWorldDouble,
             this.wireframe,
             this.boundingBox,
             this.frustumCullingEnabled,
@@ -219,7 +224,7 @@ export class ChunkTree {
     }
 
     // SSE tuning knobs (adjust to taste)
-    public static sseThresholdPx = 4.0; // 1..3 = very detailed, 3..6 = better perf
+    public static sseThresholdPx = 6.0; // 1..3 = very detailed, 3..6 = better perf
     public static geomErrorScale = 0.4; // empirical scale factor (depends on terrain)
     public static minDistEpsilon = 1e-3; // avoids division by zero
 
@@ -334,6 +339,7 @@ export class ChunkTree {
                                 child.parentEntity,
                                 child.renderParent,
                                 child.getCenterChunk(),
+                                child.starPosWorldDouble,
                                 child.wireframe,
                                 child.boundingBox
                             );
@@ -369,6 +375,7 @@ export class ChunkTree {
                         this.parentEntity,
                         this.renderParent,
                         center,
+                        this.starPosWorldDouble,
                         this.wireframe,
                         this.boundingBox
                     );
@@ -389,6 +396,7 @@ export class ChunkTree {
                         this.parentEntity,
                         this.renderParent,
                         center,
+                        this.starPosWorldDouble,
                         this.wireframe,
                         this.boundingBox
                     );
