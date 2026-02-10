@@ -341,25 +341,3 @@ function normalizeSystemJSON(raw: unknown): SystemJSON {
 
     return out;
 }
-
-export function runCDLODLoop(
-    scene: Scene,
-    camera: OriginCamera,
-    all: Map<string, PlanetCDLOD>
-) {
-    const roots = Array.from(all.values()).flatMap((p) => p.chunks);
-    let inFlight = false;
-
-    scene.onBeforeRenderObservable.add(() => {
-        if (inFlight) return;
-        inFlight = true;
-
-        Promise.all(roots.map((c) => c.updateLOD(camera, false)))
-            .catch(console.error)
-            .finally(() => {
-                inFlight = false;
-            });
-
-        for (const c of roots) c.updateDebugLOD(ChunkTree.debugLODEnabled);
-    });
-}

@@ -21,7 +21,8 @@ import { GuiManager } from './core/gui/gui_manager';
 import planetsJson from './game_world/stellar_system/data.json';
 import { teleportToEntity } from './core/camera/teleport_entity';
 import { ScaleManager } from './core/scale/scale_manager';
-import { createCDLODForSystem, listStellarSystems, loadStellarSystemFromCatalog, PlanetCDLOD, runCDLODLoop } from './game_world/stellar_system/stellar_catalog_loader';
+import { createCDLODForSystem, listStellarSystems, loadStellarSystemFromCatalog, PlanetCDLOD } from './game_world/stellar_system/stellar_catalog_loader';
+import { LodRunner } from './systems/lod/lod_runner';
 
 export class FloatingCameraScene {
     public static async CreateScene(
@@ -158,7 +159,15 @@ export class FloatingCameraScene {
             }
         }
 
-        runCDLODLoop(scene, camera, mergedCDLOD);
+        const roots = Array.from(mergedCDLOD.values()).flatMap(p => p.chunks);
+
+        const lodRunner = new LodRunner(scene, camera, roots, {
+            maxRootsPerFrame: 4, // démarre 2 roots / frame
+            maxConcurrent: 3, // 2 updateLOD max en parallèle
+            applyDebugEveryFrame: true,
+        });
+
+        lodRunner.start();
 
         // RACCOURCI: T pour se téléporter
         window.addEventListener('keydown', (e) => {
@@ -168,6 +177,7 @@ export class FloatingCameraScene {
                 if (!pluto) return;
 
                 teleportToEntity(camera, pluto.positionWorldDouble, pluto.diameter, 20);
+                lodRunner.boostOnce(6);
             }
         });
 
