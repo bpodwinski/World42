@@ -70,6 +70,44 @@
       "origin_km": [40000000000000, 0, 0],
       "bodies": {
         "AlphaCenA": {
+          "type": "star",
+          "position_km": [-1800000000, 0, 0],
+          "diameter_km": 1708000,
+          "rotation_period_days": 28.3
+        },
+        "AlphaCenB": {
+          "type": "star",
+          "position_km": [1800000000, 0, 0],
+          "diameter_km": 1204000,
+          "rotation_period_days": 36.7
+        },
+
+        "ProximaCen": {
+          "type": "star",
+          "position_km": [1900000000000, 0, 0],
+          "diameter_km": 214646,
+          "rotation_period_days": 83.5
+        },
+        "Proxima_b": {
+          "type": "planet",
+          "position_km": [1900007253000, 0, 0],
+          "diameter_km": 12742,
+          "rotation_period_days": 11.2
+        },
+        "Proxima_d": {
+          "type": "planet",
+          "position_km": [1900004200000, 0, 0],
+          "diameter_km": 11000,
+          "rotation_period_days": 5.1
+        },
+        "Proxima_c": {
+          "type": "planet",
+          "position_km": [1900220000000, 0, 0],
+          "diameter_km": 30000,
+          "rotation_period_days": null
+        },
+
+        "AlphaCenA_Planet1": {
           "type": "planet",
           "position_km": [5906400000, 0, 0],
           "diameter_km": 2377,
