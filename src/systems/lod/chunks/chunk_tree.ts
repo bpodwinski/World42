@@ -433,4 +433,36 @@ export class ChunkTree {
             this.children.forEach((child) => child.updateDebugLOD(debugLOD));
         }
     }
+
+    /**
+     * Priority hint for the LOD scheduler (WorldDouble).
+     * Smaller = more urgent (near camera).
+     */
+    public estimatePriority(camera: OriginCamera): number {
+        // Reprend les mêmes repères que updateLOD (WorldDouble)
+        const center = this.getCenterChunk();
+
+        // Si on a des bounds mesh précises, on améliore la distance (optionnel mais utile)
+        let centerWorld = center;
+        let radiusForCull = 0;
+
+        const bi = (this.mesh as any)?.metadata?.boundsInfo;
+        const hasAccurateBounds =
+            Array.isArray(bi?.centerLocal) &&
+            bi.centerLocal.length === 3 &&
+            Number.isFinite(bi.boundingRadius);
+
+        if (hasAccurateBounds) {
+            const centerLocal = Vector3.FromArray(bi.centerLocal);
+            const rotatedLocal = new Vector3();
+            Vector3.TransformNormalToRef(centerLocal, this.renderParent.getWorldMatrix(), rotatedLocal);
+            centerWorld = this.parentEntity.doublepos.add(rotatedLocal);
+            radiusForCull = bi.boundingRadius;
+        }
+
+        const dc = Vector3.Distance(camera.doublepos, centerWorld);
+        const distToPatch = Math.max(0, dc - radiusForCull);
+
+        return distToPatch;
+    }
 }
