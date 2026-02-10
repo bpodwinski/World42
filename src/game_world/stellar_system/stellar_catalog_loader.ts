@@ -14,11 +14,18 @@ import { ChunkTree } from "../../systems/lod/chunks/chunk_tree";
 import type { Face } from "../../systems/lod/types";
 
 /** ---------- Types JSON (catalogue) ---------- */
+export type StarJSON = {
+    temperature_k?: number;
+    color_rgb?: [number, number, number]; // linéaire 0..1
+    intensity?: number;
+};
+
 export type BodyJSON = {
-    type: string; // "star" | "planet" | ...
+    type: string;
     position_km: [number, number, number];
     diameter_km: number;
     rotation_period_days: number | null;
+    star?: StarJSON; // ✅ NEW
 };
 
 export type SystemJSON = Record<string, BodyJSON>;
@@ -41,7 +48,6 @@ export type StellarCatalogJSON = {
 };
 
 /** ---------- Runtime Loaded ---------- */
-
 export type LoadedBody = {
     systemId: string;
     bodyType: string;
@@ -59,6 +65,11 @@ export type LoadedBody = {
     rotationPeriodDays: number | null;
 
     entity?: FloatingEntity;
+
+    starLight?: {
+        color: Vector3;      // (r,g,b) linéaire
+        intensity: number;   // scalaire
+    };
 };
 
 export type LoadedSystem = {
@@ -89,7 +100,6 @@ export type LoadSystemOptions = {
 };
 
 /** ---------- API ---------- */
-
 /** Liste des systèmes disponibles (compat ancien format inclus). */
 export function listStellarSystems(jsonSource: unknown): string[] {
     const cat = normalizeCatalogJSON(jsonSource);
@@ -157,13 +167,23 @@ export async function loadStellarSystemFromCatalog(
             ScaleManager.toSimulationVector(new Vector3(pKm[0], pKm[1], pKm[2]))
         );
 
+        let meshName = `body_${systemId}_${name}`;
+
         const diameter = ScaleManager.toSimulationUnits(data.diameter_km);
 
-        let meshName = `body_${systemId}_${name}`;
+        const starLight = isStar ? parseStarLight(data.star) : undefined;
+
         if (isStar) {
             const sphere = MeshBuilder.CreateSphere(meshName, { diameter, segments: 64 }, scene);
             sphere.parent = pivot;
-            sphere.material = makeMaterial(`${systemId}_${name}`, true, scene);
+
+            const mat = makeMaterial(`${systemId}_${name}`, true, scene);
+
+            // ✅ applique la couleur/intensité JSON sur l’étoile
+            if (starLight) {
+                mat.emissiveColor = new Color3(starLight.color.x, starLight.color.y, starLight.color.z);
+            }
+            sphere.material = mat;
             meshName = sphere.name;
         }
 
@@ -176,6 +196,7 @@ export async function loadStellarSystemFromCatalog(
             positionWorldDouble: posWorldDouble,
             diameter,
             rotationPeriodDays: data.rotation_period_days,
+            starLight, // ✅ store
         });
     }
 
@@ -229,14 +250,19 @@ export function createCDLODForSystem(
 
     const out = new Map<string, PlanetCDLOD>();
 
+    const stars = Array.from(loaded.bodies.values()).filter(b => b.bodyType === "star");
+
     for (const [name, body] of loaded.bodies) {
         if (skip(name, body)) continue;
+
+        const { pos: starPosWorldDouble, color: starColor, intensity: starIntensity, name: starName } =
+            pickNearestStar(body, stars);
 
         const ent = body.entity!;
         const radius = body.diameter * 0.5;
 
-        const star = Array.from(loaded.bodies.values()).find(b => b.bodyType === "star");
-        const starPosWorldDouble = star?.positionWorldDouble ?? null;
+        // debug light
+        console.log(`[light] ${loaded.systemId}:${name} -> ${starName} color=${starColor.toString()} I=${starIntensity}`);
 
         const chunks = faces.map((face) =>
             new ChunkTree(
@@ -248,9 +274,11 @@ export function createCDLODForSystem(
                 radius,
                 resolution,
                 face,
-                ent,       // WorldDouble anchor
-                body.node, // pivot (rotation) => chunks tournent
+                ent,
+                body.node,
                 starPosWorldDouble,
+                starColor,
+                starIntensity,
                 false,
                 false,
                 true,
@@ -266,7 +294,6 @@ export function createCDLODForSystem(
 }
 
 /** ---------- Normalisation / compat ---------- */
-
 function canonicalType(typeRaw: unknown): string {
     let t = (typeof typeRaw === "string" ? typeRaw : "planet").toLowerCase().trim();
     if (t === "sun") t = "star";
@@ -319,25 +346,105 @@ function normalizeSystemJSON(raw: unknown): SystemJSON {
         const type = canonicalType(v.type ?? v.Type);
 
         let x = 0, y = 0, z = 0;
-        if (Array.isArray(v.position_km)) {
-            [x = 0, y = 0, z = 0] = v.position_km as number[];
-        } else {
-            x = Number(v.x ?? 0);
-            y = Number(v.y ?? 0);
-            z = Number(v.z ?? 0);
-        }
+        if (Array.isArray(v.position_km)) [x = 0, y = 0, z = 0] = v.position_km as number[];
 
         const diameter_km = Number(v.diameter_km ?? v.diameter ?? 0);
         const rot = v.rotation_period_days;
         const rotation_period_days = rot === null || rot === undefined ? null : Number(rot);
+
+        // ✅ NEW: star config
+        const starAny = v.star;
+        const star =
+            starAny && typeof starAny === "object"
+                ? {
+                    temperature_k: Number.isFinite(Number(starAny.temperature_k)) ? Number(starAny.temperature_k) : undefined,
+                    intensity: Number.isFinite(Number(starAny.intensity)) ? Number(starAny.intensity) : undefined,
+                    color_rgb: Array.isArray(starAny.color_rgb) && starAny.color_rgb.length === 3
+                        ? [Number(starAny.color_rgb[0]), Number(starAny.color_rgb[1]), Number(starAny.color_rgb[2])] as [number, number, number]
+                        : undefined,
+                }
+                : undefined;
 
         out[name] = {
             type,
             position_km: [x, y, z],
             diameter_km: Number.isFinite(diameter_km) ? diameter_km : 0,
             rotation_period_days: Number.isFinite(Number(rotation_period_days)) ? Number(rotation_period_days) : null,
+            star, // ✅ keep
+        };
+    }
+    return out;
+}
+
+/** ---------- Star helpers ---------- */
+function parseStarLight(star?: StarJSON): { color: Vector3; intensity: number } {
+    const intensity = Number.isFinite(star?.intensity) ? (star!.intensity as number) : 1.0;
+
+    if (star?.color_rgb) {
+        const [r, g, b] = star.color_rgb;
+        return {
+            color: new Vector3(r, g, b),
+            intensity,
         };
     }
 
-    return out;
+    if (typeof star?.temperature_k === "number") {
+        return {
+            color: kelvinToLinearRGB(star.temperature_k),
+            intensity,
+        };
+    }
+
+    return { color: new Vector3(1, 1, 1), intensity };
+}
+
+function kelvinToLinearRGB(k: number): Vector3 {
+    // Approx Tanner Helland (sRGB), puis on approx linéaire par pow(2.2)
+    const t = Math.max(1000, Math.min(40000, k)) / 100;
+    let r = 0, g = 0, b = 0;
+
+    // R
+    if (t <= 66) r = 255;
+    else r = 329.698727446 * Math.pow(t - 60, -0.1332047592);
+
+    // G
+    if (t <= 66) g = 99.4708025861 * Math.log(t) - 161.1195681661;
+    else g = 288.1221695283 * Math.pow(t - 60, -0.0755148492);
+
+    // B
+    if (t >= 66) b = 255;
+    else if (t <= 19) b = 0;
+    else b = 138.5177312231 * Math.log(t - 10) - 305.0447927307;
+
+    const clamp01 = (x: number) => Math.max(0, Math.min(1, x / 255));
+    // sRGB -> approx linéaire
+    const toLin = (x: number) => Math.pow(clamp01(x), 2.2);
+
+    return new Vector3(toLin(r), toLin(g), toLin(b));
+}
+
+function pickNearestStar(body: LoadedBody, stars: LoadedBody[]) {
+    if (!stars.length) {
+        return {
+            pos: null as Vector3 | null,
+            color: new Vector3(1, 1, 1),
+            intensity: 0.25,
+            name: "none",
+        };
+    }
+
+    let best = stars[0];
+    let bestD2 = Vector3.DistanceSquared(body.positionWorldDouble, best.positionWorldDouble);
+
+    for (let i = 1; i < stars.length; i++) {
+        const s = stars[i];
+        const d2 = Vector3.DistanceSquared(body.positionWorldDouble, s.positionWorldDouble);
+        if (d2 < bestD2) {
+            best = s;
+            bestD2 = d2;
+        }
+    }
+
+    const light = best.starLight ?? { color: new Vector3(1, 1, 1), intensity: 1.0 };
+    return { pos: best.positionWorldDouble, color: light.color, intensity: light.intensity, name: best.name };
 }

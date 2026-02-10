@@ -162,8 +162,8 @@ export class FloatingCameraScene {
         const roots = Array.from(mergedCDLOD.values()).flatMap(p => p.chunks);
 
         const lod = new LodScheduler(scene, camera, roots, {
-            maxConcurrent: 2,
-            maxStartsPerFrame: 3,
+            maxConcurrent: 3,
+            maxStartsPerFrame: 2,
             rescoreMs: 200,
             applyDebugEveryFrame: true,
         });

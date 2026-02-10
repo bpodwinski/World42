@@ -25,6 +25,7 @@ uniform float lodMaxLevel;        // LOD maximum
 
 // Uniforms pour l'éclairage
 uniform vec3 lightDirection;      // Direction de la lumière (normalisée)
+uniform vec3 lightColor;          // Couleur de la lumière
 uniform float lightIntensity;     // Intensité de la lumière
 
 #include<debugLOD>
@@ -84,7 +85,17 @@ void main(void) {
     vec4 combinedColor = mix(baseColor, baseColor * detailColor, detailBlend);
 
     // Calcul de l'éclairage
-    float lighting = clamp(dot(normal, normalize(-lightDirection)), 0.0, 1.0) * lightIntensity;
-    gl_FragColor = vec4(combinedColor.rgb * lighting, combinedColor.a);
+    vec3 L = normalize(-lightDirection);
+    float ndl = max(dot(normal, L), 0.0);
+
+    // petit ambient pour éviter "nuit totale"
+    vec3 ambient = vec3(0.01);
+
+    // lumière colorée (lightColor doit être en linéaire)
+    vec3 diffuse = lightColor * (ndl * lightIntensity);
+
+    vec3 lightingRGB = ambient + diffuse;
+
+    gl_FragColor = vec4(combinedColor.rgb * lightingRGB, combinedColor.a);
   }
 }

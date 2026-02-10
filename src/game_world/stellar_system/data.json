@@ -8,7 +8,8 @@
           "type": "star",
           "position_km": [0, 0, 0],
           "diameter_km": 1391000,
-          "rotation_period_days": null
+          "rotation_period_days": 25.38,
+          "star": { "temperature_k": 5772, "intensity": 1.0 }
         },
         "Mercury": {
           "type": "planet",
@@ -73,20 +74,22 @@
           "type": "star",
           "position_km": [-1800000000, 0, 0],
           "diameter_km": 1708000,
-          "rotation_period_days": 28.3
+          "rotation_period_days": 28.3,
+          "star": { "temperature_k": 5790, "intensity": 1.2 }
         },
         "AlphaCenB": {
           "type": "star",
           "position_km": [1800000000, 0, 0],
           "diameter_km": 1204000,
-          "rotation_period_days": 36.7
+          "rotation_period_days": 36.7,
+          "star": { "temperature_k": 5260, "intensity": 0.9 }
         },
-
         "ProximaCen": {
           "type": "star",
           "position_km": [1900000000000, 0, 0],
           "diameter_km": 214646,
-          "rotation_period_days": 83.5
+          "rotation_period_days": 83.5,
+          "star": { "temperature_k": 5260, "intensity": 0.9 }
         },
         "Proxima_b": {
           "type": "planet",

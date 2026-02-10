@@ -88,6 +88,7 @@ export class TerrainShader {
                     'detailScale',
                     'detailBlend',
                     'lightDirection',
+                    "lightColor",
                     'lightIntensity',
                 ],
                 samplers: ['diffuseTexture', 'detailTexture'],
@@ -132,6 +133,7 @@ export class TerrainShader {
         const lightDir = new Vector3(1, 0, 0);
         if (starPosWorldDouble) {
             starPosWorldDouble.subtractToRef(planetCenter, lightDir);
+            planetCenter.subtractToRef(starPosWorldDouble, lightDir);
             if (lightDir.lengthSquared() < 1e-12) {
                 lightDir.set(1, 0, 0);
             } else {
@@ -139,6 +141,7 @@ export class TerrainShader {
             }
         }
         shader.setVector3('lightDirection', lightDir);
+        shader.setVector3("lightColor", new Vector3(1, 1, 1));
         shader.setFloat('lightIntensity', intensity);
 
         shader.wireframe = wireframe;

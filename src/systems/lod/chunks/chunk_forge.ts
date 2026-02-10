@@ -30,6 +30,7 @@ export class ChunkForge {
     private _rotatedLocal = new Vector3();
     private _patchCenterLocal = new Vector3();
     private _lightDir = new Vector3();
+    private _lightDirLocal = new Vector3();
 
     constructor(scene: Scene, workerPool: WorkerPool) {
         this.scene = scene;
@@ -43,7 +44,9 @@ export class ChunkForge {
         planetEntity: FloatingEntityInterface,
         renderParent: TransformNode,
         patchCenterWorldDouble: Vector3,
-        starPosWorldDouble: Vector3 | null,     // ✅ NEW (par système)
+        starPosWorldDouble: Vector3 | null,
+        starColor: Vector3,
+        starIntensity: number,
         wireframe: boolean,
         boundingBox: boolean
     ): Mesh {
@@ -81,24 +84,30 @@ export class ChunkForge {
             ChunkTree.debugLODEnabled
         ) as ShaderMaterial;
 
-        // ✅ IMPORTANT: lighting PER-CHUNK (multi-systèmes)
-        // On override les uniforms du mat, sans dépendre de scene.metadata (qui est global).
+        terrainMesh.material = mat;
+
+        const sm = mat as ShaderMaterial;
+
+        // Lighting (PER-CHUNK, multi-systèmes)
+        mat.setVector3("lightColor", starColor);
+        mat.setFloat("lightIntensity", starIntensity);
+
         if (starPosWorldDouble) {
-            starPosWorldDouble.subtractToRef(planetCenterWorldDouble, this._lightDir);
+            // lightDirWorld = star -> planet (WorldDouble)
+            planetCenterWorldDouble.subtractToRef(starPosWorldDouble, this._lightDir);
+            if (this._lightDir.lengthSquared() < 1e-12) this._lightDir.set(1, 0, 0);
+            else this._lightDir.normalize();
 
-            if (this._lightDir.lengthSquared() < 1e-12) {
-                this._lightDir.set(1, 0, 0);
-            } else {
-                this._lightDir.normalize();
-            }
+            // Convertir en planète-local (inverse rotation du pivot node_*)
+            renderParent.getWorldMatrix().invertToRef(this._invWorld);
+            Vector3.TransformNormalToRef(this._lightDir, this._invWorld, this._lightDirLocal);
+            if (this._lightDirLocal.lengthSquared() < 1e-12) this._lightDirLocal.set(1, 0, 0);
+            else this._lightDirLocal.normalize();
 
-            mat.setVector3("lightDirection", this._lightDir);
-
-            // intensity: fixe pour l’instant (tu peux le passer aussi si tu veux par système)
-            mat.setFloat("lightIntensity", 1.0);
+            mat.setVector3("lightDirection", this._lightDirLocal);
         }
 
-        terrainMesh.material = mat;
+        terrainMesh.material = sm;
 
         const tMat1 = performance.now();
 
@@ -118,7 +127,9 @@ export class ChunkForge {
         planetEntity: FloatingEntityInterface,
         renderParent: TransformNode,
         patchCenterWorldDouble: Vector3,
-        starPosWorldDouble: Vector3 | null,     // ✅ NEW
+        starPosWorldDouble: Vector3 | null,
+        starColor: Vector3,
+        starIntensity: number,
         wireframe: boolean,
         boundingBox: boolean
     ): Promise<Mesh> {
@@ -159,7 +170,9 @@ export class ChunkForge {
                             planetEntity,
                             renderParent,
                             patchCenterWorldDouble,
-                            starPosWorldDouble, // ✅
+                            starPosWorldDouble,
+                            starColor,
+                            starIntensity,
                             wireframe,
                             boundingBox
                         );
