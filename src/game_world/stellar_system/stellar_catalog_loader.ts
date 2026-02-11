@@ -234,6 +234,8 @@ export function createCDLODForSystem(
         skip = (_name: string, body: LoadedBody) => body.bodyType === "star",
     } = opts;
 
+    ChunkTree.cullReliefMargin = ScaleManager.toSimulationUnits(10);
+
     // attacher entités flottantes (noms namespacés)
     for (const [name, body] of loaded.bodies) {
         if (!body.entity) {

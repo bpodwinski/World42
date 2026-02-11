@@ -187,8 +187,8 @@ export class ChunkTree {
     subdivide(): void {
         this.children = [];
         const { uMin, uMax, vMin, vMax } = this.bounds;
-        const uMid = (uMin + uMax) / 2;
-        const vMid = (vMin + vMax) / 2;
+        const uMid = Math.tan((Math.atan(uMin) + Math.atan(uMax)) * 0.5);
+        const vMid = Math.tan((Math.atan(vMin) + Math.atan(vMax)) * 0.5);
 
         const boundsTL: Bounds = { uMin, uMax: uMid, vMin: vMid, vMax };
         const boundsTR: Bounds = { uMin: uMid, uMax, vMin: vMid, vMax };
@@ -236,6 +236,7 @@ export class ChunkTree {
     public static sseThresholdPx = 3.0; // 1..3 = very detailed, 3..6 = better perf
     public static geomErrorScale = 0.4; // empirical scale factor (depends on terrain)
     public static minDistEpsilon = 1e-3; // avoids division by zero
+    public static cullReliefMargin = 0.0;
 
     /**
      * Asynchronously updates the Level of Detail (LOD) for this node.
@@ -270,8 +271,8 @@ export class ChunkTree {
             const planetCenter = this.parentEntity.doublepos;
 
             // Bounds used for culling
-            let centerWorld = center; // fallback
-            let radiusForCull = bsRadiusFallback; // fallback
+            let centerWorld = center; // fallback (WorldDouble)
+            let radiusForCull = bsRadiusFallback + ChunkTree.cullReliefMargin; // fallback + marge relief
 
             const bi = (this.mesh as any)?.metadata?.boundsInfo;
             const hasAccurateBounds =
@@ -280,17 +281,19 @@ export class ChunkTree {
                 Number.isFinite(bi.boundingRadius);
 
             if (hasAccurateBounds) {
-                // local planète (origine planète) -> appliquer rotation pivot -> world/double
+                // local planète -> rotation pivot -> world/double
                 const centerLocal = Vector3.FromArray(bi.centerLocal);
                 const rotatedLocal = new Vector3();
                 Vector3.TransformNormalToRef(centerLocal, this.renderParent.getWorldMatrix(), rotatedLocal);
 
                 centerWorld = this.parentEntity.doublepos.add(rotatedLocal);
+
+                // boundsInfo est censé déjà inclure le relief : pas besoin de marge ici (sauf si tu veux un epsilon)
                 radiusForCull = bi.boundingRadius;
             }
 
             // Frustum culling (WorldDouble center; frustumCulling does WorldDouble->Render internally)
-            if (this.frustumCullingEnabled && hasAccurateBounds) {
+            if (this.frustumCullingEnabled) {
                 const visible = frustumCulling(
                     camera,
                     centerWorld,
@@ -306,7 +309,7 @@ export class ChunkTree {
             }
 
             // Backside culling (WorldDouble)
-            if (this.backsideCullingEnabled && hasAccurateBounds) {
+            if (this.backsideCullingEnabled) {
                 const visible = backsideCulling(
                     camera.doublepos,
                     planetCenter,
