@@ -245,9 +245,9 @@ export class ChunkTree {
 
     // SSE tuning knobs (adjust to taste)
     // Hystérésis: split > merge (évite split/merge en boucle)
-    public static sseSplitThresholdPx = 1.2; // au-dessus: on subdivise
-    public static sseMergeThresholdPx = 1.1; // en-dessous: on merge (disposer les enfants)
-    public static geomErrorScale = 0.4; // empirical scale factor (depends on terrain)
+    public static sseSplitThresholdPx = 5.0; // au-dessus: on subdivise
+    public static sseMergeThresholdPx = 3.0; // en-dessous: on merge (disposer les enfants)
+    public static geomErrorScale = 0.3; // empirical scale factor (depends on terrain)
     public static minDistEpsilon = 1e-3; // avoids division by zero
     public static cullReliefMargin = 0.0;
 

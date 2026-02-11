@@ -148,12 +148,12 @@ export class ChunkForge {
                     ...params,
                     noise: {
                         seed: 1,
-                        octaves: 8,
+                        octaves: 16,
                         baseFrequency: 20.0,
-                        baseAmplitude: 10.0,
-                        lacunarity: 2.0,
+                        baseAmplitude: 15.0,
+                        lacunarity: 1.8,
                         persistence: 0.5,
-                        globalTerrainAmplitude: 10.0
+                        globalTerrainAmplitude: 80.0
                     },
                     meshFormat: "typed",
                 },
