@@ -150,7 +150,7 @@ export class FloatingCameraScene {
 
         for (const sys of loadedSystems.values()) {
             const cdlod = createCDLODForSystem(scene, camera, sys, {
-                maxLevel: 16,
+                maxLevel: 8,
                 resolution: 64,
             });
 

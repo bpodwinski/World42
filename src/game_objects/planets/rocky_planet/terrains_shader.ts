@@ -122,7 +122,7 @@ export class TerrainShader {
         shader.setFloat('textureScale', 0.0001);
 
         shader.setTexture('detailTexture', tex.detail);
-        shader.setFloat('detailScale', 1.0);
+        shader.setFloat('detailScale', 0.1);
         shader.setFloat('detailBlend', 0.5);
 
         // Lighting: compute direction from a per-scene "primary star" if provided
