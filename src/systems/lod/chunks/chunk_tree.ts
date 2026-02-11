@@ -233,7 +233,9 @@ export class ChunkTree {
     }
 
     // SSE tuning knobs (adjust to taste)
-    public static sseThresholdPx = 3.0; // 1..3 = very detailed, 3..6 = better perf
+    // Hystérésis: split > merge (évite split/merge en boucle)
+    public static sseSplitThresholdPx = 3.5; // au-dessus: on subdivise
+    public static sseMergeThresholdPx = 2.0; // en-dessous: on merge (disposer les enfants)
     public static geomErrorScale = 0.4; // empirical scale factor (depends on terrain)
     public static minDistEpsilon = 1e-3; // avoids division by zero
     public static cullReliefMargin = 0.0;
@@ -339,7 +341,17 @@ export class ChunkTree {
             });
 
             // Split
-            if (ssePx > ChunkTree.sseThresholdPx && this.level < this.maxLevel) {
+            const splitTh = ChunkTree.sseSplitThresholdPx;
+            const mergeTh = ChunkTree.sseMergeThresholdPx;
+
+            const shouldSplit = (ssePx > splitTh) && (this.level < this.maxLevel);
+            const shouldMerge = (ssePx < mergeTh);
+
+            // Si:
+            // - on doit splitter, OU
+            // - on est déjà split et on n’est pas sous le seuil de merge
+            // => on garde/active les enfants (on ne merge pas dans la zone d’hystérésis)
+            if (shouldSplit || (this.children && !shouldMerge)) {
                 if (!this.children) {
                     this.subdivide();
 
@@ -363,28 +375,17 @@ export class ChunkTree {
                     for (const child of this.children!) {
                         if (child.mesh) child.mesh.setEnabled(true);
                     }
-
-                    if (this.mesh) this.mesh.setEnabled(false);
                 }
 
                 if (this.mesh) this.mesh.setEnabled(false);
-
                 await Promise.all(this.children!.map((child) => child.updateLOD(camera, debugMode)));
             } else {
-                // Current LOD ok
-
+                // Leaf path (on garde ce node comme feuille)
                 if (this.mesh && this.currentLODLevel === this.level) {
                     // up to date
                 } else if (!this.mesh) {
                     this.mesh = await this.chunkForge.worker(
-                        {
-                            bounds: this.bounds,
-                            resolution: this.resolution,
-                            radius: this.radius,
-                            face: this.face,
-                            level: this.level,
-                            maxLevel: this.maxLevel
-                        },
+                        { bounds: this.bounds, resolution: this.resolution, radius: this.radius, face: this.face, level: this.level, maxLevel: this.maxLevel },
                         this.camera.doublepos,
                         this.parentEntity,
                         this.renderParent,
@@ -400,14 +401,7 @@ export class ChunkTree {
                     const oldMesh = this.mesh;
 
                     this.mesh = await this.chunkForge.worker(
-                        {
-                            bounds: this.bounds,
-                            resolution: this.resolution,
-                            radius: this.radius,
-                            face: this.face,
-                            level: this.level,
-                            maxLevel: this.maxLevel
-                        },
+                        { bounds: this.bounds, resolution: this.resolution, radius: this.radius, face: this.face, level: this.level, maxLevel: this.maxLevel },
                         this.camera.doublepos,
                         this.parentEntity,
                         this.renderParent,
@@ -432,7 +426,8 @@ export class ChunkTree {
                     this.currentLODLevel = this.level;
                 }
 
-                if (this.children) this.disposeChildren();
+                // Merge uniquement si on est VRAIMENT sous mergeTh
+                if (this.children && shouldMerge) this.disposeChildren();
                 if (this.mesh) this.mesh.setEnabled(true);
             }
         } finally {
