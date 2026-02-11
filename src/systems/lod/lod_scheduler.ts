@@ -92,6 +92,11 @@ export class LodScheduler {
             for (const r of this.roots) r.updateDebugLOD(ChunkTree.debugLODEnabled);
         }
 
+        // Update tous les roots chaque frame (updateLOD est maintenant non-bloquant)
+        for (const r of this.roots) {
+            r.updateLOD(this.camera, false).catch(console.error);
+        }
+
         let started = 0;
 
         while (

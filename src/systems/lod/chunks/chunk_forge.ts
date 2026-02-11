@@ -52,6 +52,8 @@ export class ChunkForge {
     ): Mesh {
         const tMesh0 = performance.now();
         const terrainMesh = Terrain.createMesh(this.scene, meshData, params.face, params.level);
+        terrainMesh.setEnabled(true); // IMPORTANT: l'affichage sera piloté par updateLOD
+
         const tMesh1 = performance.now();
 
         terrainMesh.metadata = terrainMesh.metadata ?? {};
@@ -59,9 +61,9 @@ export class ChunkForge {
 
         // ✅ chunks sous node_* (rotation planète)
         terrainMesh.parent = renderParent;
-        terrainMesh.checkCollisions = true;
+        terrainMesh.checkCollisions = false;
         terrainMesh.showBoundingBox = boundingBox;
-        terrainMesh.alwaysSelectAsActiveMesh = true;
+        terrainMesh.alwaysSelectAsActiveMesh = false;
 
         const planetCenterWorldDouble = planetEntity.doublepos;
 

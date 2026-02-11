@@ -60,6 +60,13 @@ export class ChunkTree {
     public debugLOD: boolean;
     public static debugLODEnabled: boolean = false;
 
+    public static frustumPrefetchScale = 1.25;  // 1.15–1.35 selon vitesse caméra
+    public static horizonPrefetchScale = 1.15;  // idem, précharge près de l’horizon
+
+    private pendingMeshPromise: Promise<void> | null = null;
+    private pendingMeshToken = 0;
+    private disposedFlag = false;
+
     /**
      * Creates a new ChunkTree node
      *
@@ -222,6 +229,10 @@ export class ChunkTree {
      * Disposes the current node mesh and recursively disposes its children.
      */
     dispose(): void {
+        this.disposedFlag = true;
+        this.pendingMeshToken++; // invalide tout résultat futur
+        this.pendingMeshPromise = null;
+
         if (this.mesh) {
             this.mesh.dispose();
             this.mesh = null;
@@ -234,8 +245,8 @@ export class ChunkTree {
 
     // SSE tuning knobs (adjust to taste)
     // Hystérésis: split > merge (évite split/merge en boucle)
-    public static sseSplitThresholdPx = 3.5; // au-dessus: on subdivise
-    public static sseMergeThresholdPx = 2.0; // en-dessous: on merge (disposer les enfants)
+    public static sseSplitThresholdPx = 1.2; // au-dessus: on subdivise
+    public static sseMergeThresholdPx = 1.1; // en-dessous: on merge (disposer les enfants)
     public static geomErrorScale = 0.4; // empirical scale factor (depends on terrain)
     public static minDistEpsilon = 1e-3; // avoids division by zero
     public static cullReliefMargin = 0.0;
@@ -294,9 +305,11 @@ export class ChunkTree {
                 radiusForCull = bi.boundingRadius;
             }
 
-            // Frustum culling (WorldDouble center; frustumCulling does WorldDouble->Render internally)
+            let inFrustumStrict = true;
+            let inFrustumPrefetch = true;
+
             if (this.frustumCullingEnabled) {
-                const visible = frustumCulling(
+                inFrustumStrict = frustumCulling(
                     camera,
                     centerWorld,
                     radiusForCull,
@@ -304,25 +317,56 @@ export class ChunkTree {
                     this.frustumCache
                 );
 
-                if (!visible) {
+                // si pas strict, test "guard band" (préfetch)
+                inFrustumPrefetch = inFrustumStrict || frustumCulling(
+                    camera,
+                    centerWorld,
+                    radiusForCull * ChunkTree.frustumPrefetchScale,
+                    isSphereInFrustum,
+                    this.frustumCache
+                );
+
+                // si même pas dans le guard band => on peut ignorer totalement
+                if (!inFrustumPrefetch) {
                     this.deactivate();
                     return;
                 }
             }
 
-            // Backside culling (WorldDouble)
+            let inHorizonStrict = true;
+            let inHorizonPrefetch = true;
+
             if (this.backsideCullingEnabled) {
-                const visible = backsideCulling(
+                inHorizonStrict = backsideCulling(
                     camera.doublepos,
                     planetCenter,
                     centerWorld,
                     radiusForCull
                 );
 
-                if (!visible) {
+                inHorizonPrefetch = inHorizonStrict || backsideCulling(
+                    camera.doublepos,
+                    planetCenter,
+                    centerWorld,
+                    radiusForCull * ChunkTree.horizonPrefetchScale
+                );
+
+                if (!inHorizonPrefetch) {
                     this.deactivate();
                     return;
                 }
+            }
+
+            // IMPORTANT: affichage strict uniquement
+            const shouldDrawStrict =
+                (!this.frustumCullingEnabled || inFrustumStrict) &&
+                (!this.backsideCullingEnabled || inHorizonStrict);
+
+            // Si on est en prefetch mais pas en strict: on précharge le mesh courant, sans raffiner
+            if (!shouldDrawStrict) {
+                this.requestMeshIfNeeded(centerWorld);
+                this.deactivate(); // ne rien afficher tant que ce n'est pas strict
+                return;
             }
 
             // Distance for SSE consistent with radiusForCull
@@ -352,83 +396,53 @@ export class ChunkTree {
             // - on est déjà split et on n’est pas sous le seuil de merge
             // => on garde/active les enfants (on ne merge pas dans la zone d’hystérésis)
             if (shouldSplit || (this.children && !shouldMerge)) {
-                if (!this.children) {
-                    this.subdivide();
-
-                    await Promise.all(
-                        this.children!.map(async (child) => {
-                            child.mesh = await child.chunkForge.worker(
-                                { bounds: child.bounds, resolution: child.resolution, radius: child.radius, face: child.face, level: child.level, maxLevel: child.maxLevel },
-                                this.camera.doublepos,
-                                child.parentEntity,
-                                child.renderParent,
-                                child.getCenterChunk(),
-                                child.starPosWorldDouble,
-                                child.starColor,
-                                child.starIntensity,
-                                child.wireframe,
-                                child.boundingBox
-                            );
-                        })
-                    );
-
-                    for (const child of this.children!) {
-                        if (child.mesh) child.mesh.setEnabled(true);
-                    }
+                // 1) Assure au moins un mesh parent (fallback) avant de splitter plus
+                if (!this.mesh) {
+                    this.requestMeshIfNeeded(centerWorld);
+                    return;
                 }
 
+                // 2) Create children if needed
+                if (!this.children) this.subdivide();
+                const children = this.children;
+                if (!children) return;
+
+                // 3) Demande les meshes enfants (une fois)
+                for (const child of children) {
+                    child.requestMeshIfNeeded(child.getCenterChunk());
+                }
+
+                const childrenReady = children.every((c) => !!c.mesh && c.currentLODLevel === c.level);
+
+                // 4) Tant que les enfants ne sont pas prêts: on garde le parent visible et on STOP ici
+                if (!childrenReady) {
+                    if (this.mesh) this.mesh.setEnabled(shouldDrawStrict); // parent couvre
+                    return;
+                }
+
+                // 5) Enfants prêts: on coupe le parent et on descend
                 if (this.mesh) this.mesh.setEnabled(false);
-                await Promise.all(this.children!.map((child) => child.updateLOD(camera, debugMode)));
-            } else {
+
+                for (const child of children) {
+                    await child.updateLOD(camera, debugMode);
+                }
+
+                return;
+            }
+            else {
                 // Leaf path (on garde ce node comme feuille)
                 if (this.mesh && this.currentLODLevel === this.level) {
                     // up to date
                 } else if (!this.mesh) {
-                    this.mesh = await this.chunkForge.worker(
-                        { bounds: this.bounds, resolution: this.resolution, radius: this.radius, face: this.face, level: this.level, maxLevel: this.maxLevel },
-                        this.camera.doublepos,
-                        this.parentEntity,
-                        this.renderParent,
-                        center,
-                        this.starPosWorldDouble,
-                        this.starColor,
-                        this.starIntensity,
-                        this.wireframe,
-                        this.boundingBox
-                    );
-                    this.currentLODLevel = this.level;
+                    this.requestMeshIfNeeded(centerWorld);
                 } else {
-                    const oldMesh = this.mesh;
-
-                    this.mesh = await this.chunkForge.worker(
-                        { bounds: this.bounds, resolution: this.resolution, radius: this.radius, face: this.face, level: this.level, maxLevel: this.maxLevel },
-                        this.camera.doublepos,
-                        this.parentEntity,
-                        this.renderParent,
-                        center,
-                        this.starPosWorldDouble,
-                        this.starColor,
-                        this.starIntensity,
-                        this.wireframe,
-                        this.boundingBox
-                    );
-
-                    this.mesh.setEnabled(true);
-
-                    await new Promise<void>((resolve) => {
-                        const observer = this.scene.onAfterRenderObservable.add(() => {
-                            this.scene.onAfterRenderObservable.remove(observer);
-                            resolve();
-                        });
-                    });
-
-                    oldMesh.dispose();
-                    this.currentLODLevel = this.level;
+                    this.requestMeshIfNeeded(centerWorld);
+                    if (this.mesh) this.mesh.setEnabled(shouldDrawStrict);
                 }
 
                 // Merge uniquement si on est VRAIMENT sous mergeTh
                 if (this.children && shouldMerge) this.disposeChildren();
-                if (this.mesh) this.mesh.setEnabled(true);
+                if (this.mesh) this.mesh.setEnabled(shouldDrawStrict);
             }
         } finally {
             this.updating = false;
@@ -477,5 +491,62 @@ export class ChunkTree {
         const distToPatch = Math.max(0, dc - radiusForCull);
 
         return distToPatch;
+    }
+
+    private requestMeshIfNeeded(patchCenterWorldDouble: Vector3): void {
+        if (this.disposedFlag) return;
+
+        // Mesh déjà OK
+        if (this.mesh && this.currentLODLevel === this.level) return;
+
+        // Déjà en cours
+        if (this.pendingMeshPromise) return;
+
+        const token = ++this.pendingMeshToken;
+
+        const params = {
+            bounds: this.bounds,
+            resolution: this.resolution,
+            radius: this.radius,
+            face: this.face,
+            level: this.level,
+            maxLevel: this.maxLevel,
+        };
+
+        this.pendingMeshPromise = this.chunkForge.worker(
+            params,
+            this.camera.doublepos,
+            this.parentEntity,
+            this.renderParent,
+            patchCenterWorldDouble,
+            this.starPosWorldDouble,
+            this.starColor,
+            this.starIntensity,
+            this.wireframe,
+            this.boundingBox
+        ).then((mesh) => {
+            // Résultat arrivé trop tard (node mergé/disposé) => on jette
+            if (this.disposedFlag || token !== this.pendingMeshToken) {
+                mesh.dispose();
+                return;
+            }
+
+            // Remplace l'ancien mesh si besoin
+            if (this.mesh && this.mesh !== mesh) {
+                this.mesh.dispose();
+            }
+
+            this.mesh = mesh;
+            this.mesh.setEnabled(false); // affichage décidé dans updateLOD
+            this.currentLODLevel = this.level;
+        }).catch((e) => {
+            // Optionnel: log
+            console.error("[ChunkTree] mesh build failed", e);
+        }).finally(() => {
+            // Libère le slot pending seulement si c'est toujours le job courant
+            if (token === this.pendingMeshToken) {
+                this.pendingMeshPromise = null;
+            }
+        });
     }
 }
