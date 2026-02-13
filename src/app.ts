@@ -23,6 +23,7 @@ import { teleportToEntity } from './core/camera/teleport_entity';
 import { ScaleManager } from './core/scale/scale_manager';
 import { createCDLODForSystem, listStellarSystems, loadStellarSystemFromCatalog, PlanetCDLOD } from './game_world/stellar_system/stellar_catalog_loader';
 import { LodScheduler } from './systems/lod/lod_scheduler';
+import { attachStarRayMarchingPostProcess, type StarGlowSource } from "./core/render/star_raymarch_postprocess";
 
 export class FloatingCameraScene {
     public static async CreateScene(
@@ -169,6 +170,26 @@ export class FloatingCameraScene {
         });
 
         lod.start();
+
+        const stars: StarGlowSource[] = [];
+
+        for (const sys of loadedSystems.values()) {
+            for (const body of sys.bodies.values()) {
+                if (body.bodyType === "star") {
+                    const light = (body as any).starLight; // ou body.starLight si typé
+
+                    stars.push({
+                        posWorldDouble: body.positionWorldDouble,
+                        radius: body.diameter * 0.5,
+                        color: light?.color ?? new Vector3(1, 1, 1),
+                        intensity: light?.intensity ?? 1.0,
+                    });
+                }
+            }
+        }
+
+        // après création de `camera`
+        attachStarRayMarchingPostProcess(scene, camera, stars);
 
         // RACCOURCI: T pour se téléporter
         window.addEventListener('keydown', (e) => {
