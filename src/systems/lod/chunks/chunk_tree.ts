@@ -246,8 +246,8 @@ export class ChunkTree {
     // SSE tuning knobs (adjust to taste)
     // Hystérésis: split > merge (évite split/merge en boucle)
     public static sseSplitThresholdPx = 5.0; // au-dessus: on subdivise
-    public static sseMergeThresholdPx = 3.0; // en-dessous: on merge (disposer les enfants)
-    public static geomErrorScale = 0.3; // empirical scale factor (depends on terrain)
+    public static sseMergeThresholdPx = 4.0; // en-dessous: on merge (disposer les enfants)
+    public static geomErrorScale = 0.5; // empirical scale factor (depends on terrain)
     public static minDistEpsilon = 1e-3; // avoids division by zero
     public static cullReliefMargin = 0.0;
 
@@ -453,12 +453,11 @@ export class ChunkTree {
      * Updates the debugLOD uniform on the shader material of this chunk and its children.
      */
     public updateDebugLOD(debugLOD: boolean): void {
-        if (this.mesh && this.mesh.material) {
-            (this.mesh.material as ShaderMaterial).setInt('debugLOD', debugLOD ? 1 : 0);
+        const mat = this.mesh?.material;
+        if (mat instanceof ShaderMaterial) {
+            mat.setInt("debugLOD", debugLOD ? 1 : 0);
         }
-        if (this.children) {
-            this.children.forEach((child) => child.updateDebugLOD(debugLOD));
-        }
+        this.children?.forEach((c) => c.updateDebugLOD(debugLOD));
     }
 
     /**

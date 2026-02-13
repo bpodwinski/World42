@@ -56,7 +56,7 @@ export class TerrainShader {
         resolution: number,
         lodLevel: number,
         maxLevel: number,
-        cameraPosition: Vector3,
+        cameraPositionLocal: Vector3,
         planetRadius: number,
         planetCenter: Vector3,
         patchCenterLocal: Vector3,
@@ -104,7 +104,7 @@ export class TerrainShader {
         shader.setFloat('mesh_dim', resolution);
         shader.setFloat('lodLevel', lodLevel);
         shader.setFloat('lodMaxLevel', maxLevel);
-        shader.setVector3('cameraPosition', cameraPosition);
+        shader.setVector3('cameraPosition', cameraPositionLocal);
 
         const lodRanges: number[] = [];
         for (let i = 0; i < maxLevel; i++) {
@@ -128,8 +128,6 @@ export class TerrainShader {
         // Lighting: compute direction from a per-scene "primary star" if provided
         const meta = (this.scene.metadata as any)?.terrainLighting;
         const starPosWorldDouble: Vector3 | undefined = meta?.starPosWorldDouble;
-        const intensity: number = Number.isFinite(meta?.intensity) ? meta.intensity : 10.0;
-
         const lightDir = new Vector3(1, 0, 0);
         if (starPosWorldDouble) {
             starPosWorldDouble.subtractToRef(planetCenter, lightDir);
@@ -140,9 +138,9 @@ export class TerrainShader {
                 lightDir.normalize();
             }
         }
-        shader.setVector3('lightDirection', lightDir);
+        shader.setVector3("lightDirection", new Vector3(1, 0, 0));
         shader.setVector3("lightColor", new Vector3(1, 1, 1));
-        shader.setFloat('lightIntensity', intensity);
+        shader.setFloat("lightIntensity", 1.0);
 
         shader.wireframe = wireframe;
         return shader;

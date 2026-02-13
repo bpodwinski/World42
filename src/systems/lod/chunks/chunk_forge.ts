@@ -26,6 +26,7 @@ export class ChunkForge {
     private scene: Scene;
     private workerPool: WorkerPool;
 
+    private _cameraLocal = new Vector3();
     private _invWorld = new Matrix();
     private _rotatedLocal = new Vector3();
     private _patchCenterLocal = new Vector3();
@@ -52,7 +53,7 @@ export class ChunkForge {
     ): Mesh {
         const tMesh0 = performance.now();
         const terrainMesh = Terrain.createMesh(this.scene, meshData, params.face, params.level);
-        terrainMesh.setEnabled(true); // IMPORTANT: l'affichage sera piloté par updateLOD
+        terrainMesh.setEnabled(false);
 
         const tMesh1 = performance.now();
 
@@ -67,10 +68,9 @@ export class ChunkForge {
 
         const planetCenterWorldDouble = planetEntity.doublepos;
 
-        // patchCenterLocal = inverse(rotation(node_*)) * (patchCenterWorld - planetCenterWorld)
-        patchCenterWorldDouble.subtractToRef(planetCenterWorldDouble, this._rotatedLocal);
+        cameraWorldDouble.subtractToRef(planetCenterWorldDouble, this._rotatedLocal);
         renderParent.getWorldMatrix().invertToRef(this._invWorld);
-        Vector3.TransformNormalToRef(this._rotatedLocal, this._invWorld, this._patchCenterLocal);
+        Vector3.TransformNormalToRef(this._rotatedLocal, this._invWorld, this._cameraLocal);
 
         const tMat0 = performance.now();
 

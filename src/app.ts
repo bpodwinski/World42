@@ -150,8 +150,8 @@ export class FloatingCameraScene {
 
         for (const sys of loadedSystems.values()) {
             const cdlod = createCDLODForSystem(scene, camera, sys, {
-                maxLevel: 8,
-                resolution: 64,
+                maxLevel: 12,
+                resolution: 96,
             });
 
             for (const [name, planet] of cdlod.entries()) {
@@ -162,7 +162,7 @@ export class FloatingCameraScene {
         const roots = Array.from(mergedCDLOD.values()).flatMap(p => p.chunks);
 
         const lod = new LodScheduler(scene, camera, roots, {
-            maxConcurrent: 6,
+            maxConcurrent: 8,
             maxStartsPerFrame: 2,
             rescoreMs: 200,
             applyDebugEveryFrame: true,

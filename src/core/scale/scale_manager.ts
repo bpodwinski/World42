@@ -5,12 +5,19 @@ import { Vector3 } from "@babylonjs/core";
  */
 export class ScaleManager {
     /** Kilometers -> Simulation Units factor */
-    private static readonly SCALE_FACTOR: number = Number(process.env.SCALE_FACTOR);
+    private static readonly SCALE_FACTOR: number = (() => {
+        const raw = process.env.SCALE_FACTOR;
+        const v = Number(raw);
+        if (!Number.isFinite(v) || v <= 0) {
+            console.warn(`[ScaleManager] Invalid SCALE_FACTOR="${raw}", falling back to 1`);
+            return 1;
+        }
+        return v;
+    })();
 
     public static simDistanceToKm(simUnits: number): number {
         return this.toRealUnits(simUnits);
     }
-
 
     public static simDistanceToMeters(simUnits: number): number {
         return this.kmToMeters(this.simDistanceToKm(simUnits));
