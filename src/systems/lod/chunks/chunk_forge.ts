@@ -125,7 +125,7 @@ export class ChunkForge {
         const terrainMesh = Terrain.createMesh(this.scene, meshData, params.face, params.level);
 
         // Important: avoid 1-frame flash; ChunkTree decides when to enable.
-        terrainMesh.setEnabled(false);
+        terrainMesh.setEnabled(true);
 
         const tMesh1 = performance.now();
 
@@ -135,7 +135,7 @@ export class ChunkForge {
 
         // Chunks under node_* (planet rotation pivot).
         terrainMesh.parent = renderParent;
-        terrainMesh.checkCollisions = false;
+        terrainMesh.checkCollisions = true;
         terrainMesh.showBoundingBox = boundingBox;
         terrainMesh.alwaysSelectAsActiveMesh = false;
 

@@ -1,85 +1,190 @@
-import { Scene, Mesh, Vector3, ShaderMaterial, TransformNode } from '@babylonjs/core';
-import { ChunkForge } from './chunk_forge';
-import { FloatingEntityInterface, OriginCamera } from '../../../core/camera/camera_manager';
-import { Terrain } from '../../../game_objects/planets/rocky_planet/terrain';
-import { Bounds, Face } from '../types';
-import { globalWorkerPool } from '../workers/global_worker_pool';
-import { computeSSEPx, distanceToPatchBoundingSphere, isSphereInFrustum } from './chunk_metrics';
-import { createFrustumCullCache, frustumCulling } from './frustum_culling';
-import { backsideCulling } from './backside_culling';
+import { Matrix, Mesh, Plane, Scene, ShaderMaterial, TransformNode, Vector3 } from "@babylonjs/core";
+import type { FloatingEntityInterface, OriginCamera } from "../../../core/camera/camera_manager";
+import type { Bounds, Face } from "../types";
+import { globalWorkerPool } from "../workers/global_worker_pool";
+import { ChunkForge } from "./chunk_forge";
+import { buildBaseGeometry, localToWorldDouble, type ChunkBaseGeometry } from "./chunk_geometry";
+import { computeSSEFactor, distanceToPatchBoundingSphere } from "./chunk_metrics";
+import { evalChunkCulling } from "./chunk_culling_eval";
+import { evalLodDecision } from "./chunk_lod_eval";
 
 /**
- * ChunkTree represents a terrain chunk node and manages hierarchical subdivision (quadtree)
+ * One quadtree node (one terrain patch).
  *
- * Each node owns:
- *  - UV bounds on a cube face
- *  - LOD level
- *  - optional Babylon mesh (generated async via worker pool)
- *  - optional children (4 quadrants)
+ * Coordinate spaces used in this class:
+ * - WorldDouble: `camera.doublepos`, `parentEntity.doublepos`, `starPosWorldDouble`
+ * - Planet-local: worker-generated vertices + `baseGeom` (center/corners on base sphere)
+ * - Render-space: frustum checks via `centerRender = centerWorldDouble - camWorldDouble`
  */
 export class ChunkTree {
+    /** Babylon scene used for mesh/material creation and rendering. */
     scene: Scene;
+
+    /** Origin camera used for LOD and culling computations. */
     camera: OriginCamera;
+
+    /** Patch UV bounds (tan(angle) space). */
     bounds: Bounds;
+
+    /** Current quadtree level (0 = root). */
     level: number;
+
+    /** Maximum quadtree level allowed. */
     maxLevel: number;
+
+    /** Planet radius in simulation units. */
     radius: number;
+
+    /** Grid resolution for generated terrain meshes. */
     resolution: number;
+
+    /** Children nodes (4 quadrants) or null if leaf. */
     children: ChunkTree[] | null;
+
+    /** Babylon mesh for this patch (generated asynchronously) or null if missing. */
     mesh: Mesh | null;
+
+    /** Cube face to which this patch belongs. */
     face: Face;
 
-    /** Planet anchor in WorldDouble (floating origin) */
+    /**
+     * Cached frustum planes used by `camera.getFrustumPlanesToRef`.
+     * Babylon expects an array of 6 pre-allocated Plane objects.
+     */
+    private _frustumPlanes: Plane[] = Array.from({ length: 6 }, () => new Plane(0, 0, 0, 0));
+
+    /** Planet anchor in WorldDouble (planet center). */
     parentEntity: FloatingEntityInterface;
 
+    /** Star position in WorldDouble (nullable if no star). */
     starPosWorldDouble: Vector3 | null;
+
+    /** Star light color (linear RGB). */
     starColor: Vector3;
+
+    /** Star light intensity scalar. */
     starIntensity: number;
 
     /**
-     * Parent node in Render-space that carries the planet rotation (node_Jupiter).
-     * Chunks will be parented under this node to inherit rotation.
+     * Render-space pivot carrying the planet rotation (e.g. `node_Jupiter`).
+     * Terrain meshes are parented under this node to inherit rotation.
      */
     renderParent: TransformNode;
 
+    /** Enable wireframe rendering on generated chunk materials. */
     wireframe: boolean;
+
+    /** Enable Babylon bounding box display for debugging. */
     boundingBox: boolean;
+
+    /** Enable/disable frustum culling. */
     frustumCullingEnabled: boolean;
+
+    /** Enable/disable horizon/backside culling. */
     backsideCullingEnabled: boolean;
-    chunkForge: ChunkForge;
-
-    // Guard to prevent concurrent updateLOD calls
-    updating: boolean = false;
-
-    // Keeps track of the LOD level for which the mesh was generated
-    currentLODLevel: number | null = null;
-
-    frustumCache = createFrustumCullCache();
-
-    // Debug mode flag (passed to the shader)
-    public debugLOD: boolean;
-    public static debugLODEnabled: boolean = false;
-
-    public static frustumPrefetchScale = 1.25;  // 1.15–1.35 selon vitesse caméra
-    public static horizonPrefetchScale = 1.15;  // idem, précharge près de l’horizon
-
-    private pendingMeshPromise: Promise<void> | null = null;
-    private pendingMeshToken = 0;
-    private disposedFlag = false;
 
     /**
-     * Creates a new ChunkTree node
+     * Shared chunk forge used to build meshes via the worker pool.
+     * Do not allocate one forge per node.
+     */
+    chunkForge: ChunkForge;
+
+    /** Guard to prevent concurrent `updateLOD()` calls on the same node. */
+    updating = false;
+
+    /** LOD level for which `mesh` was generated (null if no mesh). */
+    currentLODLevel: number | null = null;
+
+    /** Instance-level debug flag (forwarded to shader). */
+    public debugLOD: boolean;
+
+    /** Global debug flag toggled externally (forwarded to shader). */
+    public static debugLODEnabled = false;
+
+    /** Frustum guard-band scale for prefetching (tune for camera speed). */
+    public static frustumPrefetchScale = 1.2;
+
+    /** Horizon guard-band scale for prefetching (tune for camera speed). */
+    public static horizonPrefetchScale = 1.1;
+
+    /** Promise tracking an in-flight mesh request (null if none). */
+    private pendingMeshPromise: Promise<void> | null = null;
+
+    /** Token to invalidate stale mesh completions when node is disposed/merged. */
+    private pendingMeshToken = 0;
+
+    /** Set to true once disposed; ignores any future async results. */
+    private disposedFlag = false;
+
+    /** Cached base geometry in planet-local space (computed once). */
+    private baseGeom: ChunkBaseGeometry;
+
+    /** Cached world geometry (recomputed during `updateLOD`, no allocations). */
+    private _centerWorldBase = new Vector3();
+
+    /** Cached base-sphere corners in WorldDouble (recomputed during `updateLOD`, no allocations). */
+    private _cornersWorldBase: [Vector3, Vector3, Vector3, Vector3] = [
+        new Vector3(),
+        new Vector3(),
+        new Vector3(),
+        new Vector3(),
+    ];
+
+    /** Temporary center used when accurate relief-aware bounds are available. */
+    private _centerForCull = new Vector3();
+
+    /** Temporary center in render-space used by frustum checks. */
+    private _centerRenderTmp = new Vector3();
+
+    /** Temporary rotated vector for local->world conversion. */
+    private _tmpRot = new Vector3();
+
+    /** Temporary local vector for decoding metadata bounds. */
+    private _tmpLocal = new Vector3();
+
+    /**
+     * Cached SSE factor K for this node.
+     * Ideally computed once per frame by the scheduler, but cached here as fallback.
+     */
+    private _lastSseK = 0;
+
+    /** Split threshold in pixels (above => split). */
+    public static sseSplitThresholdPx = 5.0;
+
+    /** Merge threshold in pixels (below => merge). */
+    public static sseMergeThresholdPx = 4.0;
+
+    /** Empirical scale factor applied to geometric error. */
+    public static geomErrorScale = 0.5;
+
+    /** Minimum distance epsilon to avoid division by zero. */
+    public static minDistEpsilon = 1e-3;
+
+    /** Optional margin to expand culling radius to account for relief (fallback bounds only). */
+    public static cullReliefMargin = 0.0;
+
+    /**
+     * Create a new quadtree node.
      *
-     * @param scene - Babylon.js scene used for mesh creation
-     * @param camera - Camera used for LOD calculations
-     * @param bounds - UV bounds of the terrain chunk
-     * @param level - Current LOD level
-     * @param maxLevel - Maximum LOD level allowed
-     * @param radius - Planet radius in simulation units
-     * @param resolution - Grid resolution used to generate the mesh
-     * @param face - Cube face for the terrain chunk
-     * @param parentEntity - FloatingEntity in WorldDouble (doublepos is planet center)
-     * @param renderParent - TransformNode pivot (node_*) that carries rotation; chunks parented here
+     * @param scene Babylon scene used for mesh/material creation.
+     * @param camera Origin camera used for LOD and culling.
+     * @param bounds Patch UV bounds in tan(angle) space.
+     * @param level Current quadtree level.
+     * @param maxLevel Maximum quadtree level.
+     * @param radius Planet radius (simulation units).
+     * @param resolution Mesh grid resolution.
+     * @param face Cube face.
+     * @param parentEntity Planet floating entity (WorldDouble center).
+     * @param renderParent Pivot node carrying planet rotation.
+     * @param starPosWorldDouble Star position in WorldDouble (nullable).
+     * @param starColor Star light color.
+     * @param starIntensity Star light intensity.
+     * @param wireframe Wireframe rendering toggle.
+     * @param boundingBox Bounding box rendering toggle.
+     * @param frustumCullingEnabled Enable frustum culling.
+     * @param backsideCullingEnabled Enable horizon/backside culling.
+     * @param debugLOD Debug flag forwarded to shader.
+     * @param chunkForge Optional shared forge instance (recommended).
      */
     constructor(
         scene: Scene,
@@ -95,11 +200,12 @@ export class ChunkTree {
         starPosWorldDouble: Vector3 | null,
         starColor: Vector3,
         starIntensity: number,
-        wireframe: boolean = false,
-        boundingBox: boolean = false,
-        frustumCullingEnabled: boolean = true,
-        backsideCullingEnabled: boolean = true,
-        debugLOD: boolean = false,
+        wireframe = false,
+        boundingBox = false,
+        frustumCullingEnabled = true,
+        backsideCullingEnabled = true,
+        debugLOD = false,
+        chunkForge?: ChunkForge
     ) {
         this.scene = scene;
         this.camera = camera;
@@ -109,6 +215,7 @@ export class ChunkTree {
         this.radius = radius;
         this.resolution = resolution;
         this.face = face;
+
         this.children = null;
         this.mesh = null;
 
@@ -124,46 +231,18 @@ export class ChunkTree {
         this.debugLOD = debugLOD;
         this.frustumCullingEnabled = frustumCullingEnabled;
         this.backsideCullingEnabled = backsideCullingEnabled;
-        this.chunkForge = new ChunkForge(this.scene, globalWorkerPool);
+
+        // Shared forge (root should pass one; otherwise the root creates it once).
+        this.chunkForge = chunkForge ?? new ChunkForge(this.scene, globalWorkerPool);
+
+        // Precompute planet-local base geometry once (no trig in the hot path).
+        this.baseGeom = buildBaseGeometry(this.bounds, this.face, this.radius);
     }
 
     /**
-     * Convert a planet-local vector (relative to planet center) to WorldDouble,
-     * applying the planet pivot rotation (renderParent) so culling/LOD matches the rendered terrain.
-     */
-    private planetLocalToWorldDouble(localPlanet: Vector3): Vector3 {
-        const rotated = new Vector3();
-        // TransformNormal ignores translation (we only want rotation/scale)
-        Vector3.TransformNormalToRef(localPlanet, this.renderParent.getWorldMatrix(), rotated);
-        return this.parentEntity.doublepos.add(rotated);
-    }
-
-    /**
-     * Returns the center position of the chunk in WorldDouble.
+     * Create a child node sharing the same configuration and forge.
      *
-     * Uses bounds -> cube -> sphere(radius) then applies planet rotation (renderParent).
-     */
-    private getCenterChunk(): Vector3 {
-        const { uMin, uMax, vMin, vMax } = this.bounds;
-
-        const angleUMin = Math.atan(uMin);
-        const angleUMax = Math.atan(uMax);
-        const angleVMin = Math.atan(vMin);
-        const angleVMax = Math.atan(vMax);
-
-        const uCenter = Math.tan((angleUMin + angleUMax) * 0.5);
-        const vCenter = Math.tan((angleVMin + angleVMax) * 0.5);
-
-        const posCube = Terrain.mapUVtoCube(uCenter, vCenter, this.face);
-
-        // IMPORTANT: center must be on the base sphere (radius)
-        const local = posCube.normalize().scale(this.radius);
-
-        return this.planetLocalToWorldDouble(local);
-    }
-
-    /**
-     * Creates a new child node with given bounds.
+     * @param bounds Child patch bounds.
      */
     private createChild(bounds: Bounds): ChunkTree {
         return new ChunkTree(
@@ -184,16 +263,18 @@ export class ChunkTree {
             this.boundingBox,
             this.frustumCullingEnabled,
             this.backsideCullingEnabled,
-            this.debugLOD
+            this.debugLOD,
+            this.chunkForge
         );
     }
 
     /**
-     * Subdivides the current node into four child nodes (quadtree split).
+     * Split this node into 4 children using angle-space midpoints (atan/tan).
      */
     subdivide(): void {
         this.children = [];
         const { uMin, uMax, vMin, vMax } = this.bounds;
+
         const uMid = Math.tan((Math.atan(uMin) + Math.atan(uMax)) * 0.5);
         const vMid = Math.tan((Math.atan(vMin) + Math.atan(vMax)) * 0.5);
 
@@ -209,28 +290,30 @@ export class ChunkTree {
     }
 
     /**
-     * Disposes all child nodes and clears the children array.
+     * Dispose all children recursively and clear the children list.
      */
     disposeChildren(): void {
         if (!this.children) return;
-        this.children.forEach((child) => child.dispose());
+        this.children.forEach((c) => c.dispose());
         this.children = null;
     }
 
     /**
-     * Deactivates the current node and all children by disabling their meshes.
+     * Disable this node's mesh and all descendant meshes.
+     * Does not dispose resources.
      */
     deactivate(): void {
         if (this.mesh) this.mesh.setEnabled(false);
-        if (this.children) this.children.forEach((child) => child.deactivate());
+        this.children?.forEach((c) => c.deactivate());
     }
 
     /**
-     * Disposes the current node mesh and recursively disposes its children.
+     * Dispose this node's mesh and all descendants.
+     * Invalidates any pending async mesh build results.
      */
     dispose(): void {
         this.disposedFlag = true;
-        this.pendingMeshToken++; // invalide tout résultat futur
+        this.pendingMeshToken++;
         this.pendingMeshPromise = null;
 
         if (this.mesh) {
@@ -238,219 +321,182 @@ export class ChunkTree {
             this.mesh = null;
         }
         if (this.children) {
-            this.children.forEach((child) => child.dispose());
+            this.children.forEach((c) => c.dispose());
             this.children = null;
         }
     }
 
-    // SSE tuning knobs (adjust to taste)
-    // Hystérésis: split > merge (évite split/merge en boucle)
-    public static sseSplitThresholdPx = 5.0; // au-dessus: on subdivise
-    public static sseMergeThresholdPx = 4.0; // en-dessous: on merge (disposer les enfants)
-    public static geomErrorScale = 0.5; // empirical scale factor (depends on terrain)
-    public static minDistEpsilon = 1e-3; // avoids division by zero
-    public static cullReliefMargin = 0.0;
+    /**
+     * Update cached center/corners on the base sphere in WorldDouble.
+     * No allocations; relies on precomputed planet-local base geometry.
+     */
+    private updateWorldBaseGeometry(): void {
+        const planetCenter = this.parentEntity.doublepos;
+        const wm = this.renderParent.getWorldMatrix();
+
+        localToWorldDouble(this.baseGeom.centerLocal, wm, planetCenter, this._centerWorldBase);
+        localToWorldDouble(this.baseGeom.cornersLocal[0], wm, planetCenter, this._cornersWorldBase[0]);
+        localToWorldDouble(this.baseGeom.cornersLocal[1], wm, planetCenter, this._cornersWorldBase[1]);
+        localToWorldDouble(this.baseGeom.cornersLocal[2], wm, planetCenter, this._cornersWorldBase[2]);
+        localToWorldDouble(this.baseGeom.cornersLocal[3], wm, planetCenter, this._cornersWorldBase[3]);
+    }
 
     /**
-     * Asynchronously updates the Level of Detail (LOD) for this node.
+     * Compute culling bounds in WorldDouble:
+     * - fallback: base-sphere bounding radius from cached corners (no relief)
+     * - accurate: optional relief-aware bounds from mesh metadata (`boundsInfo`)
+     *
+     * @param camWorldDouble Camera position in WorldDouble.
      */
-    async updateLOD(camera: OriginCamera, debugMode: boolean = false): Promise<void> {
+    private computeCullBounds(camWorldDouble: Vector3): { centerWorld: Vector3; radiusForCull: number } {
+        this.updateWorldBaseGeometry();
+
+        const { radius: bsRadiusFallback } = distanceToPatchBoundingSphere(
+            camWorldDouble,
+            this._centerWorldBase,
+            this._cornersWorldBase
+        );
+
+        let centerWorld = this._centerWorldBase;
+        let radiusForCull = bsRadiusFallback + ChunkTree.cullReliefMargin;
+
+        const bi = (this.mesh as any)?.metadata?.boundsInfo;
+        const hasAccurateBounds =
+            Array.isArray(bi?.centerLocal) &&
+            bi.centerLocal.length === 3 &&
+            Number.isFinite(bi.boundingRadius);
+
+        if (hasAccurateBounds) {
+            // Convert centerLocal (planet-local) -> rotated -> WorldDouble.
+            Vector3.FromArrayToRef(bi.centerLocal, 0, this._tmpLocal);
+            Vector3.TransformNormalToRef(this._tmpLocal, this.renderParent.getWorldMatrix(), this._tmpRot);
+            this._centerForCull.copyFrom(this.parentEntity.doublepos).addInPlace(this._tmpRot);
+
+            centerWorld = this._centerForCull;
+            radiusForCull = bi.boundingRadius;
+        }
+
+        return { centerWorld, radiusForCull };
+    }
+
+    /**
+     * Update LOD state for this node and optionally recurse into children.
+     *
+     * @param camera Origin camera.
+     * @param debugMode Optional debug flag (currently unused; kept for compatibility).
+     */
+    async updateLOD(camera: OriginCamera, debugMode = false): Promise<void> {
         if (this.updating) return;
         this.updating = true;
 
         try {
-            const { uMin, uMax, vMin, vMax } = this.bounds;
-
-            const center = this.getCenterChunk();
-
-            // Compute the 4 patch corner positions on the base sphere (radius only), rotated by renderParent
-            const cornersUV = [
-                { u: uMin, v: vMin },
-                { u: uMin, v: vMax },
-                { u: uMax, v: vMin },
-                { u: uMax, v: vMax }
-            ];
-
-            const corners = cornersUV.map(({ u, v }) => {
-                const posCube = Terrain.mapUVtoCube(u, v, this.face);
-                const local = posCube.normalize().scale(this.radius);
-                return this.planetLocalToWorldDouble(local);
-            });
-
-            // Bounding sphere fallback based on base sphere (no relief)
-            const { radius: bsRadiusFallback } =
-                distanceToPatchBoundingSphere(camera.doublepos, center, corners);
-
+            const camWorldDouble = camera.doublepos;
             const planetCenter = this.parentEntity.doublepos;
 
-            // Bounds used for culling
-            let centerWorld = center; // fallback (WorldDouble)
-            let radiusForCull = bsRadiusFallback + ChunkTree.cullReliefMargin; // fallback + marge relief
+            const { centerWorld, radiusForCull } = this.computeCullBounds(camWorldDouble);
 
-            const bi = (this.mesh as any)?.metadata?.boundsInfo;
-            const hasAccurateBounds =
-                Array.isArray(bi?.centerLocal) &&
-                bi.centerLocal.length === 3 &&
-                Number.isFinite(bi.boundingRadius);
+            // Babylon requires 6 pre-allocated planes (never pass an array with undefined entries).
+            camera.getFrustumPlanesToRef(this._frustumPlanes);
 
-            if (hasAccurateBounds) {
-                // local planète -> rotation pivot -> world/double
-                const centerLocal = Vector3.FromArray(bi.centerLocal);
-                const rotatedLocal = new Vector3();
-                Vector3.TransformNormalToRef(centerLocal, this.renderParent.getWorldMatrix(), rotatedLocal);
+            const cull = evalChunkCulling({
+                camera,
+                frustumPlanes: this._frustumPlanes,
+                camWorldDouble,
+                planetCenterWorldDouble: planetCenter,
+                centerWorldDouble: centerWorld,
+                radiusForCull,
+                frustumEnabled: this.frustumCullingEnabled,
+                backsideEnabled: this.backsideCullingEnabled,
+                frustumPrefetchScale: ChunkTree.frustumPrefetchScale,
+                horizonPrefetchScale: ChunkTree.horizonPrefetchScale,
+                centerRenderTmp: this._centerRenderTmp,
+            });
 
-                centerWorld = this.parentEntity.doublepos.add(rotatedLocal);
-
-                // boundsInfo est censé déjà inclure le relief : pas besoin de marge ici (sauf si tu veux un epsilon)
-                radiusForCull = bi.boundingRadius;
-            }
-
-            let inFrustumStrict = true;
-            let inFrustumPrefetch = true;
-
-            if (this.frustumCullingEnabled) {
-                inFrustumStrict = frustumCulling(
-                    camera,
-                    centerWorld,
-                    radiusForCull,
-                    isSphereInFrustum,
-                    this.frustumCache
-                );
-
-                // si pas strict, test "guard band" (préfetch)
-                inFrustumPrefetch = inFrustumStrict || frustumCulling(
-                    camera,
-                    centerWorld,
-                    radiusForCull * ChunkTree.frustumPrefetchScale,
-                    isSphereInFrustum,
-                    this.frustumCache
-                );
-
-                // si même pas dans le guard band => on peut ignorer totalement
-                if (!inFrustumPrefetch) {
-                    this.deactivate();
-                    return;
-                }
-            }
-
-            let inHorizonStrict = true;
-            let inHorizonPrefetch = true;
-
-            if (this.backsideCullingEnabled) {
-                inHorizonStrict = backsideCulling(
-                    camera.doublepos,
-                    planetCenter,
-                    centerWorld,
-                    radiusForCull
-                );
-
-                inHorizonPrefetch = inHorizonStrict || backsideCulling(
-                    camera.doublepos,
-                    planetCenter,
-                    centerWorld,
-                    radiusForCull * ChunkTree.horizonPrefetchScale
-                );
-
-                if (!inHorizonPrefetch) {
-                    this.deactivate();
-                    return;
-                }
-            }
-
-            // IMPORTANT: affichage strict uniquement
-            const shouldDrawStrict =
-                (!this.frustumCullingEnabled || inFrustumStrict) &&
-                (!this.backsideCullingEnabled || inHorizonStrict);
-
-            // Si on est en prefetch mais pas en strict: on précharge le mesh courant, sans raffiner
-            if (!shouldDrawStrict) {
-                this.requestMeshIfNeeded(centerWorld);
-                this.deactivate(); // ne rien afficher tant que ce n'est pas strict
+            if (!cull.inPrefetch) {
+                this.deactivate();
                 return;
             }
 
-            // Distance for SSE consistent with radiusForCull
-            const dc = Vector3.Distance(camera.doublepos, centerWorld);
+            if (!cull.drawStrict) {
+                this.requestMeshIfNeeded(camWorldDouble, centerWorld);
+                this.deactivate();
+                return;
+            }
+
+            // SSE factor K (fallback cache per node; ideally computed once per frame by the scheduler).
+            if (!this._lastSseK) this._lastSseK = computeSSEFactor(this.scene, camera.fov);
+
+            const dc = Vector3.Distance(camWorldDouble, centerWorld);
             const distanceToPatch = Math.max(0, dc - radiusForCull);
 
-            // SSE decision in pixels
-            const ssePx = computeSSEPx({
-                scene: this.scene,
-                cameraFov: camera.fov,
+            const { shouldSplit, shouldMerge } = evalLodDecision({
+                cornersWorld: this._cornersWorldBase,
                 distanceToPatch,
-                corners,
                 resolution: this.resolution,
+                level: this.level,
+                maxLevel: this.maxLevel,
+                splitTh: ChunkTree.sseSplitThresholdPx,
+                mergeTh: ChunkTree.sseMergeThresholdPx,
                 geomErrorScale: ChunkTree.geomErrorScale,
                 minDistEpsilon: ChunkTree.minDistEpsilon,
+                sseK: this._lastSseK,
             });
 
-            // Split
-            const splitTh = ChunkTree.sseSplitThresholdPx;
-            const mergeTh = ChunkTree.sseMergeThresholdPx;
-
-            const shouldSplit = (ssePx > splitTh) && (this.level < this.maxLevel);
-            const shouldMerge = (ssePx < mergeTh);
-
-            // Si:
-            // - on doit splitter, OU
-            // - on est déjà split et on n’est pas sous le seuil de merge
-            // => on garde/active les enfants (on ne merge pas dans la zone d’hystérésis)
+            // Split path (hysteresis preserved).
             if (shouldSplit || (this.children && !shouldMerge)) {
-                // 1) Assure au moins un mesh parent (fallback) avant de splitter plus
+                // Ensure parent mesh exists as a fallback before going deeper.
                 if (!this.mesh) {
-                    this.requestMeshIfNeeded(centerWorld);
+                    this.requestMeshIfNeeded(camWorldDouble, centerWorld);
                     return;
                 }
 
-                // 2) Create children if needed
                 if (!this.children) this.subdivide();
-                const children = this.children;
-                if (!children) return;
+                const children = this.children!;
 
-                // 3) Demande les meshes enfants (une fois)
                 for (const child of children) {
-                    child.requestMeshIfNeeded(child.getCenterChunk());
+                    child.requestMeshIfNeeded(camWorldDouble, child.getCenterWorldDouble());
                 }
 
                 const childrenReady = children.every((c) => !!c.mesh && c.currentLODLevel === c.level);
 
-                // 4) Tant que les enfants ne sont pas prêts: on garde le parent visible et on STOP ici
                 if (!childrenReady) {
-                    if (this.mesh) this.mesh.setEnabled(shouldDrawStrict); // parent couvre
+                    this.mesh?.setEnabled(true);
                     return;
                 }
 
-                // 5) Enfants prêts: on coupe le parent et on descend
-                if (this.mesh) this.mesh.setEnabled(false);
+                this.mesh?.setEnabled(false);
 
                 for (const child of children) {
                     await child.updateLOD(camera, debugMode);
                 }
-
                 return;
             }
-            else {
-                // Leaf path (on garde ce node comme feuille)
-                if (this.mesh && this.currentLODLevel === this.level) {
-                    // up to date
-                } else if (!this.mesh) {
-                    this.requestMeshIfNeeded(centerWorld);
-                } else {
-                    this.requestMeshIfNeeded(centerWorld);
-                    if (this.mesh) this.mesh.setEnabled(shouldDrawStrict);
-                }
 
-                // Merge uniquement si on est VRAIMENT sous mergeTh
-                if (this.children && shouldMerge) this.disposeChildren();
-                if (this.mesh) this.mesh.setEnabled(shouldDrawStrict);
+            // Leaf path.
+            if (!this.mesh || this.currentLODLevel !== this.level) {
+                this.requestMeshIfNeeded(camWorldDouble, centerWorld);
             }
+
+            if (this.children && shouldMerge) this.disposeChildren();
+            this.mesh?.setEnabled(true);
         } finally {
             this.updating = false;
         }
     }
 
     /**
-     * Updates the debugLOD uniform on the shader material of this chunk and its children.
+     * Get the patch center in WorldDouble on the base sphere (no trig).
+     * Ensures world base geometry is up-to-date (planet pivot rotation may change).
+     */
+    private getCenterWorldDouble(): Vector3 {
+        this.updateWorldBaseGeometry();
+        return this._centerWorldBase;
+    }
+
+    /**
+     * Update the `debugLOD` uniform on this chunk material and descendants.
+     *
+     * @param debugLOD Enable/disable debug LOD shading.
      */
     public updateDebugLOD(debugLOD: boolean): void {
         const mat = this.mesh?.material;
@@ -461,44 +507,25 @@ export class ChunkTree {
     }
 
     /**
-     * Priority hint for the LOD scheduler (WorldDouble).
-     * Smaller = more urgent (near camera).
+     * Priority hint for the scheduler (smaller = more urgent).
+     * Uses WorldDouble distance-to-patch based on culling radius.
      */
     public estimatePriority(camera: OriginCamera): number {
-        // Reprend les mêmes repères que updateLOD (WorldDouble)
-        const center = this.getCenterChunk();
-
-        // Si on a des bounds mesh précises, on améliore la distance (optionnel mais utile)
-        let centerWorld = center;
-        let radiusForCull = 0;
-
-        const bi = (this.mesh as any)?.metadata?.boundsInfo;
-        const hasAccurateBounds =
-            Array.isArray(bi?.centerLocal) &&
-            bi.centerLocal.length === 3 &&
-            Number.isFinite(bi.boundingRadius);
-
-        if (hasAccurateBounds) {
-            const centerLocal = Vector3.FromArray(bi.centerLocal);
-            const rotatedLocal = new Vector3();
-            Vector3.TransformNormalToRef(centerLocal, this.renderParent.getWorldMatrix(), rotatedLocal);
-            centerWorld = this.parentEntity.doublepos.add(rotatedLocal);
-            radiusForCull = bi.boundingRadius;
-        }
-
-        const dc = Vector3.Distance(camera.doublepos, centerWorld);
-        const distToPatch = Math.max(0, dc - radiusForCull);
-
-        return distToPatch;
+        const camWorldDouble = camera.doublepos;
+        const { centerWorld, radiusForCull } = this.computeCullBounds(camWorldDouble);
+        const dc = Vector3.Distance(camWorldDouble, centerWorld);
+        return Math.max(0, dc - radiusForCull);
     }
 
-    private requestMeshIfNeeded(patchCenterWorldDouble: Vector3): void {
+    /**
+     * Request mesh generation if missing or stale for the current LOD level.
+     *
+     * @param camWorldDouble Camera position in WorldDouble (used for worker priority).
+     * @param patchCenterWorldDouble Patch center in WorldDouble (used for worker priority/build context).
+     */
+    private requestMeshIfNeeded(camWorldDouble: Vector3, patchCenterWorldDouble: Vector3): void {
         if (this.disposedFlag) return;
-
-        // Mesh déjà OK
         if (this.mesh && this.currentLODLevel === this.level) return;
-
-        // Déjà en cours
         if (this.pendingMeshPromise) return;
 
         const token = ++this.pendingMeshToken;
@@ -512,40 +539,35 @@ export class ChunkTree {
             maxLevel: this.maxLevel,
         };
 
-        this.pendingMeshPromise = this.chunkForge.worker(
-            params,
-            this.camera.doublepos,
-            this.parentEntity,
-            this.renderParent,
-            patchCenterWorldDouble,
-            this.starPosWorldDouble,
-            this.starColor,
-            this.starIntensity,
-            this.wireframe,
-            this.boundingBox
-        ).then((mesh) => {
-            // Résultat arrivé trop tard (node mergé/disposé) => on jette
-            if (this.disposedFlag || token !== this.pendingMeshToken) {
-                mesh.dispose();
-                return;
-            }
+        this.pendingMeshPromise = this.chunkForge
+            .worker(
+                params,
+                camWorldDouble,
+                this.parentEntity,
+                this.renderParent,
+                patchCenterWorldDouble,
+                this.starPosWorldDouble,
+                this.starColor,
+                this.starIntensity,
+                this.wireframe,
+                this.boundingBox
+            )
+            .then((mesh) => {
+                if (this.disposedFlag || token !== this.pendingMeshToken) {
+                    mesh.dispose();
+                    return;
+                }
+                if (this.mesh && this.mesh !== mesh) this.mesh.dispose();
 
-            // Remplace l'ancien mesh si besoin
-            if (this.mesh && this.mesh !== mesh) {
-                this.mesh.dispose();
-            }
-
-            this.mesh = mesh;
-            this.mesh.setEnabled(false); // affichage décidé dans updateLOD
-            this.currentLODLevel = this.level;
-        }).catch((e) => {
-            // Optionnel: log
-            console.error("[ChunkTree] mesh build failed", e);
-        }).finally(() => {
-            // Libère le slot pending seulement si c'est toujours le job courant
-            if (token === this.pendingMeshToken) {
-                this.pendingMeshPromise = null;
-            }
-        });
+                this.mesh = mesh;
+                this.mesh.setEnabled(false);
+                this.currentLODLevel = this.level;
+            })
+            .catch((e) => {
+                console.error("[ChunkTree] mesh build failed", e);
+            })
+            .finally(() => {
+                if (token === this.pendingMeshToken) this.pendingMeshPromise = null;
+            });
     }
 }
