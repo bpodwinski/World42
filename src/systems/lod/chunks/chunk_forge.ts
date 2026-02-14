@@ -1,7 +1,7 @@
 import { Scene, Mesh, Vector3, TransformNode, Matrix, ShaderMaterial } from "@babylonjs/core";
 import { ChunkTree } from "./chunk_tree";
 import { Terrain } from "../../../game_objects/planets/rocky_planet/terrain";
-import { TerrainShader } from "../../../game_objects/planets/rocky_planet/terrains_shader";
+import { TerrainShader, TerrainShadowContext } from "../../../game_objects/planets/rocky_planet/terrains_shader";
 import type { FloatingEntityInterface } from "../../../core/camera/camera_manager";
 import { WorkerPool } from "../workers/worker_pool";
 import type { Bounds, Face } from "../types";
@@ -141,6 +141,17 @@ export class ChunkForge {
 
         const planetCenterWorldDouble = planetEntity.doublepos;
 
+        // Inverse world matrix of planet pivot (rotation carrier) for WorldDouble -> planet-local directions
+        renderParent.getWorldMatrix().invertToRef(this._invWorld);
+
+        // cameraLocal = inverse(planetPivotRotation) * (cameraWorldDouble - planetCenterWorldDouble)
+        cameraWorldDouble.subtractToRef(planetCenterWorldDouble, this._rotatedLocal);
+        Vector3.TransformNormalToRef(this._rotatedLocal, this._invWorld, this._cameraLocal);
+
+        // patchCenterLocal = inverse(planetPivotRotation) * (patchCenterWorldDouble - planetCenterWorldDouble)
+        patchCenterWorldDouble.subtractToRef(planetCenterWorldDouble, this._rotatedLocal);
+        Vector3.TransformNormalToRef(this._rotatedLocal, this._invWorld, this._patchCenterLocal);
+
         // cameraLocal = inverse(planetPivotRotation) * (cameraWorldDouble - planetCenterWorldDouble)
         cameraWorldDouble.subtractToRef(planetCenterWorldDouble, this._rotatedLocal);
         renderParent.getWorldMatrix().invertToRef(this._invWorld);
@@ -158,9 +169,8 @@ export class ChunkForge {
             params.resolution,
             params.level,
             params.maxLevel,
-            cameraWorldDouble,
+            this._cameraLocal,
             params.radius,
-            planetCenterWorldDouble,
             this._patchCenterLocal,
             wireframe,
             ChunkTree.debugLODEnabled
@@ -181,7 +191,6 @@ export class ChunkForge {
             else this._lightDir.normalize();
 
             // Convert to planet-local using inverse pivot rotation.
-            renderParent.getWorldMatrix().invertToRef(this._invWorld);
             Vector3.TransformNormalToRef(this._lightDir, this._invWorld, this._lightDirLocal);
             if (this._lightDirLocal.lengthSquared() < 1e-12) this._lightDirLocal.set(1, 0, 0);
             else this._lightDirLocal.normalize();
@@ -190,6 +199,15 @@ export class ChunkForge {
         }
 
         terrainMesh.material = sm;
+
+        const shadowCtx = (this.scene.metadata as any)?.terrainShadow as TerrainShadowContext | null | undefined;
+        if (shadowCtx) {
+            terrainMesh.receiveShadows = true;
+            shadowCtx.shadowGen.addShadowCaster(terrainMesh);
+            terrainMesh.onDisposeObservable.add(() => {
+                shadowCtx.shadowGen.removeShadowCaster(terrainMesh, true);
+            });
+        }
 
         const tMat1 = performance.now();
 
@@ -267,7 +285,7 @@ export class ChunkForge {
                         const mesh = this.buildMesh(
                             meshData,
                             params,
-                            cameraWorldDouble,
+                            this._cameraLocal,
                             planetEntity,
                             renderParent,
                             patchCenterWorldDouble,

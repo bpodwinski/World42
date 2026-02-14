@@ -24,6 +24,8 @@ import { ScaleManager } from './core/scale/scale_manager';
 import { createCDLODForSystem, listStellarSystems, loadStellarSystemFromCatalog, PlanetCDLOD } from './game_world/stellar_system/stellar_catalog_loader';
 import { LodScheduler } from './systems/lod/lod_scheduler';
 import { attachStarRayMarchingPostProcess, type StarGlowSource } from "./core/render/star_raymarch_postprocess";
+import { DirectionalLight, ShadowGenerator, Matrix, Vector2 } from "@babylonjs/core";
+import { TerrainShader, type TerrainShadowContext } from "./game_objects/planets/rocky_planet/terrains_shader";
 
 export class FloatingCameraScene {
     public static async CreateScene(
@@ -171,6 +173,173 @@ export class FloatingCameraScene {
 
         lod.start();
 
+        // --------------------
+        // Terrain shadows P0 (1 ShadowGenerator shared around camera) — Render-space (floating origin)
+        // --------------------
+        const SHADOW_MAP_SIZE = 4096;          // 4096 si tu veux, mais coûteux. 2048 + range dynamique => souvent mieux.
+        const MIN_SHADOW_RANGE = 6000;         // ortho half-size min (près du sol)
+        const MAX_SHADOW_RANGE = 50000;        // ortho half-size max (haut)
+        const RANGE_LERP = 0.12;               // smoothing 0..1 (plus petit = plus smooth)
+        const DEPTH_HALF_MULT = 2.0;           // half depth extent = shadowRange * DEPTH_HALF_MULT
+        const LIGHT_DIST_MULT = 2.5;           // LIGHT_DISTANCE = shadowRange * LIGHT_DIST_MULT + LIGHT_DIST_ADD
+        const LIGHT_DIST_ADD = 5000;           // marge fixe
+
+        let shadowRange = 12000;               // valeur lissée runtime
+
+        const shadowLight = new DirectionalLight("terrainShadowLight", new Vector3(0, -1, 0), scene);
+        shadowLight.intensity = 0; // ombres uniquement
+
+        const shadowGen = new ShadowGenerator(SHADOW_MAP_SIZE, shadowLight, true);
+
+        // Biais côté génération de shadow map (anti-acne)
+        shadowGen.bias = 0.0015;
+        shadowGen.normalBias = 0.6;
+
+        // Contexte partagé lu par TerrainShader.onBindObservable
+        const shadowCtx: TerrainShadowContext = {
+            shadowGen,
+            shadowMap: shadowGen.getShadowMapForRendering()!, // IMPORTANT WebGPU
+            lightMatrix: new Matrix(),
+            texelSize: new Vector2(1 / SHADOW_MAP_SIZE, 1 / SHADOW_MAP_SIZE),
+            bias: 0.00025,     // bias shader (plus petit, sinon peter-panning)
+            darkness: 1.0,
+            reverseDepth: (engine as any).useReverseDepthBuffer ? 1 : 0,
+        };
+
+        TerrainShader.setTerrainShadowContext(scene, shadowCtx);
+
+        // --- Active planet selection (closest to camera in WorldDouble) ---
+        let activePlanet: PlanetCDLOD | null = null;
+        let lastPickMs = 0;
+        const PICK_MS = 250;
+
+        function pickActivePlanetNow() {
+            let best: PlanetCDLOD | null = null;
+            let bestD = Number.POSITIVE_INFINITY;
+            for (const p of mergedCDLOD.values()) {
+                const d = camera.distanceToSim(p.entity.doublepos);
+                if (d < bestD) { bestD = d; best = p; }
+            }
+            activePlanet = best;
+        }
+        pickActivePlanetNow();
+
+        // temporaires
+        const tmpStarRender = new Vector3();
+        const tmpPlanetRender = new Vector3();
+        const lightDir = new Vector3();
+        const camPosRender = new Vector3();
+        const lightRight = new Vector3();
+        const lightUp = new Vector3();
+        const lightView = new Matrix();
+        const centerLS = new Vector3();
+
+        scene.onBeforeRenderObservable.add(() => {
+            // (A) choisir planète active (throttle)
+            const now = performance.now();
+            if (now - lastPickMs > PICK_MS) {
+                pickActivePlanetNow();
+                lastPickMs = now;
+            }
+            if (!activePlanet) return;
+
+            const starPosWorldDouble = activePlanet.chunks[0]?.starPosWorldDouble;
+            if (!starPosWorldDouble) return;
+
+            // (B) Render-space conversion
+            const camWD = camera.doublepos;
+
+            tmpStarRender.set(
+                starPosWorldDouble.x - camWD.x,
+                starPosWorldDouble.y - camWD.y,
+                starPosWorldDouble.z - camWD.z
+            );
+
+            const planetCenterWD = activePlanet.entity.doublepos;
+            tmpPlanetRender.set(
+                planetCenterWD.x - camWD.x,
+                planetCenterWD.y - camWD.y,
+                planetCenterWD.z - camWD.z
+            );
+
+            // (C) Direction rayons: étoile -> planète (Render-space)
+            lightDir.copyFrom(tmpPlanetRender).subtractInPlace(tmpStarRender);
+            if (lightDir.lengthSquared() < 1e-12) return;
+            lightDir.normalize();
+            shadowLight.direction.copyFrom(lightDir);
+
+            // (D) Centre autour caméra (Render-space)
+            camPosRender.copyFrom(camera.position);
+
+            // (E) shadowRange dynamique (altitude -> range)
+            const distToCenter = camera.distanceToSim(planetCenterWD);
+            const altitude = Math.max(0, distToCenter - activePlanet.radius);
+            const targetRange = Math.min(
+                MAX_SHADOW_RANGE,
+                Math.max(MIN_SHADOW_RANGE, altitude * 2.0 + 2000.0)
+            );
+
+            // Quantize targetRange to avoid "resolution pumping" near ground
+            function quantizeRange(r: number) {
+                // paliers: 2k, 4k, 8k, 16k, 32k, 64k...
+                const base = 2000;
+                const q = base * Math.pow(2, Math.round(Math.log(r / base) / Math.log(2)));
+                return Math.min(MAX_SHADOW_RANGE, Math.max(MIN_SHADOW_RANGE, q));
+            }
+
+            const targetQ = quantizeRange(targetRange);
+            shadowRange += (targetQ - shadowRange) * RANGE_LERP;
+
+            // LIGHT_DISTANCE lié au range (réduit énormément les banding/acne)
+            const lightDistance = shadowRange * LIGHT_DIST_MULT + LIGHT_DIST_ADD;
+
+            // (F) Ortho autour caméra
+            shadowLight.orthoLeft = -shadowRange;
+            shadowLight.orthoRight = shadowRange;
+            shadowLight.orthoTop = shadowRange;
+            shadowLight.orthoBottom = -shadowRange;
+
+            // (G) Profondeur serrée (half extent)
+            const depthHalf = shadowRange * DEPTH_HALF_MULT;
+            shadowLight.shadowMinZ = Math.max(0.1, lightDistance - depthHalf);
+            shadowLight.shadowMaxZ = lightDistance + depthHalf;
+
+            // (H) Position light autour caméra
+            shadowLight.position.copyFrom(camPosRender).subtractInPlace(lightDir.scale(lightDistance));
+
+            // (I) Snap stable (réduit shimmer) — CORRECTION SIGNE dx/dy
+            const worldUnitsPerTexel = (2.0 * shadowRange) / SHADOW_MAP_SIZE;
+
+            Matrix.LookAtLHToRef(
+                shadowLight.position,
+                shadowLight.position.add(shadowLight.direction),
+                Vector3.Up(),
+                lightView
+            );
+            Vector3.TransformCoordinatesToRef(camPosRender, lightView, centerLS);
+
+            const snappedX = Math.round(centerLS.x / worldUnitsPerTexel) * worldUnitsPerTexel;
+            const snappedY = Math.round(centerLS.y / worldUnitsPerTexel) * worldUnitsPerTexel;
+
+            // dx/dy = center - snapped (pas l’inverse)
+            const dx = centerLS.x - snappedX;
+            const dy = centerLS.y - snappedY;
+
+            // axes right/up de la light en world/render-space (robuste si dir ~ up)
+            const upRef = Math.abs(Vector3.Dot(lightDir, Vector3.Up())) > 0.98 ? Vector3.Forward() : Vector3.Up();
+            Vector3.CrossToRef(upRef, lightDir, lightRight);
+            lightRight.normalize();
+            Vector3.CrossToRef(lightDir, lightRight, lightUp);
+            lightUp.normalize();
+
+            // déplacer la light dans son plan ortho
+            shadowLight.position.addInPlace(lightRight.scale(dx));
+            shadowLight.position.addInPlace(lightUp.scale(dy));
+
+            // (J) Push lightMatrix finale (après position + snap)
+            shadowCtx.lightMatrix.copyFrom(shadowGen.getTransformMatrix());
+        });
+
         const stars: StarGlowSource[] = [];
 
         for (const sys of loadedSystems.values()) {
@@ -200,6 +369,8 @@ export class FloatingCameraScene {
 
                 teleportToEntity(camera, pluto.positionWorldDouble, pluto.diameter, 20);
                 lod.resetNow();
+                pickActivePlanetNow();
+                lastPickMs = performance.now();
             }
         });
 

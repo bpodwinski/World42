@@ -1,4 +1,4 @@
-import { Effect, Scene, ShaderMaterial, Vector3 } from '@babylonjs/core';
+import { Effect, Scene, ShaderMaterial, Vector2, Vector3, Matrix, ShadowGenerator, RenderTargetTexture, RawTexture } from '@babylonjs/core';
 import terrainDebugLODShader from '../../../assets/shaders/terrain/_terrainDebugLOD.glsl';
 import terrainVertexShader from '../../../assets/shaders/terrain/terrainVertexShader.glsl';
 import terrainFragmentShader from '../../../assets/shaders/terrain/terrainFragmentShader.glsl';
@@ -8,29 +8,50 @@ Effect.IncludesShadersStore['debugLOD'] = terrainDebugLODShader;
 Effect.ShadersStore['terrainVertexShader'] = terrainVertexShader;
 Effect.ShadersStore['terrainFragmentShader'] = terrainFragmentShader;
 
-/**
- * TerrainShader creates and configures ShaderMaterial for terrain rendering
- */
+export type TerrainShadowContext = {
+    shadowGen: ShadowGenerator;
+    shadowMap: RenderTargetTexture;
+    lightMatrix: Matrix;     // mis à jour 1x/frame (Render-space)
+    texelSize: Vector2;      // 1 / mapSize
+    bias: number;            // bias en [0..1]
+    darkness: number;        // 0..1 (1 = ombre full)
+    reverseDepth: number;    // 0 ou 1
+};
+
 export class TerrainShader {
     private scene: Scene;
 
-    // Cache textures per-scene to avoid re-creating them for every chunk material
     private static _texCache = new WeakMap<Scene, { diffuse: TextureManager; detail: TextureManager }>();
+
+    private static _dummyShadow = new WeakMap<Scene, RawTexture>();
+
+    private static getDummyShadow(scene: Scene): RawTexture {
+        const cached = this._dummyShadow.get(scene);
+        if (cached) return cached;
+
+        // 1x1 blanc => depth=1.0 => "pas d’ombre"
+        const tex = new RawTexture(new Uint8Array([255, 255, 255, 255]), 1, 1, 5 /* RGBA */, scene, false, false);
+        this._dummyShadow.set(scene, tex);
+        return tex;
+    }
 
     constructor(scene: Scene) {
         this.scene = scene;
     }
 
-    /**
-     * Optional: set the primary star position for lighting (WorldDouble, simulation units)
-     * Store it in scene.metadata to avoid globals like PlanetData.
-     */
     public static setPrimaryStarWorldDouble(scene: Scene, starPosWorldDouble: Vector3, intensity: number = 1.0) {
         scene.metadata = scene.metadata ?? {};
-        scene.metadata.terrainLighting = {
-            starPosWorldDouble: starPosWorldDouble.clone(),
-            intensity,
-        };
+        scene.metadata.terrainLighting = { starPosWorldDouble: starPosWorldDouble.clone(), intensity };
+    }
+
+    /** Contexte d’ombre partagé (P0) */
+    public static setTerrainShadowContext(scene: Scene, ctx: TerrainShadowContext | null) {
+        scene.metadata = scene.metadata ?? {};
+        (scene.metadata as any).terrainShadow = ctx;
+    }
+
+    public static getTerrainShadowContext(scene: Scene): TerrainShadowContext | null {
+        return ((scene.metadata as any)?.terrainShadow ?? null) as TerrainShadowContext | null;
     }
 
     private static getTextures(scene: Scene) {
@@ -45,20 +66,12 @@ export class TerrainShader {
         return tex;
     }
 
-    /**
-     * Creates and configures a ShaderMaterial for terrain rendering
-     *
-     * @param cameraPosition - Camera position in WorldDouble (simulation units)
-     * @param planetCenter - Planet center in WorldDouble (simulation units)
-     * @param patchCenterLocal - Center of the patch in planet-local space (before rotation)
-     */
     create(
         resolution: number,
         lodLevel: number,
         maxLevel: number,
         cameraPositionLocal: Vector3,
         planetRadius: number,
-        planetCenter: Vector3,
         patchCenterLocal: Vector3,
         wireframe: boolean = false,
         debugLOD: boolean = false
@@ -72,26 +85,31 @@ export class TerrainShader {
                 uniforms: [
                     'worldViewProjection',
                     'world',
-                    'time',
-                    'amplitude',
-                    'frequency',
+
+                    'time', 'amplitude', 'frequency',
                     'mesh_dim',
-                    'lodLevel',
-                    'lodMaxLevel',
-                    'lodRangesLUT',
+                    'lodLevel', 'lodMaxLevel', 'lodRangesLUT',
                     'cameraPosition',
-                    'uPlanetCenter',
-                    'uPatchCenter',
-                    'debugUV',
-                    'debugLOD',
+                    'uPlanetCenter', 'uPatchCenter',
+                    'debugUV', 'debugLOD',
+
                     'textureScale',
                     'detailScale',
                     'detailBlend',
+
                     'lightDirection',
-                    "lightColor",
+                    'lightColor',
                     'lightIntensity',
+
+                    // Shadows (P0)
+                    'lightMatrix',
+                    'shadowBias',
+                    'shadowDarkness',
+                    'shadowTexelSize',
+                    'shadowReverseDepth',
+                    "shadowNdcHalfZRange",
                 ],
-                samplers: ['diffuseTexture', 'detailTexture'],
+                samplers: ['diffuseTexture', 'detailTexture', 'shadowSampler'],
             }
         );
 
@@ -101,22 +119,19 @@ export class TerrainShader {
         shader.setFloat('time', 0.0);
         shader.setFloat('amplitude', 0.0);
         shader.setFloat('frequency', 0.0);
+
         shader.setFloat('mesh_dim', resolution);
         shader.setFloat('lodLevel', lodLevel);
         shader.setFloat('lodMaxLevel', maxLevel);
         shader.setVector3('cameraPosition', cameraPositionLocal);
 
         const lodRanges: number[] = [];
-        for (let i = 0; i < maxLevel; i++) {
-            lodRanges[i] = planetRadius * Math.pow(2, i);
-        }
+        for (let i = 0; i < maxLevel; i++) lodRanges[i] = planetRadius * Math.pow(2, i);
         shader.setFloats('lodRangesLUT', lodRanges);
 
-        // Mesh vertices are in planet-local space (origin = planet center)
         shader.setVector3('uPlanetCenter', Vector3.Zero());
         shader.setVector3('uPatchCenter', patchCenterLocal);
 
-        // Textures (cached)
         const tex = TerrainShader.getTextures(this.scene);
         shader.setTexture('diffuseTexture', tex.diffuse);
         shader.setFloat('textureScale', 0.0001);
@@ -125,24 +140,36 @@ export class TerrainShader {
         shader.setFloat('detailScale', 0.1);
         shader.setFloat('detailBlend', 0.5);
 
-        // Lighting: compute direction from a per-scene "primary star" if provided
-        const meta = (this.scene.metadata as any)?.terrainLighting;
-        const starPosWorldDouble: Vector3 | undefined = meta?.starPosWorldDouble;
-        const lightDir = new Vector3(1, 0, 0);
-        if (starPosWorldDouble) {
-            starPosWorldDouble.subtractToRef(planetCenter, lightDir);
-            planetCenter.subtractToRef(starPosWorldDouble, lightDir);
-            if (lightDir.lengthSquared() < 1e-12) {
-                lightDir.set(1, 0, 0);
-            } else {
-                lightDir.normalize();
-            }
-        }
-        shader.setVector3("lightDirection", new Vector3(1, 0, 0));
-        shader.setVector3("lightColor", new Vector3(1, 1, 1));
-        shader.setFloat("lightIntensity", 1.0);
+        shader.setVector3('lightDirection', new Vector3(1, 0, 0));
+        shader.setVector3('lightColor', new Vector3(1, 1, 1));
+        shader.setFloat('lightIntensity', 1.0);
+
+        // Shadows defaults + bind dummy to satisfy WebGPU
+        shader.setMatrix('lightMatrix', Matrix.Identity());
+        shader.setFloat('shadowBias', 0.0005);
+        shader.setFloat('shadowDarkness', 1.0);
+        shader.setVector2('shadowTexelSize', new Vector2(1.0, 1.0));
+        shader.setFloat('shadowReverseDepth', 0.0);
+        shader.setTexture('shadowSampler', TerrainShader.getDummyShadow(this.scene));
+
+        // If scene.metadata.terrainShadow exists, override at bind time
+        shader.onBindObservable.add(() => {
+            const ctx = TerrainShader.getTerrainShadowContext(this.scene);
+            if (!ctx) return;
+
+            shader.setTexture("shadowSampler", ctx.shadowMap);       // IMPORTANT: shadowMapForRendering en WebGPU
+            shader.setMatrix("lightMatrix", ctx.lightMatrix);
+            shader.setVector2("shadowTexelSize", ctx.texelSize);
+            shader.setFloat("shadowBias", ctx.bias);
+            shader.setFloat("shadowDarkness", ctx.darkness);
+
+            const eng = this.scene.getEngine();
+            shader.setFloat("shadowReverseDepth", eng.useReverseDepthBuffer ? 1 : 0);
+            shader.setFloat("shadowNdcHalfZRange", eng.isNDCHalfZRange ? 1 : 0);
+        });
 
         shader.wireframe = wireframe;
+
         return shader;
     }
 }

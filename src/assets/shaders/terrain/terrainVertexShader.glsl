@@ -1,10 +1,6 @@
-#define NUM_LOD_LEVELS 8
-
 /*
- * Planetary Terrain Vertex Shader
- *
- * This shader displaces planetary terrain vertices using procedural logic and LOD morphing,
- * without sampling a heightmap to modify altitude.
+ * Planetary Terrain Vertex Shader (planet-local shading)
+ * Outputs vWorldPos in render-space for shadow projection.
  */
 precision highp float;
 
@@ -18,47 +14,46 @@ attribute vec2 uv;
 //------------------------------------------------------------------------------
 // Uniforms
 //------------------------------------------------------------------------------
+uniform mat4 world;
 uniform mat4 worldViewProjection;
-uniform float time;
+varying vec3 vWorldPosRender;
+
 uniform float amplitude;
-uniform float frequency;
-uniform float mesh_dim;      // Subdivision count (used for morphing)
-uniform float lodMaxLevel;   // Maximum LOD level
-uniform vec3 cameraPosition;
-uniform vec3 uPlanetCenter;  // Planet global center (planet-local origin)
-uniform vec3 uPatchCenter;   // Patch center (computed on CPU)
+uniform vec3 uPlanetCenter; // (optionnel) planet-local center, souvent (0,0,0)
+uniform vec3 uPatchCenter;  // patch center (planet-local)
 
 //------------------------------------------------------------------------------
 // Varyings (to fragment shader)
 //------------------------------------------------------------------------------
-varying vec2 vUV;
-varying vec3 vRadial;
-varying vec3 vPosition;
-varying vec3 vNormal;
+varying vec3 vPosition;   // planet-local
+varying vec2 vUV;         // patch-relative UV
+varying vec3 vNormal;     // planet-local normal
+varying vec3 vWorldPos;   // render-space (world matrix applied)
 
 void main(void) {
-  // Displace the vertex along its normal (simple radial displacement)
+  // Displace in planet-local
   vec3 displacedPosition = position + normal * amplitude;
 
-  // Generate UVs relative to the patch center (stable for patch-local texturing/debug)
+  // Varyings
+  vPosition = displacedPosition;
+  vNormal = normalize(normal);
+
+  // Patch-stable spherical UV (debug/optional)
   vec3 diff = normalize(displacedPosition - uPatchCenter);
   float longitude = atan(diff.z, diff.x);
   float latitude = asin(diff.y);
 
-  // Convert spherical coordinates to [0..1] UV range
-  float uCoord = (longitude + 3.14159) / (2.0 * 3.14159);
-  float vCoord = (latitude + 1.5708) / 3.14159;
+  float uCoord = (longitude + 3.14159265) / (2.0 * 3.14159265);
+  float vCoord = (latitude + 1.57079633) / 3.14159265;
   vUV = vec2(uCoord, vCoord);
 
-  // Pass through displaced position (planet-local) to the fragment shader
-  vPosition = displacedPosition;
+  vec4 worldPos = world * vec4(displacedPosition, 1.0);
+  vWorldPosRender = worldPos.xyz;
 
-  // Pass the smoothed normal (interpolated across triangles)
-  vNormal = normal;
+  // World position in render-space for shadow projection
+  vec4 wpos = world * vec4(displacedPosition, 1.0);
+  vWorldPos = wpos.xyz;
 
-  // Radial direction from planet center (useful for lighting/blending logic)
-  vRadial = normalize(displacedPosition - uPlanetCenter);
-
-  // Final clip-space position
+  // Clip-space
   gl_Position = worldViewProjection * vec4(displacedPosition, 1.0);
 }

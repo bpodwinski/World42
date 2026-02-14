@@ -50,7 +50,8 @@ export class Terrain {
         vd.uvs = toFloatArray(meshData.uvs) as any;
         vd.indices = toIndexArray(meshData.indices) as any;
 
-        vd.applyToMesh(mesh, true);
+        vd.applyToMesh(mesh, false);
+
         return mesh;
     }
 }
