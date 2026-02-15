@@ -8,63 +8,135 @@ import {
     LinesMesh,
     Frustum,
     Plane,
+    Mesh,
+    Observer,
 } from "@babylonjs/core";
 import { ScaleManager } from "../scale/scale_manager";
 
 export interface FloatingEntityInterface extends TransformNode {
-    doublepos: Vector3;
-    update(cam: OriginCamera): void;
+    doublepos: Vector3; // WorldDouble (simulation units)
+    update(cam: OriginCamera): void; // updates render-space transform from camera.doublepos
 }
 
+export type OriginCameraOptions = {
+    colliderDiameter?: number;
+    colliderSegments?: number;
+};
+
 /**
- * Floating-origin camera:
- * - Keeps the render-space camera at (0,0,0)
- * - Maintains a high-precision position in `doublepos`
- * - Updates attached floating entities relative to `doublepos`
- * - Computes velocity and speed each frame from `doublepos`
+ * OriginCamera (floating origin)
+ *
+ * Repères :
+ * - `camera.doublepos` : WorldDouble (simulation units, haute précision)
+ * - `camera.position`  : Render-space (floating origin), maintenu à (0,0,0)
+ *
+ * Pipeline par frame (hook Babylon) :
+ * 1) intègre `camera.position` (render delta) dans `doublepos`
+ * 2) reset `camera.position` à 0
+ * 3) update des FloatingEntities (render = worldDouble - camera.doublepos)
+ * 4) calc velocity/speed depuis doublepos
+ * 5) debug (optionnel)
+ *
+ * Optionnel :
+ * - `camCollider` (Mesh render-space) gardé à l’origine après l’évaluation active meshes.
  */
 export class OriginCamera extends UniversalCamera {
-    public debugMode: boolean = false;
+    public debugMode = false;
+
+    // --- WorldDouble state ---
+    private readonly _doublepos = new Vector3();
+    private readonly _doubletgt = new Vector3();
+
+    // --- Motion (WorldDouble) ---
+    private readonly _velocitySim = new Vector3(0, 0, 0);
+    private _speedSim = 0;
+
+    private readonly _lastDoublepos = new Vector3();
+    private _lastTimestampMs = performance.now();
+
+    // --- Managed floating entities ---
+    private readonly _floatingEntities: FloatingEntityInterface[] = [];
+
+    // --- Optional render-space collider ---
+    private readonly _camCollider: Mesh;
+
+    // --- Observers (for clean disposal) ---
+    private _beforeObs: Observer<Scene> | null = null;
+    private _afterObs: Observer<Scene> | null = null;
+
+    // --- Debug lines (render-space visualization helpers) ---
     private _doubleposLine: LinesMesh | null = null;
     private _doubletgtLine: LinesMesh | null = null;
-    private _floatingDebugLines: LinesMesh[] = [];
-
-    // Managed floating entities
-    private _floatingEntities: FloatingEntity[] = [];
-
-    // High-precision position/target
-    private _doublepos: Vector3 = new Vector3();
-    private _doubletgt: Vector3 = new Vector3();
-
-    // Velocity vector (units of simulation per second)
-    private _velocitySim: Vector3 = new Vector3(0, 0, 0);
-
-    // Speed magnitude (units of simulation per second)
-    private _speedSim: number = 0;
-
-    // Internal previous-frame state for velocity computation
-    private _lastDoublepos: Vector3 = new Vector3();
-    private _lastTimestampMs: number = performance.now();
-
-    public distanceToSim(target: Vector3 | FloatingEntity): number {
-        const tp = target instanceof FloatingEntity ? target.doublepos : target;
-
-        return Vector3.Distance(this.doublepos, tp);
-    }
-
-    public distanceToKm(target: Vector3 | FloatingEntity): number {
-        const dSim = this.distanceToSim(target);
-
-        return ScaleManager.toRealUnits(dSim); // sim -> km
-    }
-
-    public distanceToMeters(target: Vector3 | FloatingEntity): number {
-        return ScaleManager.kmToMeters(this.distanceToKm(target)); // km -> m
-    }
+    private readonly _dbgZero = Vector3.Zero(); // stable object
+    private readonly _dbgDpPoint = new Vector3();
+    private readonly _dbgDtPoint = new Vector3();
+    private readonly _dbgPtsDp = [this._dbgZero, this._dbgDpPoint];
+    private readonly _dbgPtsDt = [this._dbgZero, this._dbgDtPoint];
 
     /**
-     * Current high-precision position (simulation units)
+     * Create a floating-origin camera.
+     *
+     * @param name      camera name
+     * @param position  initial WorldDouble position (simulation units)
+     * @param scene     Babylon.js scene
+     * @param opts      collider options (optional)
      */
+    constructor(name: string, position: Vector3, scene: Scene, opts: OriginCameraOptions = {}) {
+        super(name, Vector3.Zero(), scene);
+
+        // Init WorldDouble position
+        this.doublepos = position;
+
+        // Init velocity history
+        this._lastDoublepos.copyFrom(position);
+        this._lastTimestampMs = performance.now();
+
+        const diameter = opts.colliderDiameter ?? 0.05;
+        const segments = opts.colliderSegments ?? 64;
+
+        this._camCollider = MeshBuilder.CreateSphere(
+            `${name}_camCollider`,
+            { segments, diameter },
+            scene
+        ) as Mesh;
+
+        this._camCollider.isVisible = false;
+        this._camCollider.isPickable = false;
+        this._camCollider.checkCollisions = true;
+        this._camCollider.position.set(0, 0, 0);
+
+        this._camCollider.ellipsoid = new Vector3(diameter, diameter, diameter);
+        this._camCollider.ellipsoidOffset = new Vector3(diameter, diameter, diameter);
+
+        // Hook: integrate floating origin BEFORE active meshes evaluation
+        this._beforeObs = scene.onBeforeActiveMeshesEvaluationObservable.add(() => {
+            // (1) integrate render delta into WorldDouble
+            this._doublepos.addInPlace(this.position);
+
+            // (2) reset render-space camera to origin
+            this.position.set(0, 0, 0);
+
+            // (3) update floating entities (render = worldDouble - camera.doublepos)
+            for (const e of this._floatingEntities) e.update(this);
+
+            // (4) velocity/speed from WorldDouble
+            this._updateVelocity();
+
+            // (5) debug visuals (optional)
+            if (this.debugMode) this._updateDebugVisuals();
+        });
+
+        // Hook: keep collider at origin AFTER meshes evaluation (stable)
+        this._afterObs = scene.onAfterActiveMeshesEvaluationObservable.add(() => {
+            this._camCollider.position.set(0, 0, 0);
+        });
+    }
+
+    // ---------------------------------------------------------------------------
+    // Public API
+    // ---------------------------------------------------------------------------
+
+    /** WorldDouble position (simulation units). */
     public get doublepos(): Vector3 {
         return this._doublepos;
     }
@@ -72,182 +144,180 @@ export class OriginCamera extends UniversalCamera {
         this._doublepos.copyFrom(pos);
     }
 
-    /**
-     * Current high-precision target (simulation units). The actual look target in render-space is (doubletgt - doublepos)
-     */
+    /** WorldDouble target (simulation units). Render-space look target is (doubletgt - doublepos). */
     public get doubletgt(): Vector3 {
         return this._doubletgt;
     }
-
     public set doubletgt(tgt: Vector3) {
         this._doubletgt.copyFrom(tgt);
-        // If you want to drive look-at each frame: setTarget(this._doubletgt.subtract(this._doublepos))
     }
 
-    /**
-     * Current velocity vector in simulation units per second. This is computed each frame from doublepos delta / dt
-     */
+    /** Velocity in simulation units / second (computed from WorldDouble). */
     public get velocitySim(): Vector3 {
         return this._velocitySim;
     }
 
-    /**
-     * Current speed (magnitude of velocity) in simulation units per second
-     */
+    /** Speed magnitude in simulation units / second. */
     public get speedSim(): number {
         return this._speedSim;
     }
 
-    /**
-     * Create a floating-origin camera
-     * @param name   Camera name
-     * @param position Initial high-precision position (simulation units)
-     * @param scene  Babylon.js scene
-     */
-    constructor(name: string, position: Vector3, scene: Scene) {
-        // Render-space camera starts at origin (0,0,0)
-        super(name, Vector3.Zero(), scene);
-
-        // Store high-precision position
-        this.doublepos = position;
-
-        // Initialize velocity history
-        this._lastDoublepos.copyFrom(position);
-        this._lastTimestampMs = performance.now();
-
-        // Per-frame update: integrate render-space movement into doublepos, reset render-space position, update entities, compute velocity, debug lines
-        scene.onBeforeActiveMeshesEvaluationObservable.add(() => {
-            // 1) Floating-origin integration:
-            // Accumulate render-space delta into high-precision space
-            this.doublepos.addInPlace(this.position);
-
-            // Reset render-space camera to origin
-            this.position.set(0, 0, 0);
-
-            // 2) Update attached floating entities to reflect new doublepos
-            for (let entity of this._floatingEntities) {
-                entity.update(this);
-            }
-
-            // 3) Compute velocity from doublepos delta / dt
-            this._updateVelocity();
-
-            // 4) Debug visuals (optional)
-            if (this.debugMode) {
-                this.updateDebugVisuals();
-            }
-        });
+    /** Render-space collider mesh (kept near origin). Can be null if disabled. */
+    public get camCollider(): Mesh {
+        return this._camCollider;
     }
 
-    /**
-     * Add a floating entity managed by this camera
-     */
-    public add(entity: FloatingEntity): void {
+    /** Add a floating entity managed by this camera. */
+    public add(entity: FloatingEntityInterface): void {
+        if (this._floatingEntities.includes(entity)) return;
         this._floatingEntities.push(entity);
     }
 
+    /** Remove a floating entity. */
+    public remove(entity: FloatingEntityInterface): void {
+        const i = this._floatingEntities.indexOf(entity);
+        if (i >= 0) this._floatingEntities.splice(i, 1);
+    }
+
+    /** Distance in simulation units to a WorldDouble position or a floating entity. */
+    public distanceToSim(target: Vector3 | FloatingEntityInterface): number {
+        const tp = target instanceof TransformNode ? (target as any).doublepos : target;
+        return Vector3.Distance(this._doublepos, tp);
+    }
+
+    public distanceToKm(target: Vector3 | FloatingEntityInterface): number {
+        return ScaleManager.toRealUnits(this.distanceToSim(target));
+    }
+
+    public distanceToMeters(target: Vector3 | FloatingEntityInterface): number {
+        return ScaleManager.kmToMeters(this.distanceToKm(target));
+    }
+
+    /** Frustum planes in render-space (same space as camera.getTransformationMatrix()). */
+    public getFrustumPlanesToRef(out: Plane[]): Plane[] {
+        while (out.length < 6) out.push(new Plane(0, 0, 0, 0));
+        Frustum.GetPlanesToRef(this.getTransformationMatrix(), out);
+        return out;
+    }
+
     /**
-     * Compute velocity & speed (simulation units / second) from doublepos. Uses wall-clock delta between frames
+     * WorldDouble -> Render-space
+     * render = worldDouble - camera.doublepos
      */
+    public toRenderSpace(worldDouble: Vector3, out: Vector3 = new Vector3()): Vector3 {
+        worldDouble.subtractToRef(this._doublepos, out);
+        return out;
+    }
+
+    /**
+     * Render-space -> WorldDouble
+     * worldDouble = render + camera.doublepos
+     */
+    public toWorldSpace(renderPos: Vector3, out: Vector3 = new Vector3()): Vector3 {
+        renderPos.addToRef(this._doublepos, out);
+        return out;
+    }
+
+    /** Cleanly detach observers and dispose owned resources (collider + debug lines). */
+    public override dispose(doNotRecurse?: boolean, disposeMaterialAndTextures?: boolean): void {
+        const scene = this.getScene();
+
+        if (this._beforeObs) {
+            scene.onBeforeActiveMeshesEvaluationObservable.remove(this._beforeObs);
+            this._beforeObs = null;
+        }
+        if (this._afterObs) {
+            scene.onAfterActiveMeshesEvaluationObservable.remove(this._afterObs);
+            this._afterObs = null;
+        }
+
+        this._doubleposLine?.dispose();
+        this._doubletgtLine?.dispose();
+        this._doubleposLine = null;
+        this._doubletgtLine = null;
+
+        this._camCollider?.dispose();
+
+        this._floatingEntities.length = 0;
+
+        // Camera.dispose() n'accepte pas d'args dans tes typings
+        super.dispose();
+    }
+
+    // ---------------------------------------------------------------------------
+    // Internals
+    // ---------------------------------------------------------------------------
+
     private _updateVelocity(): void {
         const nowMs = performance.now();
-        const dt = (nowMs - this._lastTimestampMs) / 1000.0; // seconds
+        const dt = (nowMs - this._lastTimestampMs) / 1000.0;
 
-        if (dt > 0) {
-            // delta in simulation units
+        if (dt > 1e-6) {
             const dx = this._doublepos.x - this._lastDoublepos.x;
             const dy = this._doublepos.y - this._lastDoublepos.y;
             const dz = this._doublepos.z - this._lastDoublepos.z;
 
-            // velocity (sim units / s)
             this._velocitySim.set(dx / dt, dy / dt, dz / dt);
             this._speedSim = this._velocitySim.length();
 
-            // persist for next frame
             this._lastDoublepos.copyFrom(this._doublepos);
             this._lastTimestampMs = nowMs;
         }
-        // If dt == 0 (very rare), keep previous velocity
     }
 
     /**
-     * Debug helpers: draw lines for doublepos and (doubletgt - doublepos) in render-space from (0,0,0)
+     * Debug visuals:
+     * - line "doublepos" : 0 -> doublepos (WorldDouble vector shown in render-space; huge values may be off-screen)
+     * - line "doubletgt - doublepos" : 0 -> (relative target) in render-space
      */
-    private updateDebugVisuals(): void {
+    private _updateDebugVisuals(): void {
         const scene = this.getScene();
 
-        // Line for doublepos: [0,0,0] -> doublepos
-        const dp = this.doublepos;
-        const dpPts = [Vector3.Zero(), dp];
+        // Update cached points (avoid new allocations)
+        this._dbgDpPoint.copyFrom(this._doublepos);
+        this._dbgDtPoint.copyFrom(this._doubletgt).subtractInPlace(this._doublepos);
 
         if (!this._doubleposLine) {
             this._doubleposLine = MeshBuilder.CreateLines(
                 "doubleposLine",
-                { points: dpPts },
+                { points: this._dbgPtsDp },
                 scene
             ) as LinesMesh;
             this._doubleposLine.color = Color3.Red();
         } else {
             MeshBuilder.CreateLines(
                 "doubleposLine",
-                { points: dpPts, instance: this._doubleposLine },
+                { points: this._dbgPtsDp, instance: this._doubleposLine },
                 scene
             );
         }
 
-        // Line for relative target: (doubletgt - doublepos)
-        const dt = this.doubletgt.subtract(this.doublepos);
-        const dtPts = [Vector3.Zero(), dt];
-
         if (!this._doubletgtLine) {
             this._doubletgtLine = MeshBuilder.CreateLines(
                 "doubletgtLine",
-                { points: dtPts },
+                { points: this._dbgPtsDt },
                 scene
             ) as LinesMesh;
             this._doubletgtLine.color = Color3.Blue();
         } else {
             MeshBuilder.CreateLines(
                 "doubletgtLine",
-                { points: dtPts, instance: this._doubletgtLine },
+                { points: this._dbgPtsDt, instance: this._doubletgtLine },
                 scene
             );
         }
     }
-
-    public getFrustumPlanesToRef(out: Plane[]): Plane[] {
-        while (out.length < 6) out.push(new Plane(0, 0, 0, 0));
-        Frustum.GetPlanesToRef(this.getTransformationMatrix(), out);
-
-        return out;
-    }
-
-    /**
-     * Converts a high-precision world(sim) position to render-space (floating origin) position.
-     * render = world - camera.doublepos
-     */
-    public toRenderSpace(worldSim: Vector3, out: Vector3 = new Vector3()): Vector3 {
-        worldSim.subtractToRef(this.doublepos, out);
-        return out;
-    }
-
-    /**
-     * Converts a render-space position back to high-precision world(sim) position.
-     * world = render + camera.doublepos
-     */
-    public toWorldSpace(renderPos: Vector3, out: Vector3 = new Vector3()): Vector3 {
-        renderPos.addToRef(this.doublepos, out);
-        return out;
-    }
 }
 
 /**
- * Floating entity with high-precision position in `doublepos`. Its render-space transform is updated relative to the camera's doublepos
+ * Default floating entity implementation:
+ * - Stores a WorldDouble position in `doublepos`
+ * - Updates render-space TransformNode.position each frame:
+ *   render = worldDouble - camera.doublepos
  */
-export class FloatingEntity extends TransformNode {
-    private _doublepos: Vector3 = new Vector3();
+export class FloatingEntity extends TransformNode implements FloatingEntityInterface {
+    private readonly _doublepos = new Vector3();
 
-    /** High-precision position (simulation units) */
     public get doublepos(): Vector3 {
         return this._doublepos;
     }
@@ -259,10 +329,7 @@ export class FloatingEntity extends TransformNode {
         super(name, scene);
     }
 
-    /**
-     * Update render-space position relative to camera.doublepos
-     */
     public update(camera: OriginCamera): void {
-        this.doublepos.subtractToRef(camera.doublepos, this.position);
+        this._doublepos.subtractToRef(camera.doublepos, this.position);
     }
 }

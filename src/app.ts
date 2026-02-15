@@ -2,10 +2,6 @@ import {
     Engine,
     Scene,
     Vector3,
-    MeshBuilder,
-    Texture,
-    StandardMaterial,
-    CubeTexture,
     WebGPUEngine,
 } from '@babylonjs/core';
 import '@babylonjs/core/Materials/Textures/Loaders/ktxTextureLoader';
@@ -67,26 +63,13 @@ export class FloatingCameraScene {
         camera.inputs.clear();
         camera.checkCollisions = false;
 
-        // Optionnel mais utile: viser la planète au spawn
         const tmpTargetRender = new Vector3();
         camera.toRenderSpace(body.positionWorldDouble, tmpTargetRender);
         camera.setTarget(tmpTargetRender);
 
-        // Collider mesh invisible (Render-space)
-        const camCollider = MeshBuilder.CreateSphere("camCollider", { segments: 64, diameter: 0.05 }, scene);
-        camCollider.isVisible = false;
-        camCollider.isPickable = false;
-        camCollider.checkCollisions = true;
-        camCollider.position.set(0, 0, 0);
-        camCollider.ellipsoid = new Vector3(0.05, 0.05, 0.05);
-        camCollider.ellipsoidOffset = new Vector3(0.05, 0.05, 0.05);
+        const control = new MouseSteerControlManager(camera, scene, canvas, camera.camCollider, {});
+        control.gui = gui;
 
-        // Reset collider après l'intégration floating-origin
-        scene.onAfterActiveMeshesEvaluationObservable.add(() => {
-            camCollider.position.set(0, 0, 0);
-        });
-
-        const control = new MouseSteerControlManager(camera, scene, canvas, camCollider, {});
         control.gui = gui;
 
         const { mergedCDLOD, roots } = buildStellarSystemPlanetsCDLOD(
