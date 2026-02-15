@@ -21,13 +21,13 @@ import { GuiManager } from './core/gui/gui_manager';
 import planetsJson from './game_world/stellar_system/data.json';
 import { teleportToEntity } from './core/camera/teleport_entity';
 import { ScaleManager } from './core/scale/scale_manager';
-import { createCDLODForSystem, PlanetCDLOD } from './game_world/stellar_system/stellar_catalog_loader';
+import { PlanetCDLOD } from './game_world/stellar_system/stellar_catalog_loader';
 import { LodScheduler } from './systems/lod/lod_scheduler';
 import { attachStarRayMarchingPostProcess, type StarGlowSource } from "./core/render/star_raymarch_postprocess";
 import { DirectionalLight, ShadowGenerator, Matrix, Vector2 } from "@babylonjs/core";
 import { TerrainShader, type TerrainShadowContext } from "./game_objects/planets/rocky_planet/terrains_shader";
 import { createBaseScene } from './core/render/create_scene';
-import { loadStellarSystemRuntime } from './game_world/stellar_system/stellar_system_runtime';
+import { buildStellarSystemPlanetsCDLOD, loadStellarSystemRuntime } from './game_world/stellar_system/stellar_system_runtime';
 
 export class FloatingCameraScene {
     public static async CreateScene(
@@ -131,20 +131,12 @@ export class FloatingCameraScene {
             if (keys.has('o')) debugDoublePos.addInPlace(up.scale(-speed));
         });
 
-        const mergedCDLOD = new Map<string, PlanetCDLOD>();
-
-        for (const sys of loadedSystems.values()) {
-            const cdlod = createCDLODForSystem(scene, camera, sys, {
-                maxLevel: 12,
-                resolution: 96,
-            });
-
-            for (const [name, planet] of cdlod.entries()) {
-                mergedCDLOD.set(`${sys.systemId}:${name}`, planet);
-            }
-        }
-
-        const roots = Array.from(mergedCDLOD.values()).flatMap(p => p.chunks);
+        const { mergedCDLOD, roots } = buildStellarSystemPlanetsCDLOD(
+            scene,
+            camera,
+            loadedSystems,
+            { maxLevel: 10, resolution: 64 }
+        );
 
         const lod = new LodScheduler(scene, camera, roots, {
             maxConcurrent: 8,

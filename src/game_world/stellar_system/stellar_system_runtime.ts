@@ -1,8 +1,11 @@
 import type { Scene } from "@babylonjs/core";
 import {
+    createCDLODForSystem,
     listStellarSystems,
     loadStellarSystemFromCatalog,
+    PlanetCDLOD,
 } from "../stellar_system/stellar_catalog_loader";
+import { OriginCamera } from "../../core/camera/camera_manager";
 
 export type LoadedSystem = Awaited<ReturnType<typeof loadStellarSystemFromCatalog>>;
 export type SystemBody = LoadedSystem["bodies"] extends Map<any, infer V> ? V : never;
@@ -13,6 +16,11 @@ export type StellarSystemRuntime = {
     loadedSystems: Map<string, LoadedSystem>;
     activeSystem: LoadedSystem;
     spawnBody: SystemBody;
+};
+
+export type StellarSystemPlanetsBuild = {
+    mergedCDLOD: Map<string, PlanetCDLOD>;
+    roots: any[]; // si tu as un type ChunkNode/ChunkTreeNode, remplace `any[]`
 };
 
 export async function loadStellarSystemRuntime(
@@ -57,4 +65,31 @@ export async function loadStellarSystemRuntime(
         activeSystem,
         spawnBody,
     };
+}
+
+export function buildStellarSystemPlanetsCDLOD(
+    scene: Scene,
+    camera: OriginCamera,
+    loadedSystems: Map<string, LoadedSystem>,
+    opts: {
+        maxLevel: number;
+        resolution: number;
+    }
+): StellarSystemPlanetsBuild {
+    const mergedCDLOD = new Map<string, PlanetCDLOD>();
+
+    for (const sys of loadedSystems.values()) {
+        const cdlod = createCDLODForSystem(scene, camera, sys, {
+            maxLevel: opts.maxLevel,
+            resolution: opts.resolution,
+        });
+
+        for (const [name, planet] of cdlod.entries()) {
+            mergedCDLOD.set(`${sys.systemId}:${name}`, planet);
+        }
+    }
+
+    const roots = Array.from(mergedCDLOD.values()).flatMap((p) => p.chunks);
+
+    return { mergedCDLOD, roots };
 }
