@@ -1,4 +1,4 @@
-import { Scene, Texture } from '@babylonjs/core';
+import { BaseTexture, Scene, Texture } from '@babylonjs/core';
 
 /**
  * TextureManager extends the Babylon.js Texture class

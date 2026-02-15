@@ -26,15 +26,14 @@ import { LodScheduler } from './systems/lod/lod_scheduler';
 import { attachStarRayMarchingPostProcess, type StarGlowSource } from "./core/render/star_raymarch_postprocess";
 import { DirectionalLight, ShadowGenerator, Matrix, Vector2 } from "@babylonjs/core";
 import { TerrainShader, type TerrainShadowContext } from "./game_objects/planets/rocky_planet/terrains_shader";
+import { createBaseScene } from './core/render/create_scene';
 
 export class FloatingCameraScene {
     public static async CreateScene(
         engine: Engine | WebGPUEngine,
         canvas: HTMLCanvasElement
     ): Promise<Scene> {
-        const scene = new Scene(engine);
-        scene.clearColor.set(0, 0, 0, 1);
-        scene.collisionsEnabled = true;
+        const scene = createBaseScene(engine);
 
         const systemIds = listStellarSystems(planetsJson);
 
@@ -58,10 +57,6 @@ export class FloatingCameraScene {
         if (!body) {
             throw new Error("Aucun corps (planète) trouvé dans le système actif.");
         }
-
-        scene.textures.forEach((texture) => {
-            texture.anisotropicFilteringLevel = 16;
-        });
 
         // GUI
         const gui = new GuiManager(scene);

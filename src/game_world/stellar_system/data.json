@@ -1,6 +1,30 @@
 {
   "default": "Sol",
   "systems": {
+    "DebugSystem": {
+      "origin_km": [0, 0, 0],
+      "bodies": {
+        "DebugStar1": {
+          "type": "star",
+          "position_km": [0, 0, 0],
+          "diameter_km": 100,
+          "rotation_period_days": 10,
+          "star": { "temperature_k": 3500, "intensity": 10.0 }
+        },
+        "DebugPlanet1": {
+          "type": "planet",
+          "position_km": [1500, 0, 0],
+          "diameter_km": 100,
+          "rotation_period_days": 0.005
+        },
+        "DebugPlanet2": {
+          "type": "planet",
+          "position_km": [1520, 100, 25],
+          "diameter_km": 35,
+          "rotation_period_days": 0.001
+        }
+      }
+    },
     "Sol": {
       "origin_km": [0, 0, 0],
       "bodies": {
