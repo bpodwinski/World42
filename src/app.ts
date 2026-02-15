@@ -7,8 +7,6 @@ import {
     StandardMaterial,
     CubeTexture,
     WebGPUEngine,
-    Viewport,
-    UniversalCamera
 } from '@babylonjs/core';
 import '@babylonjs/core/Materials/Textures/Loaders/ktxTextureLoader';
 import '@babylonjs/core/Debug/debugLayer';
@@ -21,14 +19,12 @@ import { GuiManager } from './core/gui/gui_manager';
 import planetsJson from './game_world/stellar_system/data.json';
 import { teleportToEntity } from './core/camera/teleport_entity';
 import { ScaleManager } from './core/scale/scale_manager';
-import { PlanetCDLOD } from './game_world/stellar_system/stellar_catalog_loader';
 import { LodScheduler } from './systems/lod/lod_scheduler';
 import { attachStarRayMarchingPostProcess, type StarGlowSource } from "./core/render/star_raymarch_postprocess";
-import { DirectionalLight, ShadowGenerator, Matrix, Vector2 } from "@babylonjs/core";
-import { TerrainShader, type TerrainShadowContext } from "./game_objects/planets/rocky_planet/terrains_shader";
 import { createBaseScene } from './core/render/create_scene';
 import { buildStellarSystemPlanetsCDLOD, loadStellarSystemRuntime } from './game_world/stellar_system/stellar_system_runtime';
 import { TerrainShadowSystem } from './game_objects/planets/rocky_planet/terrain_shadow';
+import { createSkybox } from './core/render/skybox_factory';
 
 export class FloatingCameraScene {
     public static async CreateScene(
@@ -37,6 +33,13 @@ export class FloatingCameraScene {
     ): Promise<Scene> {
         // Create scene
         const scene = createBaseScene(engine);
+
+        // Skybox
+        createSkybox(scene, {
+            url: `${process.env.ASSETS_URL}/skybox`,
+            size: 1000,
+            renderingGroupId: 0,
+        });
 
         // Load stellar system
         const runtime = await loadStellarSystemRuntime(scene, planetsJson, {
@@ -51,11 +54,6 @@ export class FloatingCameraScene {
         const gui = new GuiManager(scene);
         gui.setMouseCrosshairVisible(true);
 
-        // -------------------------
-        // IMPORTANT (P0):
-        // node.position est en Render-space (souvent 0),
-        // la vraie position est body.positionWorldDouble (WorldDouble).
-        // -------------------------
         const planetTargetWorldDouble = body.positionWorldDouble.clone();
         planetTargetWorldDouble.y += body.diameter * 0.52;
 
@@ -210,19 +208,6 @@ export class FloatingCameraScene {
         });
 
         new PostProcess('Pipeline', scene, camera);
-
-        // Skybox
-        const skybox = MeshBuilder.CreateBox('skyBox', { size: 1_000 }, scene);
-        const skyboxMaterial = new StandardMaterial('skyBox', scene);
-        skyboxMaterial.backFaceCulling = false;
-        skyboxMaterial.disableLighting = true;
-        skybox.material = skyboxMaterial;
-        skybox.infiniteDistance = true;
-        skyboxMaterial.reflectionTexture = new CubeTexture(`${process.env.ASSETS_URL}/skybox`, scene);
-        skyboxMaterial.reflectionTexture.coordinatesMode = Texture.SKYBOX_MODE;
-        skyboxMaterial.disableDepthWrite = true;
-        skybox.isPickable = false;
-        skybox.renderingGroupId = 0;
 
         // --- HUD Vitesse + distance
         let emaMS = 0;
