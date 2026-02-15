@@ -16,7 +16,7 @@ import type { Face } from "../../systems/lod/types";
 /** ---------- Types JSON (catalogue) ---------- */
 export type StarJSON = {
     temperature_k?: number;
-    color_rgb?: [number, number, number]; // linéaire 0..1
+    color_rgb?: [number, number, number];
     intensity?: number;
 };
 
@@ -25,7 +25,8 @@ export type BodyJSON = {
     position_km: [number, number, number];
     diameter_km: number;
     rotation_period_days: number | null;
-    star?: StarJSON; // ✅ NEW
+    mass_kg?: number;
+    star?: StarJSON;
 };
 
 export type SystemJSON = Record<string, BodyJSON>;
@@ -63,6 +64,8 @@ export type LoadedBody = {
 
     diameter: number;
     rotationPeriodDays: number | null;
+
+    massKg: number;
 
     entity?: FloatingEntity;
 
@@ -171,6 +174,8 @@ export async function loadStellarSystemFromCatalog(
 
         const diameter = ScaleManager.toSimulationUnits(data.diameter_km);
 
+        const massKg = Number.isFinite(Number(data.mass_kg)) ? Number(data.mass_kg) : 0;
+
         const starLight = isStar ? parseStarLight(data.star) : undefined;
 
         if (isStar) {
@@ -196,7 +201,8 @@ export async function loadStellarSystemFromCatalog(
             positionWorldDouble: posWorldDouble,
             diameter,
             rotationPeriodDays: data.rotation_period_days,
-            starLight, // ✅ store
+            massKg,
+            starLight,
         });
     }
 
@@ -247,6 +253,7 @@ export function createCDLODForSystem(
             body.node.parent = ent;
             body.node.position.set(0, 0, 0);
             body.entity = ent;
+            body.positionWorldDouble = ent.doublepos;
         }
     }
 
@@ -354,7 +361,9 @@ function normalizeSystemJSON(raw: unknown): SystemJSON {
         const rot = v.rotation_period_days;
         const rotation_period_days = rot === null || rot === undefined ? null : Number(rot);
 
-        // ✅ NEW: star config
+        const mass_kg_raw = v.mass_kg ?? v.massKg ?? v.mass ?? 0;
+        const mass_kg = Number.isFinite(Number(mass_kg_raw)) ? Number(mass_kg_raw) : undefined;
+
         const starAny = v.star;
         const star =
             starAny && typeof starAny === "object"
@@ -372,9 +381,11 @@ function normalizeSystemJSON(raw: unknown): SystemJSON {
             position_km: [x, y, z],
             diameter_km: Number.isFinite(diameter_km) ? diameter_km : 0,
             rotation_period_days: Number.isFinite(Number(rotation_period_days)) ? Number(rotation_period_days) : null,
-            star, // ✅ keep
+            mass_kg: mass_kg && mass_kg > 0 ? mass_kg : undefined,
+            star,
         };
     }
+
     return out;
 }
 
