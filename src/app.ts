@@ -34,13 +34,14 @@ export class FloatingCameraScene {
         engine: Engine | WebGPUEngine,
         canvas: HTMLCanvasElement
     ): Promise<Scene> {
+        // Create scene
         const scene = createBaseScene(engine);
 
+        // Load stellar system
         const runtime = await loadStellarSystemRuntime(scene, planetsJson, {
             preferredSystemId: "Sol",
             preferredBodyName: "Mercury",
         });
-
         const loadedSystems = runtime.loadedSystems;
         const activeSystem = runtime.activeSystem;
         const body = runtime.spawnBody;

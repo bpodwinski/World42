@@ -6,6 +6,7 @@ import {
     PlanetCDLOD,
 } from "../stellar_system/stellar_catalog_loader";
 import { OriginCamera } from "../../core/camera/camera_manager";
+import { ChunkTree } from "../../systems/lod/chunks/chunk_tree";
 
 export type LoadedSystem = Awaited<ReturnType<typeof loadStellarSystemFromCatalog>>;
 export type SystemBody = LoadedSystem["bodies"] extends Map<any, infer V> ? V : never;
@@ -20,7 +21,7 @@ export type StellarSystemRuntime = {
 
 export type StellarSystemPlanetsBuild = {
     mergedCDLOD: Map<string, PlanetCDLOD>;
-    roots: any[]; // si tu as un type ChunkNode/ChunkTreeNode, remplace `any[]`
+    roots: ChunkTree[];
 };
 
 export async function loadStellarSystemRuntime(
