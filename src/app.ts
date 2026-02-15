@@ -21,12 +21,13 @@ import { GuiManager } from './core/gui/gui_manager';
 import planetsJson from './game_world/stellar_system/data.json';
 import { teleportToEntity } from './core/camera/teleport_entity';
 import { ScaleManager } from './core/scale/scale_manager';
-import { createCDLODForSystem, listStellarSystems, loadStellarSystemFromCatalog, PlanetCDLOD } from './game_world/stellar_system/stellar_catalog_loader';
+import { createCDLODForSystem, PlanetCDLOD } from './game_world/stellar_system/stellar_catalog_loader';
 import { LodScheduler } from './systems/lod/lod_scheduler';
 import { attachStarRayMarchingPostProcess, type StarGlowSource } from "./core/render/star_raymarch_postprocess";
 import { DirectionalLight, ShadowGenerator, Matrix, Vector2 } from "@babylonjs/core";
 import { TerrainShader, type TerrainShadowContext } from "./game_objects/planets/rocky_planet/terrains_shader";
 import { createBaseScene } from './core/render/create_scene';
+import { loadStellarSystemRuntime } from './game_world/stellar_system/stellar_system_runtime';
 
 export class FloatingCameraScene {
     public static async CreateScene(
@@ -35,28 +36,14 @@ export class FloatingCameraScene {
     ): Promise<Scene> {
         const scene = createBaseScene(engine);
 
-        const systemIds = listStellarSystems(planetsJson);
+        const runtime = await loadStellarSystemRuntime(scene, planetsJson, {
+            preferredSystemId: "Sol",
+            preferredBodyName: "Mercury",
+        });
 
-        // Charge tout
-        const loadedSystemsArr = await Promise.all(
-            systemIds.map((id) => loadStellarSystemFromCatalog(scene, planetsJson, id))
-        );
-        const loadedSystems = new Map(loadedSystemsArr.map((s) => [s.systemId, s]));
-
-        // Choisit le système actif (Sol si présent, sinon le 1er)
-        const activeSystem =
-            loadedSystems.get("Sol") ?? loadedSystemsArr[0];
-
-        const systemBodies = activeSystem.bodies;
-
-        // Choisit un corps de spawn (Mercury si présent, sinon 1re planète non-star)
-        const body =
-            systemBodies.get("Mercury") ??
-            Array.from(systemBodies.values()).find((b) => b.bodyType !== "star");
-
-        if (!body) {
-            throw new Error("Aucun corps (planète) trouvé dans le système actif.");
-        }
+        const loadedSystems = runtime.loadedSystems;
+        const activeSystem = runtime.activeSystem;
+        const body = runtime.spawnBody;
 
         // GUI
         const gui = new GuiManager(scene);
