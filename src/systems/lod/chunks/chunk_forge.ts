@@ -270,7 +270,7 @@ export class ChunkForge {
                         baseAmplitude: 5.0,
                         lacunarity: 1.8,
                         persistence: 0.5,
-                        globalTerrainAmplitude: 1.0,
+                        globalTerrainAmplitude: 50.0,
                     },
                     meshFormat: "typed",
                 },

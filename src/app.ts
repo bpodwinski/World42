@@ -259,20 +259,6 @@ export class FloatingCameraScene {
                 engine,
                 camera,
                 planets: Array.from(mergedCDLOD.values()),
-            },
-            {
-                shadowMapSize: 4096,
-                minShadowRange: 6000,
-                maxShadowRange: 50000,
-                rangeLerp: 0.12,
-                depthHalfMult: 2.0,
-                lightDistMult: 2.5,
-                lightDistAdd: 5000,
-                pickIntervalMs: 250,
-                generatorBias: 0.0015,
-                generatorNormalBias: 0.6,
-                shaderBias: 0.00025,
-                darkness: 1.0,
             }
         );
 

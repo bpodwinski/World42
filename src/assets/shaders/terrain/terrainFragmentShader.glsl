@@ -4,7 +4,7 @@ precision highp int;
 //------------------------------------------------------------------------------
 // Varyings (from vertex shader)
 //------------------------------------------------------------------------------
-varying vec3 vPosition;      // planet-local
+varying vec3 vPosition;       // planet-local
 varying vec2 vUV;
 varying vec3 vNormal;
 varying vec3 vWorldPosRender; // render-space (world * position)
@@ -44,15 +44,21 @@ uniform vec3 uPatchCenter;
 
 #include<debugLOD>
 
+//------------------------------------------------------------------------------
 // Shadows
+//------------------------------------------------------------------------------
 uniform sampler2D shadowSampler;
 uniform mat4 lightMatrix;
 uniform vec2 shadowTexelSize;
 uniform float shadowBias;
-uniform float shadowDarkness;      // 0..1 (1 = ombres noires)
-uniform float shadowReverseDepth;  // 1 si reverse depth buffer
-uniform float shadowNdcHalfZRange; // 1 si WebGPU (z NDC 0..1)
+uniform float shadowDarkness;      // 0..1 (1 = fully dark)
+uniform float shadowReverseDepth;  // 1 if reverse depth buffer
+uniform float shadowNdcHalfZRange; // 1 if WebGPU (NDC z is 0..1)
 
+/**
+ * Converts the projected clip-space Z to the depth metric used in the shadow map.
+ * Handles WebGL vs WebGPU NDC conventions and reverse depth buffers.
+ */
 float shadowDepthMetric(float clipZ) {
   float z01 = (shadowNdcHalfZRange > 0.5) ? clipZ : (clipZ * 0.5 + 0.5);
 
@@ -60,46 +66,72 @@ float shadowDepthMetric(float clipZ) {
   float GREATEST_LESS_THAN_ONE = 0.99999994;
 
   if(shadowReverseDepth > 0.5) {
+    // Reverse depth: keep > 0 to avoid precision edge cases.
     return clamp(z01, SMALLEST_ABOVE_ZERO, 1.0);
   } else {
     return clamp(z01, 0.0, GREATEST_LESS_THAN_ONE);
   }
 }
 
-// returns 1 if lit, 0 if shadow
+/**
+ * Returns 1.0 if the point is lit, 0.0 if it is in shadow.
+ * The comparison direction depends on reverse depth.
+ */
 float isLit(float depthMetric, float mapDepth) {
   if(shadowReverseDepth > 0.5) {
-    // reverse: bigger = closer
+    // Reverse depth: bigger values are closer.
     return (depthMetric + shadowBias >= mapDepth) ? 1.0 : 0.0;
   } else {
     return (depthMetric - shadowBias <= mapDepth) ? 1.0 : 0.0;
   }
 }
 
-float computeShadowPCF3x3(vec3 worldPosRender) {
-  vec4 p = lightMatrix * vec4(worldPosRender, 1.0);
-  vec3 clip = p.xyz / p.w;
+//------------------------------------------------------------------------------
+// Poisson disk PCF (12 taps) with per-fragment rotation
+//------------------------------------------------------------------------------
+const vec2 POISSON[12] = vec2[](vec2(-0.326, -0.406), vec2(-0.840, -0.074), vec2(-0.696, 0.457), vec2(-0.203, 0.621), vec2(0.962, -0.195), vec2(0.473, -0.480), vec2(0.519, 0.767), vec2(0.185, -0.893), vec2(0.507, 0.064), vec2(0.896, 0.412), vec2(-0.322, -0.933), vec2(-0.792, -0.598));
 
-  vec2 uv = clip.xy * 0.5 + vec2(0.5);
+/** Cheap hash for per-fragment rotation (reduces visible banding patterns). */
+float hash13(vec3 p) {
+  p = fract(p * 0.1031);
+  p += dot(p, p.yzx + 33.33);
+  return fract((p.x + p.y) * p.z);
+}
 
-  float inX = step(0.0, uv.x) * step(uv.x, 1.0);
-  float inY = step(0.0, uv.y) * step(uv.y, 1.0);
-  float inFrustum = inX * inY;
+/**
+ * Poisson PCF shadow visibility (1 = lit, 0 = shadow).
+ *
+ * @param worldPosRender Fragment position in Render-space
+ * @param bias          Depth bias (already tuned at CPU side)
+ * @param texelSize     1 / shadowMapResolution for sampling offsets
+ */
+float computeShadowPoisson(vec3 worldPosRender, float bias, vec2 texelSize) {
+  vec4 lp = lightMatrix * vec4(worldPosRender, 1.0);
+  vec3 ndc = lp.xyz / lp.w;
 
-  vec2 uvc = clamp(uv, vec2(0.0), vec2(1.0));
-  float depthMetric = shadowDepthMetric(clip.z);
+  vec2 uv = ndc.xy * 0.5 + vec2(0.5);
+  float depth = shadowDepthMetric(ndc.z);
 
-  float sum = 0.0;
-  for(int y = -1; y <= 1; y++) {
-    for(int x = -1; x <= 1; x++) {
-      vec2 off = vec2(float(x), float(y)) * shadowTexelSize;
-      float mapDepth = textureLod(shadowSampler, uvc + off, 0.0).r;
-      sum += isLit(depthMetric, mapDepth);
-    }
+  // Outside of the shadow map => treat as lit.
+  if(uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+    return 1.0;
   }
 
-  float visibility = sum / 9.0; // 0..1 (lit)
-  return mix(1.0, visibility, inFrustum); // outside frustum => lit
+  // Rotate kernel per-fragment (reduces structured aliasing).
+  float a = hash13(worldPosRender) * 6.2831853;
+  float ca = cos(a), sa = sin(a);
+  mat2 R = mat2(ca, -sa, sa, ca);
+
+  // Kernel radius in texels. Tune: ~1.25 (sharper) .. ~2.5 (softer).
+  float radius = 1.75;
+
+  float sum = 0.0;
+  for(int i = 0; i < 12; i++) {
+    vec2 o = (R * POISSON[i]) * texelSize * radius;
+    float mapDepth = textureLod(shadowSampler, uv + o, 0.0).r;
+    sum += isLit(depth, mapDepth);
+  }
+  return sum / 12.0;
 }
 
 //------------------------------------------------------------------------------
@@ -148,8 +180,8 @@ void main(void) {
   vec3 ambient = vec3(0.01);
   vec3 diffuse = lightColor * (ndl * lightIntensity);
 
-  float vis = computeShadowPCF3x3(vWorldPosRender);                   // 0..1 (lit)
-  float shadowFactor = mix(1.0 - shadowDarkness, 1.0, vis);           // lit=1, shadow=(1-darkness)
+  float vis = computeShadowPoisson(vWorldPosRender, shadowBias, shadowTexelSize);
+  float shadowFactor = mix(1.0 - shadowDarkness, 1.0, vis);
 
   vec3 lighting = ambient + diffuse * shadowFactor;
   gl_FragColor = vec4(combined.rgb * lighting, combined.a);
