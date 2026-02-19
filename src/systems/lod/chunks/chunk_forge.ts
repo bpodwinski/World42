@@ -152,19 +152,9 @@ export class ChunkForge {
         patchCenterWorldDouble.subtractToRef(planetCenterWorldDouble, this._rotatedLocal);
         Vector3.TransformNormalToRef(this._rotatedLocal, this._invWorld, this._patchCenterLocal);
 
-        // cameraLocal = inverse(planetPivotRotation) * (cameraWorldDouble - planetCenterWorldDouble)
-        cameraWorldDouble.subtractToRef(planetCenterWorldDouble, this._rotatedLocal);
-        renderParent.getWorldMatrix().invertToRef(this._invWorld);
-        Vector3.TransformNormalToRef(this._rotatedLocal, this._invWorld, this._cameraLocal);
-
         const tMat0 = performance.now();
 
-        /**
-         * NOTE:
-         * - The shader operates primarily in planet-local space.
-         * - If TerrainShader expects camera in planet-local, pass `_cameraLocal` instead of `cameraWorldDouble`.
-         *   (Keep consistent across shader code/uniforms.)
-         */
+        // The shader operates in planet-local space: camera and patch center are converted above.
         const mat = new TerrainShader(this.scene).create(
             params.resolution,
             params.level,
@@ -285,7 +275,7 @@ export class ChunkForge {
                         const mesh = this.buildMesh(
                             meshData,
                             params,
-                            this._cameraLocal,
+                            cameraWorldDouble,
                             planetEntity,
                             renderParent,
                             patchCenterWorldDouble,

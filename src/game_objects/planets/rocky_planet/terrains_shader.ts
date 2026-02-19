@@ -66,6 +66,21 @@ export class TerrainShader {
         return tex;
     }
 
+    /**
+     * Create a terrain ShaderMaterial for one chunk.
+     *
+     * All spatial parameters are in **planet-local** space (origin = planet center,
+     * axes = pre-rotation). The caller (ChunkForge) converts from WorldDouble before calling.
+     *
+     * @param resolution       Grid resolution of the terrain patch.
+     * @param lodLevel         Current LOD level of this chunk.
+     * @param maxLevel         Maximum LOD level in the quadtree.
+     * @param cameraPositionLocal Camera position in **planet-local** (sim units).
+     * @param planetRadius     Planet radius in **simulation units** (km * SCALE_FACTOR).
+     * @param patchCenterLocal Patch center in **planet-local** (sim units).
+     * @param wireframe        Enable wireframe rendering.
+     * @param debugLOD         Enable LOD debug coloring.
+     */
     create(
         resolution: number,
         lodLevel: number,

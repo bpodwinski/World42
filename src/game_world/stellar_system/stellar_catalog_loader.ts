@@ -47,21 +47,33 @@ export type StellarCatalogJSON = {
     default?: string;
 };
 
-/** ---------- Runtime Loaded ---------- */
+/**
+ * Runtime representation of a loaded celestial body.
+ *
+ * Coordinate space conventions:
+ * - `positionWorldDouble`: **WorldDouble** (simulation units, high-precision absolute position)
+ * - `diameterSim` / `radiusSim`: **Simulation units** (km * SCALE_FACTOR)
+ * - `node`: **Render-space** transform (parented under FloatingEntity)
+ */
 export type LoadedBody = {
     systemId: string;
     bodyType: string;
     name: string;
 
-    /** Pivot Render-space (rotation/tilt), parenté sous FloatingEntity */
+    /** Pivot in render-space (rotation/tilt), parented under FloatingEntity. */
     node: TransformNode;
 
     meshName: string;
 
-    /** WorldDouble (simulation units) */
+    /** Absolute position in WorldDouble (simulation units). */
     positionWorldDouble: Vector3;
 
-    diameter: number;
+    /** Full diameter in simulation units (converted from diameter_km via ScaleManager). */
+    diameterSim: number;
+
+    /** Half-diameter (radius) in simulation units. Convenience = diameterSim * 0.5. */
+    radiusSim: number;
+
     rotationPeriodDays: number | null;
 
     entity?: FloatingEntity;
@@ -81,7 +93,8 @@ export type LoadedSystem = {
 export type PlanetCDLOD = {
     entity: FloatingEntity;
     chunks: ChunkTree[];
-    radius: number;
+    /** Planet radius in simulation units. */
+    radiusSim: number;
     maxLevel: number;
     resolution: number;
 };
@@ -169,12 +182,12 @@ export async function loadStellarSystemFromCatalog(
 
         let meshName = `body_${systemId}_${name}`;
 
-        const diameter = ScaleManager.toSimulationUnits(data.diameter_km);
+        const diameterSim = ScaleManager.toSimulationUnits(data.diameter_km);
 
         const starLight = isStar ? parseStarLight(data.star) : undefined;
 
         if (isStar) {
-            const sphere = MeshBuilder.CreateSphere(meshName, { diameter, segments: 64 }, scene);
+            const sphere = MeshBuilder.CreateSphere(meshName, { diameter: diameterSim, segments: 64 }, scene);
             sphere.parent = pivot;
 
             const mat = makeMaterial(`${systemId}_${name}`, true, scene);
@@ -194,9 +207,10 @@ export async function loadStellarSystemFromCatalog(
             node: pivot,
             meshName,
             positionWorldDouble: posWorldDouble,
-            diameter,
+            diameterSim,
+            radiusSim: diameterSim * 0.5,
             rotationPeriodDays: data.rotation_period_days,
-            starLight, // ✅ store
+            starLight,
         });
     }
 
@@ -234,6 +248,7 @@ export function createCDLODForSystem(
         skip = (_name: string, body: LoadedBody) => body.bodyType === "star",
     } = opts;
 
+    // Extra margin for culling bounding sphere to account for terrain relief (10 km -> sim units).
     ChunkTree.cullReliefMargin = ScaleManager.toSimulationUnits(10);
 
     // attacher entités flottantes (noms namespacés)
@@ -261,7 +276,7 @@ export function createCDLODForSystem(
             pickNearestStar(body, stars);
 
         const ent = body.entity!;
-        const radius = body.diameter * 0.5;
+        const radius = body.radiusSim;
 
         // debug light
         console.log(`[light] ${loaded.systemId}:${name} -> ${starName} color=${starColor.toString()} I=${starIntensity}`);
@@ -289,7 +304,7 @@ export function createCDLODForSystem(
             )
         );
 
-        out.set(name, { entity: ent, chunks, radius, maxLevel, resolution });
+        out.set(name, { entity: ent, chunks, radiusSim: radius, maxLevel, resolution });
     }
 
     return out;

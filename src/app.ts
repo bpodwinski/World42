@@ -27,6 +27,19 @@ import { attachStarRayMarchingPostProcess, type StarGlowSource } from "./core/re
 import { DirectionalLight, ShadowGenerator, Matrix, Vector2 } from "@babylonjs/core";
 import { TerrainShader, type TerrainShadowContext } from "./game_objects/planets/rocky_planet/terrains_shader";
 
+/**
+ * Coordinate space conventions used throughout:
+ *
+ * - **WorldDouble** (sim units): High-precision absolute positions stored in `doublepos`.
+ *   Converted from km via `ScaleManager.toSimulationUnits(km)`. Used for LOD, culling, distances.
+ *
+ * - **Render-space** (sim units): Floating-origin relative to camera. camera.position is always (0,0,0).
+ *   `renderPos = worldDouble - camera.doublepos`. Used for GPU rendering, frustum planes, shadows.
+ *
+ * - **Planet-local** (sim units): Origin at planet center, axes follow planet rotation.
+ *   Worker mesh vertices, shader uniforms (cameraPosition, uPatchCenter, lightDirection).
+ *   Conversion: `local = inversePivotMatrix * (worldDouble - planetCenter)`.
+ */
 export class FloatingCameraScene {
     public static async CreateScene(
         engine: Engine | WebGPUEngine,
@@ -73,7 +86,8 @@ export class FloatingCameraScene {
         // la vraie position est body.positionWorldDouble (WorldDouble).
         // -------------------------
         const planetTargetWorldDouble = body.positionWorldDouble.clone();
-        planetTargetWorldDouble.y += body.diameter * 0.52;
+        // Spawn camera slightly above the surface (52% of radius above center)
+        planetTargetWorldDouble.y += body.radiusSim * 1.04;
 
         const camera = new OriginCamera('camera_player', planetTargetWorldDouble, scene);
         camera.debugMode = true;
@@ -115,7 +129,8 @@ export class FloatingCameraScene {
         debugCam.inputs.clear();
 
         // WorldDouble debug cam
-        let debugDoublePos = camera.doublepos.clone().add(new Vector3(0, 0, body.diameter * 1.5));
+        // Debug camera: 3 radii behind along Z (sim units)
+        let debugDoublePos = camera.doublepos.clone().add(new Vector3(0, 0, body.radiusSim * 3.0));
         let debugDoubleTgt = body.positionWorldDouble.clone();
 
         camera.viewport = new Viewport(0, 0, 1, 1);
@@ -135,7 +150,8 @@ export class FloatingCameraScene {
 
         scene.onBeforeRenderObservable.add(() => {
             const dt = engine.getDeltaTime() / 1000;
-            const speed = body.diameter * 0.2 * dt;
+            // Debug camera speed: 40% of radius per second (sim units/s)
+            const speed = body.radiusSim * 0.4 * dt;
 
             const fwd = debugCam.getDirection(Vector3.Forward());
             const right = debugCam.getDirection(Vector3.Right());
@@ -174,17 +190,18 @@ export class FloatingCameraScene {
         lod.start();
 
         // --------------------
-        // Terrain shadows P0 (1 ShadowGenerator shared around camera) — Render-space (floating origin)
+        // Terrain shadows (1 ShadowGenerator shared around camera)
+        // All distances below are in **simulation units** (= Render-space, since camera is at origin).
         // --------------------
-        const SHADOW_MAP_SIZE = 4096;          // 4096 si tu veux, mais coûteux. 2048 + range dynamique => souvent mieux.
-        const MIN_SHADOW_RANGE = 6000;         // ortho half-size min (près du sol)
-        const MAX_SHADOW_RANGE = 50000;        // ortho half-size max (haut)
-        const RANGE_LERP = 0.12;               // smoothing 0..1 (plus petit = plus smooth)
-        const DEPTH_HALF_MULT = 2.0;           // half depth extent = shadowRange * DEPTH_HALF_MULT
-        const LIGHT_DIST_MULT = 2.5;           // LIGHT_DISTANCE = shadowRange * LIGHT_DIST_MULT + LIGHT_DIST_ADD
-        const LIGHT_DIST_ADD = 5000;           // marge fixe
+        const SHADOW_MAP_SIZE = 4096;              // shadow map resolution (pixels)
+        const MIN_SHADOW_RANGE = 6000;             // ortho half-size min, sim units (near ground)
+        const MAX_SHADOW_RANGE = 50000;            // ortho half-size max, sim units (high altitude)
+        const RANGE_LERP = 0.12;                   // smoothing factor 0..1 (lower = smoother)
+        const DEPTH_HALF_MULT = 2.0;               // half depth extent = shadowRange * DEPTH_HALF_MULT (sim units)
+        const LIGHT_DIST_MULT = 2.5;               // light distance = shadowRange * LIGHT_DIST_MULT + LIGHT_DIST_ADD
+        const LIGHT_DIST_ADD = 5000;               // fixed margin, sim units
 
-        let shadowRange = 12000;               // valeur lissée runtime
+        let shadowRange = 12000;                   // smoothed runtime value, sim units
 
         const shadowLight = new DirectionalLight("terrainShadowLight", new Vector3(0, -1, 0), scene);
         shadowLight.intensity = 0; // ombres uniquement
@@ -273,16 +290,17 @@ export class FloatingCameraScene {
 
             // (E) shadowRange dynamique (altitude -> range)
             const distToCenter = camera.distanceToSim(planetCenterWD);
-            const altitude = Math.max(0, distToCenter - activePlanet.radius);
+            // Altitude above surface in sim units
+            const altitude = Math.max(0, distToCenter - activePlanet.radiusSim);
+            // targetRange in sim units: grows with altitude (2x altitude + 2000 base)
             const targetRange = Math.min(
                 MAX_SHADOW_RANGE,
                 Math.max(MIN_SHADOW_RANGE, altitude * 2.0 + 2000.0)
             );
 
-            // Quantize targetRange to avoid "resolution pumping" near ground
+            // Quantize to power-of-2 steps (sim units) to avoid "resolution pumping" near ground
             function quantizeRange(r: number) {
-                // paliers: 2k, 4k, 8k, 16k, 32k, 64k...
-                const base = 2000;
+                const base = 2000; // sim units
                 const q = base * Math.pow(2, Math.round(Math.log(r / base) / Math.log(2)));
                 return Math.min(MAX_SHADOW_RANGE, Math.max(MIN_SHADOW_RANGE, q));
             }
@@ -349,7 +367,7 @@ export class FloatingCameraScene {
 
                     stars.push({
                         posWorldDouble: body.positionWorldDouble,
-                        radius: body.diameter * 0.5,
+                        radius: body.radiusSim,
                         color: light?.color ?? new Vector3(1, 1, 1),
                         intensity: light?.intensity ?? 1.0,
                     });
@@ -367,7 +385,7 @@ export class FloatingCameraScene {
                 const pluto = sol?.bodies.get("Proxima_b");
                 if (!pluto) return;
 
-                teleportToEntity(camera, pluto.positionWorldDouble, pluto.diameter, 20);
+                teleportToEntity(camera, pluto.positionWorldDouble, pluto.diameterSim, 20);
                 lod.resetNow();
                 pickActivePlanetNow();
                 lastPickMs = performance.now();
