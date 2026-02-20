@@ -8,7 +8,7 @@ Effect.IncludesShadersStore['debugLOD'] = terrainDebugLODShader;
 Effect.ShadersStore['terrainVertexShader'] = terrainVertexShader;
 Effect.ShadersStore['terrainFragmentShader'] = terrainFragmentShader;
 
-export type TerrainShadowContext = {
+export type TerrainShadowCascade = {
     shadowGen: ShadowGenerator;
     shadowMap: RenderTargetTexture;
     lightMatrix: Matrix;     // mis à jour 1x/frame (Render-space)
@@ -16,6 +16,13 @@ export type TerrainShadowContext = {
     bias: number;            // bias en [0..1]
     normalBias: number;      // bias orienté normale (limite l'acne à angle rasant)
     darkness: number;        // 0..1 (1 = ombre full)
+};
+
+export type TerrainShadowContext = {
+    near: TerrainShadowCascade;
+    far: TerrainShadowCascade;
+    splitDistance: number;   // distance caméra-fragment en render-space
+    splitBlend: number;      // largeur de transition douce (0 => hard split)
     reverseDepth: number;    // 0 ou 1
 };
 
@@ -118,15 +125,22 @@ export class TerrainShader {
                     'lightIntensity',
 
                     // Shadows (P0)
-                    'lightMatrix',
-                    'shadowBias',
-                    'shadowNormalBias',
-                    'shadowDarkness',
-                    'shadowTexelSize',
+                    'lightMatrixNear',
+                    'lightMatrixFar',
+                    'shadowBiasNear',
+                    'shadowBiasFar',
+                    'shadowNormalBiasNear',
+                    'shadowNormalBiasFar',
+                    'shadowDarknessNear',
+                    'shadowDarknessFar',
+                    'shadowTexelSizeNear',
+                    'shadowTexelSizeFar',
+                    'shadowSplitDistance',
+                    'shadowSplitBlend',
                     'shadowReverseDepth',
                     "shadowNdcHalfZRange",
                 ],
-                samplers: ['diffuseTexture', 'detailTexture', 'shadowSampler'],
+                samplers: ['diffuseTexture', 'detailTexture', 'shadowSamplerNear', 'shadowSamplerFar'],
             }
         );
 
@@ -162,25 +176,41 @@ export class TerrainShader {
         shader.setFloat('lightIntensity', 1.0);
 
         // Shadows defaults + bind dummy to satisfy WebGPU
-        shader.setMatrix('lightMatrix', Matrix.Identity());
-        shader.setFloat('shadowBias', 0.0005);
-        shader.setFloat('shadowNormalBias', 0.0015);
-        shader.setFloat('shadowDarkness', 1.0);
-        shader.setVector2('shadowTexelSize', new Vector2(1.0, 1.0));
+        shader.setMatrix('lightMatrixNear', Matrix.Identity());
+        shader.setMatrix('lightMatrixFar', Matrix.Identity());
+        shader.setFloat('shadowBiasNear', 0.0005);
+        shader.setFloat('shadowBiasFar', 0.0005);
+        shader.setFloat('shadowNormalBiasNear', 0.0015);
+        shader.setFloat('shadowNormalBiasFar', 0.0015);
+        shader.setFloat('shadowDarknessNear', 1.0);
+        shader.setFloat('shadowDarknessFar', 1.0);
+        shader.setVector2('shadowTexelSizeNear', new Vector2(1.0, 1.0));
+        shader.setVector2('shadowTexelSizeFar', new Vector2(1.0, 1.0));
+        shader.setFloat('shadowSplitDistance', 10000.0);
+        shader.setFloat('shadowSplitBlend', 0.0);
         shader.setFloat('shadowReverseDepth', 0.0);
-        shader.setTexture('shadowSampler', TerrainShader.getDummyShadow(this.scene));
+        shader.setTexture('shadowSamplerNear', TerrainShader.getDummyShadow(this.scene));
+        shader.setTexture('shadowSamplerFar', TerrainShader.getDummyShadow(this.scene));
 
         // If scene.metadata.terrainShadow exists, override at bind time
         shader.onBindObservable.add(() => {
             const ctx = TerrainShader.getTerrainShadowContext(this.scene);
             if (!ctx) return;
 
-            shader.setTexture("shadowSampler", ctx.shadowMap);       // IMPORTANT: shadowMapForRendering en WebGPU
-            shader.setMatrix("lightMatrix", ctx.lightMatrix);
-            shader.setVector2("shadowTexelSize", ctx.texelSize);
-            shader.setFloat("shadowBias", ctx.bias);
-            shader.setFloat("shadowNormalBias", ctx.normalBias);
-            shader.setFloat("shadowDarkness", ctx.darkness);
+            shader.setTexture("shadowSamplerNear", ctx.near.shadowMap);       // IMPORTANT: shadowMapForRendering en WebGPU
+            shader.setTexture("shadowSamplerFar", ctx.far.shadowMap);
+            shader.setMatrix("lightMatrixNear", ctx.near.lightMatrix);
+            shader.setMatrix("lightMatrixFar", ctx.far.lightMatrix);
+            shader.setVector2("shadowTexelSizeNear", ctx.near.texelSize);
+            shader.setVector2("shadowTexelSizeFar", ctx.far.texelSize);
+            shader.setFloat("shadowBiasNear", ctx.near.bias);
+            shader.setFloat("shadowBiasFar", ctx.far.bias);
+            shader.setFloat("shadowNormalBiasNear", ctx.near.normalBias);
+            shader.setFloat("shadowNormalBiasFar", ctx.far.normalBias);
+            shader.setFloat("shadowDarknessNear", ctx.near.darkness);
+            shader.setFloat("shadowDarknessFar", ctx.far.darkness);
+            shader.setFloat("shadowSplitDistance", ctx.splitDistance);
+            shader.setFloat("shadowSplitBlend", ctx.splitBlend);
 
             const eng = this.scene.getEngine();
             shader.setFloat("shadowReverseDepth", eng.useReverseDepthBuffer ? 1 : 0);

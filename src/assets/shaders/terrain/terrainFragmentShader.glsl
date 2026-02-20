@@ -44,13 +44,21 @@ uniform vec3 uPatchCenter;
 
 #include<debugLOD>
 
-// Shadows
-uniform sampler2D shadowSampler;
-uniform mat4 lightMatrix;
-uniform vec2 shadowTexelSize;
-uniform float shadowBias;
-uniform float shadowNormalBias;
-uniform float shadowDarkness;      // 0..1 (1 = ombres noires)
+// Shadows (2 cascades)
+uniform sampler2D shadowSamplerNear;
+uniform sampler2D shadowSamplerFar;
+uniform mat4 lightMatrixNear;
+uniform mat4 lightMatrixFar;
+uniform vec2 shadowTexelSizeNear;
+uniform vec2 shadowTexelSizeFar;
+uniform float shadowBiasNear;
+uniform float shadowBiasFar;
+uniform float shadowNormalBiasNear;
+uniform float shadowNormalBiasFar;
+uniform float shadowDarknessNear;
+uniform float shadowDarknessFar;
+uniform float shadowSplitDistance;
+uniform float shadowSplitBlend;
 uniform float shadowReverseDepth;  // 1 si reverse depth buffer
 uniform float shadowNdcHalfZRange; // 1 si WebGPU (z NDC 0..1)
 
@@ -67,10 +75,8 @@ float shadowDepthMetric(float clipZ) {
   }
 }
 
-// returns 1 if lit, 0 if shadow
 float isLit(float depthMetric, float mapDepth, float receiverBias) {
   if(shadowReverseDepth > 0.5) {
-    // reverse: bigger = closer
     return (depthMetric + receiverBias >= mapDepth) ? 1.0 : 0.0;
   } else {
     return (depthMetric - receiverBias <= mapDepth) ? 1.0 : 0.0;
@@ -83,7 +89,21 @@ float hash12(vec2 p) {
   return fract((p3.x + p3.y) * p3.z);
 }
 
-float computeShadowPoisson(vec3 worldPosRender, vec3 n, vec3 L) {
+float sampleShadowDepth(float cascadeIndex, vec2 uv) {
+  if(cascadeIndex < 0.5) return textureLod(shadowSamplerNear, uv, 0.0).r;
+  return textureLod(shadowSamplerFar, uv, 0.0).r;
+}
+
+float computeShadowPoisson(
+  vec3 worldPosRender,
+  vec3 n,
+  vec3 L,
+  mat4 lightMatrix,
+  vec2 shadowTexelSize,
+  float shadowBias,
+  float shadowNormalBias,
+  float cascadeIndex
+) {
   vec4 p = lightMatrix * vec4(worldPosRender, 1.0);
   vec3 clip = p.xyz / p.w;
 
@@ -115,17 +135,14 @@ float computeShadowPoisson(vec3 worldPosRender, vec3 n, vec3 L) {
   float sum = 0.0;
   for (int i = 0; i < 12; i++) {
     vec2 off = (rot * POISSON[i]) * (2.0 * shadowTexelSize);
-    float mapDepth = textureLod(shadowSampler, uvc + off, 0.0).r;
+    float mapDepth = sampleShadowDepth(cascadeIndex, uvc + off);
     sum += isLit(depthMetric, mapDepth, receiverBias);
   }
 
-  float visibility = sum / 12.0; // 0..1 (lit)
-  return mix(1.0, visibility, inFrustum); // outside frustum => lit
+  float visibility = sum / 12.0;
+  return mix(1.0, visibility, inFrustum);
 }
 
-//------------------------------------------------------------------------------
-// Triplanar weights
-//------------------------------------------------------------------------------
 vec3 triplanarWeights(vec3 n) {
   vec3 w = pow(abs(n), vec3(4.0));
   return w / (w.x + w.y + w.z);
@@ -169,8 +186,18 @@ void main(void) {
   vec3 ambient = vec3(0.01);
   vec3 diffuse = lightColor * (ndl * lightIntensity);
 
-  float vis = computeShadowPoisson(vWorldPosRender, n, L);            // 0..1 (lit)
-  float shadowFactor = mix(1.0 - shadowDarkness, 1.0, vis);           // lit=1, shadow=(1-darkness)
+  float distToCamera = length(vWorldPosRender);
+  float visNear = computeShadowPoisson(vWorldPosRender, n, L, lightMatrixNear, shadowTexelSizeNear, shadowBiasNear, shadowNormalBiasNear, 0.0);
+  float visFar = computeShadowPoisson(vWorldPosRender, n, L, lightMatrixFar, shadowTexelSizeFar, shadowBiasFar, shadowNormalBiasFar, 1.0);
+
+  float hardSelector = step(shadowSplitDistance, distToCamera);
+  float blendHalf = shadowSplitBlend * 0.5;
+  float blendSelector = smoothstep(shadowSplitDistance - blendHalf, shadowSplitDistance + blendHalf, distToCamera);
+  float selector = mix(hardSelector, blendSelector, step(1e-5, shadowSplitBlend));
+
+  float vis = mix(visNear, visFar, selector);
+  float darkness = mix(shadowDarknessNear, shadowDarknessFar, selector);
+  float shadowFactor = mix(1.0 - darkness, 1.0, vis);
 
   vec3 lighting = ambient + diffuse * shadowFactor;
   gl_FragColor = vec4(combined.rgb * lighting, combined.a);
