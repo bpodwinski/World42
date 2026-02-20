@@ -12,6 +12,8 @@ export type TerrainShadowContext = {
     shadowGen: ShadowGenerator;
     shadowMap: RenderTargetTexture;
     lightMatrix: Matrix;     // mis à jour 1x/frame (Render-space)
+    lightDirection: Vector3; // direction lumière en Render-space (équivalent WorldDouble pour les directions)
+    shadowRange: number;     // demi-étendue ortho actuelle (sim units)
     texelSize: Vector2;      // 1 / mapSize
     bias: number;            // bias en [0..1]
     normalBias: number;      // bias orienté normale (limite l'acne à angle rasant)
