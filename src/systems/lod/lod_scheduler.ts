@@ -8,6 +8,12 @@ export type LodSchedulerOptions = {
     maxStartsPerFrame?: number;  // jobs démarrés par frame
     rescoreMs?: number;          // re-score complet périodique (ms)
     applyDebugEveryFrame?: boolean;
+    /**
+     * Maximum CPU time (ms) to spend on LOD updates per frame.
+     * Prevents LOD processing from blocking the render thread.
+     * Default: 4 ms.
+     */
+    budgetMs?: number;
 };
 
 export class LodScheduler {
@@ -20,6 +26,10 @@ export class LodScheduler {
     private maxStartsPerFrame: number;
     private rescoreMs: number;
     private lastRescore = 0;
+    /** Maximum CPU time per frame (ms) for LOD updates. */
+    private budgetMs: number;
+    /** Round-robin index: next root to process first this tick. */
+    private _rootRobin = 0;
 
     private roots: ChunkTree[] = [];
 
@@ -35,6 +45,7 @@ export class LodScheduler {
         this.maxStartsPerFrame = opts.maxStartsPerFrame ?? 3;
         this.rescoreMs = opts.rescoreMs ?? 250;
         this.applyDebugEveryFrame = opts.applyDebugEveryFrame ?? true;
+        this.budgetMs = opts.budgetMs ?? 4;
         this.setRoots(roots);
     }
 
@@ -81,27 +92,37 @@ export class LodScheduler {
     private tick = () => {
         if (!this.roots.length) return;
 
-        const now = performance.now();
-        if (now - this.lastRescore > this.rescoreMs) {
+        const t0 = performance.now();
+        const deadline = t0 + this.budgetMs;
+
+        if (t0 - this.lastRescore > this.rescoreMs) {
             // Re-score complet (simple et robuste)
             this.rebuildQueue();
-            this.lastRescore = now;
+            this.lastRescore = t0;
         }
 
         if (this.applyDebugEveryFrame) {
             for (const r of this.roots) r.updateDebugLOD(ChunkTree.debugLODEnabled);
         }
 
-        // Update tous les roots chaque frame (updateLOD est maintenant non-bloquant)
-        for (const r of this.roots) {
-            r.updateLOD(this.camera, false).catch(console.error);
+        // Round-robin: itère sur tous les roots en commençant par _rootRobin.
+        // S'arrête dès que le budget frame est dépassé.
+        // Chaque racine reçoit la deadline pour stopper sa récursion à temps.
+        const n = this.roots.length;
+        for (let i = 0; i < n; i++) {
+            if (performance.now() >= deadline) break;
+            const root = this.roots[(this._rootRobin + i) % n];
+            root.updateLOD(this.camera, false, deadline).catch(console.error);
         }
+        // Avance l'index pour que la prochaine frame commence sur le root suivant
+        this._rootRobin = (this._rootRobin + 1) % Math.max(1, n);
 
         let started = 0;
 
         while (
             started < this.maxStartsPerFrame &&
-            this.inFlight < this.maxConcurrent
+            this.inFlight < this.maxConcurrent &&
+            performance.now() < deadline
         ) {
             const it = this.heap.pop();
             if (!it) break;
@@ -117,7 +138,7 @@ export class LodScheduler {
             this.inFlight++;
             started++;
 
-            node.updateLOD(this.camera, false)
+            node.updateLOD(this.camera, false, deadline)
                 .catch(console.error)
                 .finally(() => {
                     this.inFlight--;

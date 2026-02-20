@@ -384,8 +384,13 @@ export class ChunkTree {
      *
      * @param camera Origin camera.
      * @param debugMode Optional debug flag (currently unused; kept for compatibility).
+     * @param deadlineMs Absolute timestamp (performance.now()) beyond which recursion is
+     *   stopped early to respect the frame budget. Defaults to Infinity (no limit).
      */
-    async updateLOD(camera: OriginCamera, debugMode = false): Promise<void> {
+    async updateLOD(camera: OriginCamera, debugMode = false, deadlineMs = Infinity): Promise<void> {
+        // Bail out immediately if the frame budget is already exceeded.
+        if (performance.now() >= deadlineMs) return;
+
         if (this.updating) return;
         this.updating = true;
 
@@ -467,7 +472,9 @@ export class ChunkTree {
                 this.mesh?.setEnabled(false);
 
                 for (const child of children) {
-                    await child.updateLOD(camera, debugMode);
+                    // Stop recursing if the frame budget is exhausted.
+                    if (performance.now() >= deadlineMs) break;
+                    await child.updateLOD(camera, debugMode, deadlineMs);
                 }
                 return;
             }
