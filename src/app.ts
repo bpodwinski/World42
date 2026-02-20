@@ -196,7 +196,7 @@ export class FloatingCameraScene {
         // All distances below are in **simulation units** (= Render-space, since camera is at origin).
         // --------------------
         const SHADOW_MAP_SIZE = 4096;              // shadow map resolution (pixels)
-        const MIN_SHADOW_RANGE = 6000;             // ortho half-size min, sim units (near ground)
+        const MIN_SHADOW_RANGE = 3000;             // ortho half-size min, sim units (near ground)
         const MAX_SHADOW_RANGE = 50000;            // ortho half-size max, sim units (high altitude)
         const RANGE_LERP = 0.12;                   // smoothing factor 0..1 (lower = smoother)
         const DEPTH_HALF_MULT = 2.0;               // half depth extent = shadowRange * DEPTH_HALF_MULT (sim units)
@@ -204,6 +204,7 @@ export class FloatingCameraScene {
         const LIGHT_DIST_ADD = 5000;               // fixed margin, sim units
 
         let shadowRange = 12000;                   // smoothed runtime value, sim units
+        let shadowWorldUnitsPerTexel = (2.0 * shadowRange) / SHADOW_MAP_SIZE;
 
         const shadowLight = new DirectionalLight("terrainShadowLight", new Vector3(0, -1, 0), scene);
         shadowLight.intensity = 0; // ombres uniquement
@@ -294,16 +295,25 @@ export class FloatingCameraScene {
             const distToCenter = camera.distanceToSim(planetCenterWD);
             // Altitude above surface in sim units
             const altitude = Math.max(0, distToCenter - activePlanet.radiusSim);
-            // targetRange in sim units: grows with altitude (2x altitude + 2000 base)
-            const targetRange = Math.min(
-                MAX_SHADOW_RANGE,
-                Math.max(MIN_SHADOW_RANGE, altitude * 2.0 + 2000.0)
-            );
+            // targetRange in sim units: aggressive near ground, then softened at altitude.
+            // Piecewise to keep high precision at low altitude while preserving far stability.
+            const targetRange = Math.min(MAX_SHADOW_RANGE, Math.max(
+                MIN_SHADOW_RANGE,
+                altitude < 1000
+                    ? 2000 + altitude * 3.2
+                    : altitude < 6000
+                        ? 5200 + (altitude - 1000) * 2.0
+                        : 15200 + (altitude - 6000) * 1.1
+            ));
 
-            // Quantize to power-of-2 steps (sim units) to avoid "resolution pumping" near ground
+            // Quantize to adaptive steps (finer near ground) to avoid "resolution pumping".
             function quantizeRange(r: number) {
-                const base = 2000; // sim units
-                const q = base * Math.pow(2, Math.round(Math.log(r / base) / Math.log(2)));
+                const step = r < 6000
+                    ? 500
+                    : r < 14000
+                        ? 1000
+                        : 2000;
+                const q = Math.round(r / step) * step;
                 return Math.min(MAX_SHADOW_RANGE, Math.max(MIN_SHADOW_RANGE, q));
             }
 
@@ -329,6 +339,7 @@ export class FloatingCameraScene {
 
             // (I) Snap stable (réduit shimmer) — CORRECTION SIGNE dx/dy
             const worldUnitsPerTexel = (2.0 * shadowRange) / SHADOW_MAP_SIZE;
+            shadowWorldUnitsPerTexel = worldUnitsPerTexel;
 
             Matrix.LookAtLHToRef(
                 shadowLight.position,
@@ -436,6 +447,7 @@ export class FloatingCameraScene {
             if (nowHud - lastHudUpdate >= HUD_RATE_MS) {
                 const displayMS = Math.round(emaMS * 10) / 10;
                 gui.setSpeed(displayMS);
+                gui.setHint(`shadowRange: ${shadowRange.toFixed(0)} | worldUnitsPerTexel: ${shadowWorldUnitsPerTexel.toFixed(3)}`);
                 lastHudUpdate = nowHud;
             }
         });
