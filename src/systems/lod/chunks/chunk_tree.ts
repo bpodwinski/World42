@@ -469,13 +469,25 @@ export class ChunkTree {
                     return;
                 }
 
-                this.mesh?.setEnabled(false);
-
+                // Keep parent visible until all children were actually processed this frame.
+                // This avoids transient holes/clipping when the frame budget is exhausted
+                // in the middle of a split transition.
+                let processedAllChildren = true;
                 for (const child of children) {
                     // Stop recursing if the frame budget is exhausted.
-                    if (performance.now() >= deadlineMs) break;
+                    if (performance.now() >= deadlineMs) {
+                        processedAllChildren = false;
+                        break;
+                    }
                     await child.updateLOD(camera, debugMode, deadlineMs);
                 }
+
+                if (!processedAllChildren) {
+                    this.mesh?.setEnabled(true);
+                    return;
+                }
+
+                this.mesh?.setEnabled(false);
                 return;
             }
 
