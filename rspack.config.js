@@ -16,7 +16,7 @@ const config = {
     },
     devServer: {
         host: "localhost",
-        port: 3000,
+        port: 19300,
         historyApiFallback: true
     },
     resolve: {
