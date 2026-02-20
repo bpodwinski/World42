@@ -77,6 +77,17 @@ float isLit(float depthMetric, float mapDepth, float receiverBias) {
   }
 }
 
+// Soft compare to reduce staircase aliasing on shadow edges.
+float isLitSoft(float depthMetric, float mapDepth, float receiverBias, float compareWidth) {
+  float delta;
+  if(shadowReverseDepth > 0.5) {
+    delta = (depthMetric + receiverBias) - mapDepth;
+  } else {
+    delta = mapDepth - (depthMetric - receiverBias);
+  }
+  return smoothstep(-compareWidth, compareWidth, delta);
+}
+
 float hash12(vec2 p) {
   vec3 p3 = fract(vec3(p.xyx) * 0.1031);
   p3 += dot(p3, p3.yzx + 33.33);
@@ -115,13 +126,14 @@ float computeShadowPoisson(vec3 worldPosRender, vec3 n, vec3 L) {
   vec2 uvFootprint = fwidth(uvc);
   float footprintTexels = max(uvFootprint.x / max(shadowTexelSize.x, 1e-6), uvFootprint.y / max(shadowTexelSize.y, 1e-6));
   float ndlSoft = max(dot(n, L), 0.0);
-  float radiusTexels = clamp(1.5 + footprintTexels * 0.6 + (1.0 - ndlSoft) * 1.5, 1.5, 6.0);
+  float radiusTexels = clamp(1.25 + footprintTexels * 0.7 + (1.0 - ndlSoft) * 1.8, 1.25, 7.0);
+  float compareWidth = clamp(fwidth(depthMetric) * 2.0 + 0.00035, 0.00035, 0.0035);
 
   float sum = 0.0;
   for (int i = 0; i < 12; i++) {
     vec2 off = (rot * POISSON[i]) * (radiusTexels * shadowTexelSize);
     float mapDepth = textureLod(shadowSampler, uvc + off, 0.0).r;
-    sum += isLit(depthMetric, mapDepth, receiverBias);
+    sum += isLitSoft(depthMetric, mapDepth, receiverBias, compareWidth);
   }
 
   float visibility = sum / 12.0; // 0..1 (lit)

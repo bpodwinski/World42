@@ -199,7 +199,8 @@ export class FloatingCameraScene {
         const MIN_SHADOW_RANGE = 2500;             // ortho half-size min, sim units (near ground, improves local texel density)
         const MAX_SHADOW_RANGE = 50000;            // ortho half-size max, sim units (high altitude)
         const RANGE_LERP = 0.12;                   // smoothing factor 0..1 (lower = smoother)
-        const DEPTH_HALF_MULT = 2.0;               // half depth extent = shadowRange * DEPTH_HALF_MULT (sim units)
+        const DEPTH_HALF_MULT_NEAR = 1.15;         // near ground: tighter depth slab => better depth precision
+        const DEPTH_HALF_MULT_FAR = 2.2;           // high altitude: keep enough depth coverage
         const LIGHT_DIST_MULT = 2.5;               // light distance = shadowRange * LIGHT_DIST_MULT + LIGHT_DIST_ADD
         const LIGHT_DIST_ADD = 5000;               // fixed margin, sim units
 
@@ -321,7 +322,10 @@ export class FloatingCameraScene {
             shadowLight.orthoBottom = -shadowRange;
 
             // (G) Profondeur serrée (half extent)
-            const depthHalf = shadowRange * DEPTH_HALF_MULT;
+            // Interpole le slab de profondeur selon altitude pour limiter la pixelisation près du sol
+            const altT = Math.min(1.0, altitude / 20000.0);
+            const depthHalfMult = DEPTH_HALF_MULT_NEAR + (DEPTH_HALF_MULT_FAR - DEPTH_HALF_MULT_NEAR) * altT;
+            const depthHalf = shadowRange * depthHalfMult;
             shadowLight.shadowMinZ = Math.max(0.1, lightDistance - depthHalf);
             shadowLight.shadowMaxZ = lightDistance + depthHalf;
 
