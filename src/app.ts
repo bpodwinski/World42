@@ -196,10 +196,11 @@ export class FloatingCameraScene {
         // All distances below are in **simulation units** (= Render-space, since camera is at origin).
         // --------------------
         const SHADOW_MAP_SIZE = 4096;              // shadow map resolution (pixels)
-        const MIN_SHADOW_RANGE = 6000;             // ortho half-size min, sim units (near ground)
+        const MIN_SHADOW_RANGE = 2500;             // ortho half-size min, sim units (near ground, improves local texel density)
         const MAX_SHADOW_RANGE = 50000;            // ortho half-size max, sim units (high altitude)
         const RANGE_LERP = 0.12;                   // smoothing factor 0..1 (lower = smoother)
-        const DEPTH_HALF_MULT = 2.0;               // half depth extent = shadowRange * DEPTH_HALF_MULT (sim units)
+        const DEPTH_HALF_MULT_NEAR = 1.15;         // near ground: tighter depth slab => better depth precision
+        const DEPTH_HALF_MULT_FAR = 2.2;           // high altitude: keep enough depth coverage
         const LIGHT_DIST_MULT = 2.5;               // light distance = shadowRange * LIGHT_DIST_MULT + LIGHT_DIST_ADD
         const LIGHT_DIST_ADD = 5000;               // fixed margin, sim units
 
@@ -298,12 +299,12 @@ export class FloatingCameraScene {
             // targetRange in sim units: grows with altitude (2x altitude + 2000 base)
             const targetRange = Math.min(
                 MAX_SHADOW_RANGE,
-                Math.max(MIN_SHADOW_RANGE, altitude * 2.0 + 2000.0)
+                Math.max(MIN_SHADOW_RANGE, altitude * 1.25 + 1500.0)
             );
 
             // Quantize to power-of-2 steps (sim units) to avoid "resolution pumping" near ground
             function quantizeRange(r: number) {
-                const base = 2000; // sim units
+                const base = 500; // sim units
                 const q = base * Math.pow(2, Math.round(Math.log(r / base) / Math.log(2)));
                 return Math.min(MAX_SHADOW_RANGE, Math.max(MIN_SHADOW_RANGE, q));
             }
@@ -321,7 +322,10 @@ export class FloatingCameraScene {
             shadowLight.orthoBottom = -shadowRange;
 
             // (G) Profondeur serrée (half extent)
-            const depthHalf = shadowRange * DEPTH_HALF_MULT;
+            // Interpole le slab de profondeur selon altitude pour limiter la pixelisation près du sol
+            const altT = Math.min(1.0, altitude / 20000.0);
+            const depthHalfMult = DEPTH_HALF_MULT_NEAR + (DEPTH_HALF_MULT_FAR - DEPTH_HALF_MULT_NEAR) * altT;
+            const depthHalf = shadowRange * depthHalfMult;
             shadowLight.shadowMinZ = Math.max(0.1, lightDistance - depthHalf);
             shadowLight.shadowMaxZ = lightDistance + depthHalf;
 
