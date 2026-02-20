@@ -7,6 +7,7 @@ import { buildBaseGeometry, localToWorldDouble, type ChunkBaseGeometry } from ".
 import { computeSSEFactor, distanceToPatchBoundingSphere } from "./chunk_metrics";
 import { evalChunkCulling } from "./chunk_culling_eval";
 import { evalLodDecision } from "./chunk_lod_eval";
+import { isShadowRelevant } from "./shadow_culling";
 
 /**
  * One quadtree node (one terrain patch).
@@ -107,6 +108,12 @@ export class ChunkTree {
     /** Horizon guard-band scale for prefetching (tune for camera speed). */
     public static horizonPrefetchScale = 1.1;
 
+    /** Enable shadow-relevance keep-alive for off-frustum chunks (debug compare before/after). */
+    public static debugShadowCull = false;
+
+    /** Maximum swept distance used by shadow relevance test (sim units). */
+    public static maxShadowCastDistance = 50000;
+
     /** Promise tracking an in-flight mesh request (null if none). */
     private pendingMeshPromise: Promise<void> | null = null;
 
@@ -141,6 +148,9 @@ export class ChunkTree {
 
     /** Temporary local vector for decoding metadata bounds. */
     private _tmpLocal = new Vector3();
+
+    /** Temporary light direction in Render-space (star -> planet). */
+    private _lightDirRenderTmp = new Vector3();
 
     /**
      * Cached SSE factor K for this node.
@@ -417,13 +427,26 @@ export class ChunkTree {
                 centerRenderTmp: this._centerRenderTmp,
             });
 
+            const keepForShadow = this.shouldKeepAsShadowCaster(cull, camWorldDouble, planetCenter, centerWorld, radiusForCull);
+
             if (!cull.inPrefetch) {
+                if (keepForShadow) {
+                    this.requestMeshIfNeeded(camWorldDouble, centerWorld);
+                    this.children?.forEach((c) => c.deactivate());
+                    this.mesh?.setEnabled(true);
+                    return;
+                }
                 this.deactivate();
                 return;
             }
 
             if (!cull.drawStrict) {
                 this.requestMeshIfNeeded(camWorldDouble, centerWorld);
+                if (keepForShadow) {
+                    this.children?.forEach((c) => c.deactivate());
+                    this.mesh?.setEnabled(true);
+                    return;
+                }
                 this.deactivate();
                 return;
             }
@@ -516,6 +539,34 @@ export class ChunkTree {
     private getCenterWorldDouble(): Vector3 {
         this.updateWorldBaseGeometry();
         return this._centerWorldBase;
+    }
+
+    /**
+     * Decide whether an off-frustum chunk should stay alive as potential shadow caster.
+     */
+    private shouldKeepAsShadowCaster(
+        cull: { drawStrict: boolean; frustumStrict: boolean },
+        camWorldDouble: Vector3,
+        planetCenterWorldDouble: Vector3,
+        centerWorldDouble: Vector3,
+        radiusForCull: number
+    ): boolean {
+        if (!ChunkTree.debugShadowCull) return false;
+        if (cull.drawStrict) return false;
+        if (cull.frustumStrict) return false;
+        if (!this.starPosWorldDouble) return false;
+
+        // lightDir = star -> planet (camera subtraction cancels out).
+        planetCenterWorldDouble.subtractToRef(this.starPosWorldDouble, this._lightDirRenderTmp);
+        centerWorldDouble.subtractToRef(camWorldDouble, this._centerRenderTmp);
+
+        return isShadowRelevant(
+            this._centerRenderTmp,
+            radiusForCull,
+            this._lightDirRenderTmp,
+            this._frustumPlanes,
+            ChunkTree.maxShadowCastDistance
+        );
     }
 
     /**
