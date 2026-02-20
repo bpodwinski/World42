@@ -1,4 +1,5 @@
 import { Matrix, Mesh, Plane, Scene, ShaderMaterial, TransformNode, Vector3 } from "@babylonjs/core";
+import type { TerrainShadowContext } from "../../../game_objects/planets/rocky_planet/terrains_shader";
 import type { FloatingEntityInterface, OriginCamera } from "../../../core/camera/camera_manager";
 import type { Bounds, Face } from "../types";
 import { globalWorkerPool } from "../workers/global_worker_pool";
@@ -299,12 +300,26 @@ export class ChunkTree {
     }
 
     /**
+     * Apply main-pass and shadow-caster states to this node and descendants.
+     */
+    private setOwnRenderState(mainPassEnabled: boolean, shadowCasterEnabled: boolean): void {
+        if (!this.mesh) return;
+        const keepEnabled = mainPassEnabled || shadowCasterEnabled;
+        this.mesh.setEnabled(keepEnabled);
+        this.mesh.isVisible = mainPassEnabled;
+    }
+
+    private setRenderStates(mainPassEnabled: boolean, shadowCasterEnabled: boolean): void {
+        this.setOwnRenderState(mainPassEnabled, shadowCasterEnabled);
+        this.children?.forEach((c) => c.setRenderStates(mainPassEnabled, shadowCasterEnabled));
+    }
+
+    /**
      * Disable this node's mesh and all descendant meshes.
      * Does not dispose resources.
      */
     deactivate(): void {
-        if (this.mesh) this.mesh.setEnabled(false);
-        this.children?.forEach((c) => c.deactivate());
+        this.setRenderStates(false, false);
     }
 
     /**
@@ -380,6 +395,61 @@ export class ChunkTree {
     }
 
     /**
+     * Decide if a non-visible chunk should still stay active as a shadow caster.
+     *
+     * Uses a first-pass heuristic: cast a segment from chunk center along `-lightDirection`
+     * and test it against an enlarged frustum sphere around the camera.
+     */
+    private shouldKeepAsShadowCaster(camWorldDouble: Vector3, centerWorld: Vector3, radiusForCull: number): boolean {
+        const shadowCtx = (this.scene.metadata as any)?.terrainShadow as TerrainShadowContext | null | undefined;
+        if (!shadowCtx) return false;
+
+        const lightDir = shadowCtx.lightDirection;
+        const shadowRange = shadowCtx.shadowRange;
+        if (!lightDir || !Number.isFinite(shadowRange) || shadowRange <= 0) return false;
+
+        const lightLenSq = lightDir.lengthSquared();
+        if (!Number.isFinite(lightLenSq) || lightLenSq < 1e-12) return false;
+
+        const invLightLen = 1.0 / Math.sqrt(lightLenSq);
+        const segLen = shadowRange * 2.0;
+
+        const ax = centerWorld.x;
+        const ay = centerWorld.y;
+        const az = centerWorld.z;
+
+        const bx = ax - lightDir.x * invLightLen * segLen;
+        const by = ay - lightDir.y * invLightLen * segLen;
+        const bz = az - lightDir.z * invLightLen * segLen;
+
+        const abx = bx - ax;
+        const aby = by - ay;
+        const abz = bz - az;
+        const apx = camWorldDouble.x - ax;
+        const apy = camWorldDouble.y - ay;
+        const apz = camWorldDouble.z - az;
+
+        const abLenSq = abx * abx + aby * aby + abz * abz;
+        if (abLenSq <= 1e-12) return false;
+
+        const t = Math.max(0, Math.min(1, (apx * abx + apy * aby + apz * abz) / abLenSq));
+        const qx = ax + abx * t;
+        const qy = ay + aby * t;
+        const qz = az + abz * t;
+
+        const dx = camWorldDouble.x - qx;
+        const dy = camWorldDouble.y - qy;
+        const dz = camWorldDouble.z - qz;
+        const distSq = dx * dx + dy * dy + dz * dz;
+
+        const guardBandScale = ChunkTree.frustumPrefetchScale;
+        const frustumSphereRadius = shadowRange * guardBandScale;
+        const threshold = frustumSphereRadius + radiusForCull;
+
+        return distSq <= threshold * threshold;
+    }
+
+    /**
      * Update LOD state for this node and optionally recurse into children.
      *
      * @param camera Origin camera.
@@ -417,14 +487,16 @@ export class ChunkTree {
                 centerRenderTmp: this._centerRenderTmp,
             });
 
+            const castsShadowToView = this.shouldKeepAsShadowCaster(camWorldDouble, centerWorld, radiusForCull);
+
             if (!cull.inPrefetch) {
-                this.deactivate();
+                this.setRenderStates(false, false);
                 return;
             }
 
             if (!cull.drawStrict) {
                 this.requestMeshIfNeeded(camWorldDouble, centerWorld);
-                this.deactivate();
+                this.setRenderStates(false, castsShadowToView);
                 return;
             }
 
@@ -467,8 +539,8 @@ export class ChunkTree {
                 if (!childrenReady) {
                     // Keep transition one-sided while children are still warming up:
                     // parent visible, children hidden (avoids parent/child overlap).
-                    for (const child of children) child.deactivate();
-                    this.mesh?.setEnabled(true);
+                    for (const child of children) child.setRenderStates(false, false);
+                    this.setOwnRenderState(true, true);
                     return;
                 }
 
@@ -488,12 +560,12 @@ export class ChunkTree {
                 if (!processedAllChildren) {
                     // If frame budget was hit mid-split, roll back to parent-only
                     // for this frame to avoid parent+child superposition.
-                    for (const child of children) child.deactivate();
-                    this.mesh?.setEnabled(true);
+                    for (const child of children) child.setRenderStates(false, false);
+                    this.setOwnRenderState(true, true);
                     return;
                 }
 
-                this.mesh?.setEnabled(false);
+                this.setOwnRenderState(false, false);
                 return;
             }
 
@@ -503,7 +575,7 @@ export class ChunkTree {
             }
 
             if (this.children && shouldMerge) this.disposeChildren();
-            this.mesh?.setEnabled(true);
+            this.setRenderStates(true, true);
         } finally {
             this.updating = false;
         }
@@ -586,6 +658,7 @@ export class ChunkTree {
 
                 this.mesh = mesh;
                 this.mesh.setEnabled(false);
+                this.mesh.isVisible = false;
                 this.currentLODLevel = this.level;
             })
             .catch((e) => {

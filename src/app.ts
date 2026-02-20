@@ -219,6 +219,8 @@ export class FloatingCameraScene {
             shadowGen,
             shadowMap: shadowGen.getShadowMapForRendering()!, // IMPORTANT WebGPU
             lightMatrix: new Matrix(),
+            lightDirection: new Vector3(0, -1, 0),
+            shadowRange,
             texelSize: new Vector2(1 / SHADOW_MAP_SIZE, 1 / SHADOW_MAP_SIZE),
             bias: 0.00025,     // bias shader constant
             normalBias: 0.0020, // bias dépendant de l'angle (réduit fortement le shadow acne)
@@ -287,6 +289,7 @@ export class FloatingCameraScene {
             if (lightDir.lengthSquared() < 1e-12) return;
             lightDir.normalize();
             shadowLight.direction.copyFrom(lightDir);
+            shadowCtx.lightDirection.copyFrom(lightDir);
 
             // (D) Centre autour caméra (Render-space)
             camPosRender.copyFrom(camera.position);
@@ -310,6 +313,7 @@ export class FloatingCameraScene {
 
             const targetQ = quantizeRange(targetRange);
             shadowRange += (targetQ - shadowRange) * RANGE_LERP;
+            shadowCtx.shadowRange = shadowRange;
 
             // LIGHT_DISTANCE lié au range (réduit énormément les banding/acne)
             const lightDistance = shadowRange * LIGHT_DIST_MULT + LIGHT_DIST_ADD;
