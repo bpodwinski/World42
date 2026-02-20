@@ -196,7 +196,7 @@ export class FloatingCameraScene {
         // All distances below are in **simulation units** (= Render-space, since camera is at origin).
         // --------------------
         const SHADOW_MAP_SIZE = 4096;              // shadow map resolution (pixels)
-        const MIN_SHADOW_RANGE = 6000;             // ortho half-size min, sim units (near ground)
+        const MIN_SHADOW_RANGE = 2500;             // ortho half-size min, sim units (near ground, improves local texel density)
         const MAX_SHADOW_RANGE = 50000;            // ortho half-size max, sim units (high altitude)
         const RANGE_LERP = 0.12;                   // smoothing factor 0..1 (lower = smoother)
         const DEPTH_HALF_MULT = 2.0;               // half depth extent = shadowRange * DEPTH_HALF_MULT (sim units)
@@ -298,12 +298,12 @@ export class FloatingCameraScene {
             // targetRange in sim units: grows with altitude (2x altitude + 2000 base)
             const targetRange = Math.min(
                 MAX_SHADOW_RANGE,
-                Math.max(MIN_SHADOW_RANGE, altitude * 2.0 + 2000.0)
+                Math.max(MIN_SHADOW_RANGE, altitude * 1.25 + 1500.0)
             );
 
             // Quantize to power-of-2 steps (sim units) to avoid "resolution pumping" near ground
             function quantizeRange(r: number) {
-                const base = 2000; // sim units
+                const base = 500; // sim units
                 const q = base * Math.pow(2, Math.round(Math.log(r / base) / Math.log(2)));
                 return Math.min(MAX_SHADOW_RANGE, Math.max(MIN_SHADOW_RANGE, q));
             }

@@ -112,9 +112,14 @@ float computeShadowPoisson(vec3 worldPosRender, vec3 n, vec3 L) {
   float c = cos(angle);
   mat2 rot = mat2(c, -s, s, c);
 
+  vec2 uvFootprint = fwidth(uvc);
+  float footprintTexels = max(uvFootprint.x / max(shadowTexelSize.x, 1e-6), uvFootprint.y / max(shadowTexelSize.y, 1e-6));
+  float ndlSoft = max(dot(n, L), 0.0);
+  float radiusTexels = clamp(1.5 + footprintTexels * 0.6 + (1.0 - ndlSoft) * 1.5, 1.5, 6.0);
+
   float sum = 0.0;
   for (int i = 0; i < 12; i++) {
-    vec2 off = (rot * POISSON[i]) * (2.0 * shadowTexelSize);
+    vec2 off = (rot * POISSON[i]) * (radiusTexels * shadowTexelSize);
     float mapDepth = textureLod(shadowSampler, uvc + off, 0.0).r;
     sum += isLit(depthMetric, mapDepth, receiverBias);
   }
