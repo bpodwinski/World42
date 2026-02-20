@@ -465,17 +465,35 @@ export class ChunkTree {
                 const childrenReady = children.every((c) => !!c.mesh && c.currentLODLevel === c.level);
 
                 if (!childrenReady) {
+                    // Keep transition one-sided while children are still warming up:
+                    // parent visible, children hidden (avoids parent/child overlap).
+                    for (const child of children) child.deactivate();
+                    this.mesh?.setEnabled(true);
+                    return;
+                }
+
+                // Keep parent visible until all children were actually processed this frame.
+                // This avoids transient holes/clipping when the frame budget is exhausted
+                // in the middle of a split transition.
+                let processedAllChildren = true;
+                for (const child of children) {
+                    // Stop recursing if the frame budget is exhausted.
+                    if (performance.now() >= deadlineMs) {
+                        processedAllChildren = false;
+                        break;
+                    }
+                    await child.updateLOD(camera, debugMode, deadlineMs);
+                }
+
+                if (!processedAllChildren) {
+                    // If frame budget was hit mid-split, roll back to parent-only
+                    // for this frame to avoid parent+child superposition.
+                    for (const child of children) child.deactivate();
                     this.mesh?.setEnabled(true);
                     return;
                 }
 
                 this.mesh?.setEnabled(false);
-
-                for (const child of children) {
-                    // Stop recursing if the frame budget is exhausted.
-                    if (performance.now() >= deadlineMs) break;
-                    await child.updateLOD(camera, debugMode, deadlineMs);
-                }
                 return;
             }
 

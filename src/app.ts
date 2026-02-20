@@ -183,10 +183,10 @@ export class FloatingCameraScene {
         const lod = new LodScheduler(scene, camera, roots, {
             maxConcurrent: 8,
             maxStartsPerFrame: 2,
-            rescoreMs: 200,
+            rescoreMs: 100,
             applyDebugEveryFrame: true,
             // P1: limit LOD update CPU time to 4 ms per frame to avoid render stalls.
-            budgetMs: 20,
+            budgetMs: 30,
         });
 
         lod.start();
