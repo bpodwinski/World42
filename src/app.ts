@@ -186,7 +186,7 @@ export class FloatingCameraScene {
             rescoreMs: 200,
             applyDebugEveryFrame: true,
             // P1: limit LOD update CPU time to 4 ms per frame to avoid render stalls.
-            budgetMs: 4,
+            budgetMs: 20,
         });
 
         lod.start();
