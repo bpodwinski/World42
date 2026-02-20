@@ -465,6 +465,9 @@ export class ChunkTree {
                 const childrenReady = children.every((c) => !!c.mesh && c.currentLODLevel === c.level);
 
                 if (!childrenReady) {
+                    // Keep transition one-sided while children are still warming up:
+                    // parent visible, children hidden (avoids parent/child overlap).
+                    for (const child of children) child.deactivate();
                     this.mesh?.setEnabled(true);
                     return;
                 }
@@ -483,6 +486,9 @@ export class ChunkTree {
                 }
 
                 if (!processedAllChildren) {
+                    // If frame budget was hit mid-split, roll back to parent-only
+                    // for this frame to avoid parent+child superposition.
+                    for (const child of children) child.deactivate();
                     this.mesh?.setEnabled(true);
                     return;
                 }
