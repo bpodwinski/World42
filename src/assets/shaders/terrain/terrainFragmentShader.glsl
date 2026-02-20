@@ -49,6 +49,7 @@ uniform sampler2D shadowSampler;
 uniform mat4 lightMatrix;
 uniform vec2 shadowTexelSize;
 uniform float shadowBias;
+uniform float shadowNormalBias;
 uniform float shadowDarkness;      // 0..1 (1 = ombres noires)
 uniform float shadowReverseDepth;  // 1 si reverse depth buffer
 uniform float shadowNdcHalfZRange; // 1 si WebGPU (z NDC 0..1)
@@ -67,38 +68,58 @@ float shadowDepthMetric(float clipZ) {
 }
 
 // returns 1 if lit, 0 if shadow
-float isLit(float depthMetric, float mapDepth) {
+float isLit(float depthMetric, float mapDepth, float receiverBias) {
   if(shadowReverseDepth > 0.5) {
     // reverse: bigger = closer
-    return (depthMetric + shadowBias >= mapDepth) ? 1.0 : 0.0;
+    return (depthMetric + receiverBias >= mapDepth) ? 1.0 : 0.0;
   } else {
-    return (depthMetric - shadowBias <= mapDepth) ? 1.0 : 0.0;
+    return (depthMetric - receiverBias <= mapDepth) ? 1.0 : 0.0;
   }
 }
 
-float computeShadowPCF3x3(vec3 worldPosRender) {
+float hash12(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
+
+float computeShadowPoisson(vec3 worldPosRender, vec3 n, vec3 L) {
   vec4 p = lightMatrix * vec4(worldPosRender, 1.0);
   vec3 clip = p.xyz / p.w;
 
   vec2 uv = clip.xy * 0.5 + vec2(0.5);
+  float z01 = (shadowNdcHalfZRange > 0.5) ? clip.z : (clip.z * 0.5 + 0.5);
 
   float inX = step(0.0, uv.x) * step(uv.x, 1.0);
   float inY = step(0.0, uv.y) * step(uv.y, 1.0);
-  float inFrustum = inX * inY;
+  float inZ = step(0.0, z01) * step(z01, 1.0);
+  float inFrustum = inX * inY * inZ;
 
   vec2 uvc = clamp(uv, vec2(0.0), vec2(1.0));
   float depthMetric = shadowDepthMetric(clip.z);
+  float ndl = max(dot(n, L), 0.0);
+  float receiverBias = shadowBias + (1.0 - ndl) * shadowNormalBias;
+
+  const vec2 POISSON[12] = vec2[12](
+    vec2(-0.326, -0.406), vec2(-0.840, -0.074), vec2(-0.696,  0.457),
+    vec2(-0.203,  0.621), vec2( 0.962, -0.195), vec2( 0.473, -0.480),
+    vec2( 0.519,  0.767), vec2( 0.185, -0.893), vec2( 0.507,  0.064),
+    vec2( 0.896,  0.412), vec2(-0.322, -0.933), vec2(-0.792, -0.598)
+  );
+
+  float angle = hash12(uvc * 8192.0) * 6.2831853;
+  float s = sin(angle);
+  float c = cos(angle);
+  mat2 rot = mat2(c, -s, s, c);
 
   float sum = 0.0;
-  for(int y = -1; y <= 1; y++) {
-    for(int x = -1; x <= 1; x++) {
-      vec2 off = vec2(float(x), float(y)) * shadowTexelSize;
-      float mapDepth = textureLod(shadowSampler, uvc + off, 0.0).r;
-      sum += isLit(depthMetric, mapDepth);
-    }
+  for (int i = 0; i < 12; i++) {
+    vec2 off = (rot * POISSON[i]) * (2.0 * shadowTexelSize);
+    float mapDepth = textureLod(shadowSampler, uvc + off, 0.0).r;
+    sum += isLit(depthMetric, mapDepth, receiverBias);
   }
 
-  float visibility = sum / 9.0; // 0..1 (lit)
+  float visibility = sum / 12.0; // 0..1 (lit)
   return mix(1.0, visibility, inFrustum); // outside frustum => lit
 }
 
@@ -148,7 +169,7 @@ void main(void) {
   vec3 ambient = vec3(0.01);
   vec3 diffuse = lightColor * (ndl * lightIntensity);
 
-  float vis = computeShadowPCF3x3(vWorldPosRender);                   // 0..1 (lit)
+  float vis = computeShadowPoisson(vWorldPosRender, n, L);            // 0..1 (lit)
   float shadowFactor = mix(1.0 - shadowDarkness, 1.0, vis);           // lit=1, shadow=(1-darkness)
 
   vec3 lighting = ambient + diffuse * shadowFactor;

@@ -14,6 +14,7 @@ export type TerrainShadowContext = {
     lightMatrix: Matrix;     // mis à jour 1x/frame (Render-space)
     texelSize: Vector2;      // 1 / mapSize
     bias: number;            // bias en [0..1]
+    normalBias: number;      // bias orienté normale (limite l'acne à angle rasant)
     darkness: number;        // 0..1 (1 = ombre full)
     reverseDepth: number;    // 0 ou 1
 };
@@ -119,6 +120,7 @@ export class TerrainShader {
                     // Shadows (P0)
                     'lightMatrix',
                     'shadowBias',
+                    'shadowNormalBias',
                     'shadowDarkness',
                     'shadowTexelSize',
                     'shadowReverseDepth',
@@ -162,6 +164,7 @@ export class TerrainShader {
         // Shadows defaults + bind dummy to satisfy WebGPU
         shader.setMatrix('lightMatrix', Matrix.Identity());
         shader.setFloat('shadowBias', 0.0005);
+        shader.setFloat('shadowNormalBias', 0.0015);
         shader.setFloat('shadowDarkness', 1.0);
         shader.setVector2('shadowTexelSize', new Vector2(1.0, 1.0));
         shader.setFloat('shadowReverseDepth', 0.0);
@@ -176,6 +179,7 @@ export class TerrainShader {
             shader.setMatrix("lightMatrix", ctx.lightMatrix);
             shader.setVector2("shadowTexelSize", ctx.texelSize);
             shader.setFloat("shadowBias", ctx.bias);
+            shader.setFloat("shadowNormalBias", ctx.normalBias);
             shader.setFloat("shadowDarkness", ctx.darkness);
 
             const eng = this.scene.getEngine();

@@ -220,7 +220,8 @@ export class FloatingCameraScene {
             shadowMap: shadowGen.getShadowMapForRendering()!, // IMPORTANT WebGPU
             lightMatrix: new Matrix(),
             texelSize: new Vector2(1 / SHADOW_MAP_SIZE, 1 / SHADOW_MAP_SIZE),
-            bias: 0.00025,     // bias shader (plus petit, sinon peter-panning)
+            bias: 0.00025,     // bias shader constant
+            normalBias: 0.0020, // bias dépendant de l'angle (réduit fortement le shadow acne)
             darkness: 1.0,
             reverseDepth: (engine as any).useReverseDepthBuffer ? 1 : 0,
         };
