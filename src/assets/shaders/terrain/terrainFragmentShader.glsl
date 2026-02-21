@@ -59,6 +59,7 @@ uniform float shadowDarknessNear;
 uniform float shadowDarknessFar;
 uniform float shadowSplitDistance;
 uniform float shadowSplitBlend;
+uniform vec3 shadowCameraPositionRender;
 uniform float shadowReverseDepth;  // 1 si reverse depth buffer
 uniform float shadowNdcHalfZRange; // 1 si WebGPU (z NDC 0..1)
 
@@ -186,7 +187,7 @@ void main(void) {
   vec3 ambient = vec3(0.01);
   vec3 diffuse = lightColor * (ndl * lightIntensity);
 
-  float distToCamera = length(vWorldPosRender);
+  float distToCamera = length(vWorldPosRender - shadowCameraPositionRender);
   float visNear = computeShadowPoisson(vWorldPosRender, n, L, lightMatrixNear, shadowTexelSizeNear, shadowBiasNear, shadowNormalBiasNear, 0.0);
   float visFar = computeShadowPoisson(vWorldPosRender, n, L, lightMatrixFar, shadowTexelSizeFar, shadowBiasFar, shadowNormalBiasFar, 1.0);
 

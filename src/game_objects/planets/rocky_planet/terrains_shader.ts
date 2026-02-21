@@ -137,6 +137,7 @@ export class TerrainShader {
                     'shadowTexelSizeFar',
                     'shadowSplitDistance',
                     'shadowSplitBlend',
+                    'shadowCameraPositionRender',
                     'shadowReverseDepth',
                     "shadowNdcHalfZRange",
                 ],
@@ -188,6 +189,7 @@ export class TerrainShader {
         shader.setVector2('shadowTexelSizeFar', new Vector2(1.0, 1.0));
         shader.setFloat('shadowSplitDistance', 10000.0);
         shader.setFloat('shadowSplitBlend', 0.0);
+        shader.setVector3('shadowCameraPositionRender', Vector3.Zero());
         shader.setFloat('shadowReverseDepth', 0.0);
         shader.setTexture('shadowSamplerNear', TerrainShader.getDummyShadow(this.scene));
         shader.setTexture('shadowSamplerFar', TerrainShader.getDummyShadow(this.scene));
@@ -211,6 +213,9 @@ export class TerrainShader {
             shader.setFloat("shadowDarknessFar", ctx.far.darkness);
             shader.setFloat("shadowSplitDistance", ctx.splitDistance);
             shader.setFloat("shadowSplitBlend", ctx.splitBlend);
+
+            const camPos = this.scene.activeCamera?.position ?? Vector3.ZeroReadOnly;
+            shader.setVector3("shadowCameraPositionRender", camPos);
 
             const eng = this.scene.getEngine();
             shader.setFloat("shadowReverseDepth", eng.useReverseDepthBuffer ? 1 : 0);

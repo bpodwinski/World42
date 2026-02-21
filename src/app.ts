@@ -210,9 +210,10 @@ export class FloatingCameraScene {
         const LIGHT_DIST_MULT_FAR = 2.8;
         const LIGHT_DIST_ADD = 5000;
 
-        // Split in render-space distance fragment->camera. Set blend to 0 for hard split validation.
+        // Split in render-space distance fragment->camera.
+        // Start with hard split (0) to validate cascade switching, then increase for soft transition.
         const SHADOW_SPLIT_DIST = 22000;
-        const SHADOW_SPLIT_BLEND = 3500;
+        const SHADOW_SPLIT_BLEND = 0;
 
         let shadowRangeNear = 12000;
         let shadowRangeFar = 60000;
