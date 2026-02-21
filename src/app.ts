@@ -212,7 +212,9 @@ export class FloatingCameraScene {
 
         // Split in render-space distance fragment->camera.
         // Start with hard split (0) to validate cascade switching, then increase for soft transition.
-        const SHADOW_SPLIT_DIST = 22000;
+        const SHADOW_SPLIT_RATIO = 0.72;
+        const SHADOW_SPLIT_MIN = 4500;
+        const SHADOW_SPLIT_MAX = 22000;
         const SHADOW_SPLIT_BLEND = 0;
 
         let shadowRangeNear = 12000;
@@ -252,12 +254,18 @@ export class FloatingCameraScene {
                 normalBias: 0.0028,
                 darkness: 1.0,
             },
-            splitDistance: SHADOW_SPLIT_DIST,
+            splitDistance: 9000,
             splitBlend: SHADOW_SPLIT_BLEND,
             reverseDepth: (engine as any).useReverseDepthBuffer ? 1 : 0,
         };
 
         TerrainShader.setTerrainShadowContext(scene, shadowCtx);
+        console.log('[shadows] init', {
+            near: { map: SHADOW_MAP_SIZE_NEAR, range: shadowRangeNear },
+            far: { map: SHADOW_MAP_SIZE_FAR, range: shadowRangeFar },
+            split: { ratio: SHADOW_SPLIT_RATIO, min: SHADOW_SPLIT_MIN, max: SHADOW_SPLIT_MAX, blend: SHADOW_SPLIT_BLEND },
+            reverseDepth: shadowCtx.reverseDepth,
+        });
 
         // --- Active planet selection (closest to camera in WorldDouble) ---
         let activePlanet: PlanetCDLOD | null = null;
@@ -343,6 +351,11 @@ export class FloatingCameraScene {
 
             shadowRangeNear += (quantizeRange(nearTarget, NEAR_MIN_RANGE, NEAR_MAX_RANGE) - shadowRangeNear) * RANGE_LERP;
             shadowRangeFar += (quantizeRange(farTarget, FAR_MIN_RANGE, FAR_MAX_RANGE) - shadowRangeFar) * RANGE_LERP;
+
+            shadowCtx.splitDistance = Math.min(
+                SHADOW_SPLIT_MAX,
+                Math.max(SHADOW_SPLIT_MIN, shadowRangeNear * SHADOW_SPLIT_RATIO)
+            );
 
             const upRef = Math.abs(Vector3.Dot(lightDir, Vector3.Up())) > 0.98 ? Vector3.Forward() : Vector3.Up();
             Vector3.CrossToRef(upRef, lightDir, lightRight);
