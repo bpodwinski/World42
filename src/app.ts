@@ -215,7 +215,8 @@ export class FloatingCameraScene {
         const SHADOW_SPLIT_RATIO = 0.72;
         const SHADOW_SPLIT_MIN = 4500;
         const SHADOW_SPLIT_MAX = 22000;
-        const SHADOW_SPLIT_BLEND = 0;
+        const SHADOW_SPLIT_BLEND = 3500;
+        const SHADOW_SPLIT_LERP = 0.08;
 
         let shadowRangeNear = 12000;
         let shadowRangeFar = 60000;
@@ -260,6 +261,7 @@ export class FloatingCameraScene {
         };
 
         TerrainShader.setTerrainShadowContext(scene, shadowCtx);
+        let splitDistanceSmoothed = shadowCtx.splitDistance;
         console.log('[shadows] init', {
             near: { map: SHADOW_MAP_SIZE_NEAR, range: shadowRangeNear },
             far: { map: SHADOW_MAP_SIZE_FAR, range: shadowRangeFar },
@@ -352,10 +354,12 @@ export class FloatingCameraScene {
             shadowRangeNear += (quantizeRange(nearTarget, NEAR_MIN_RANGE, NEAR_MAX_RANGE) - shadowRangeNear) * RANGE_LERP;
             shadowRangeFar += (quantizeRange(farTarget, FAR_MIN_RANGE, FAR_MAX_RANGE) - shadowRangeFar) * RANGE_LERP;
 
-            shadowCtx.splitDistance = Math.min(
+            const splitTarget = Math.min(
                 SHADOW_SPLIT_MAX,
                 Math.max(SHADOW_SPLIT_MIN, shadowRangeNear * SHADOW_SPLIT_RATIO)
             );
+            splitDistanceSmoothed += (splitTarget - splitDistanceSmoothed) * SHADOW_SPLIT_LERP;
+            shadowCtx.splitDistance = splitDistanceSmoothed;
 
             const upRef = Math.abs(Vector3.Dot(lightDir, Vector3.Up())) > 0.98 ? Vector3.Forward() : Vector3.Up();
             Vector3.CrossToRef(upRef, lightDir, lightRight);

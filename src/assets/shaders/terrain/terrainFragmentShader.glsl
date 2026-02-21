@@ -95,7 +95,7 @@ float sampleShadowDepth(float cascadeIndex, vec2 uv) {
   return textureLod(shadowSamplerFar, uv, 0.0).r;
 }
 
-float computeShadowPoisson(
+vec2 computeShadowPoisson(
   vec3 worldPosRender,
   vec3 n,
   vec3 L,
@@ -141,7 +141,8 @@ float computeShadowPoisson(
   }
 
   float visibility = sum / 12.0;
-  return mix(1.0, visibility, inFrustum);
+  float vis = mix(1.0, visibility, inFrustum);
+  return vec2(vis, inFrustum);
 }
 
 vec3 triplanarWeights(vec3 n) {
@@ -188,15 +189,19 @@ void main(void) {
   vec3 diffuse = lightColor * (ndl * lightIntensity);
 
   float distToCamera = length(vWorldPosRender - shadowCameraPositionRender);
-  float visNear = computeShadowPoisson(vWorldPosRender, n, L, lightMatrixNear, shadowTexelSizeNear, shadowBiasNear, shadowNormalBiasNear, 0.0);
-  float visFar = computeShadowPoisson(vWorldPosRender, n, L, lightMatrixFar, shadowTexelSizeFar, shadowBiasFar, shadowNormalBiasFar, 1.0);
+  vec2 nearShadow = computeShadowPoisson(vWorldPosRender, n, L, lightMatrixNear, shadowTexelSizeNear, shadowBiasNear, shadowNormalBiasNear, 0.0);
+  vec2 farShadow = computeShadowPoisson(vWorldPosRender, n, L, lightMatrixFar, shadowTexelSizeFar, shadowBiasFar, shadowNormalBiasFar, 1.0);
 
   float hardSelector = step(shadowSplitDistance, distToCamera);
   float blendHalf = shadowSplitBlend * 0.5;
   float blendSelector = smoothstep(shadowSplitDistance - blendHalf, shadowSplitDistance + blendHalf, distToCamera);
   float selector = mix(hardSelector, blendSelector, step(1e-5, shadowSplitBlend));
 
-  float vis = mix(visNear, visFar, selector);
+  // Fallback anti-clipping: if selected cascade is out-of-frustum and the other is valid, switch.
+  if(nearShadow.y < 0.5 && farShadow.y > 0.5) selector = 1.0;
+  if(farShadow.y < 0.5 && nearShadow.y > 0.5) selector = 0.0;
+
+  float vis = mix(nearShadow.x, farShadow.x, selector);
   float darkness = mix(shadowDarknessNear, shadowDarknessFar, selector);
   float shadowFactor = mix(1.0 - darkness, 1.0, vis);
 
