@@ -192,41 +192,82 @@ export class FloatingCameraScene {
         lod.start();
 
         // --------------------
-        // Terrain shadows (1 ShadowGenerator shared around camera)
+        // Terrain shadows (2 cascades: near + mid/far)
         // All distances below are in **simulation units** (= Render-space, since camera is at origin).
         // --------------------
-        const SHADOW_MAP_SIZE = 4096;              // shadow map resolution (pixels)
-        const MIN_SHADOW_RANGE = 6000;             // ortho half-size min, sim units (near ground)
-        const MAX_SHADOW_RANGE = 50000;            // ortho half-size max, sim units (high altitude)
-        const RANGE_LERP = 0.12;                   // smoothing factor 0..1 (lower = smoother)
-        const DEPTH_HALF_MULT = 2.0;               // half depth extent = shadowRange * DEPTH_HALF_MULT (sim units)
-        const LIGHT_DIST_MULT = 2.5;               // light distance = shadowRange * LIGHT_DIST_MULT + LIGHT_DIST_ADD
-        const LIGHT_DIST_ADD = 5000;               // fixed margin, sim units
+        const SHADOW_MAP_SIZE_NEAR = 4096;
+        const SHADOW_MAP_SIZE_FAR = 2048;
 
-        let shadowRange = 12000;                   // smoothed runtime value, sim units
+        const NEAR_MIN_RANGE = 6000;
+        const NEAR_MAX_RANGE = 26000;
+        const FAR_MIN_RANGE = 30000;
+        const FAR_MAX_RANGE = 140000;
 
-        const shadowLight = new DirectionalLight("terrainShadowLight", new Vector3(0, -1, 0), scene);
-        shadowLight.intensity = 0; // ombres uniquement
+        const RANGE_LERP = 0.12;
+        const DEPTH_HALF_MULT_NEAR = 2.0;
+        const DEPTH_HALF_MULT_FAR = 2.8;
+        const LIGHT_DIST_MULT_NEAR = 2.5;
+        const LIGHT_DIST_MULT_FAR = 2.8;
+        const LIGHT_DIST_ADD = 5000;
 
-        const shadowGen = new ShadowGenerator(SHADOW_MAP_SIZE, shadowLight, true);
+        // Split in render-space distance fragment->camera.
+        // Start with hard split (0) to validate cascade switching, then increase for soft transition.
+        const SHADOW_SPLIT_RATIO = 0.72;
+        const SHADOW_SPLIT_MIN = 4500;
+        const SHADOW_SPLIT_MAX = 22000;
+        const SHADOW_SPLIT_BLEND = 3500;
+        const SHADOW_SPLIT_LERP = 0.08;
 
-        // Biais côté génération de shadow map (anti-acne)
-        shadowGen.bias = 0.0015;
-        shadowGen.normalBias = 0.6;
+        let shadowRangeNear = 12000;
+        let shadowRangeFar = 60000;
 
-        // Contexte partagé lu par TerrainShader.onBindObservable
+        const shadowLightNear = new DirectionalLight("terrainShadowLightNear", new Vector3(0, -1, 0), scene);
+        shadowLightNear.intensity = 0;
+
+        const shadowLightFar = new DirectionalLight("terrainShadowLightFar", new Vector3(0, -1, 0), scene);
+        shadowLightFar.intensity = 0;
+
+        const shadowGenNear = new ShadowGenerator(SHADOW_MAP_SIZE_NEAR, shadowLightNear, true);
+        const shadowGenFar = new ShadowGenerator(SHADOW_MAP_SIZE_FAR, shadowLightFar, true);
+
+        // Biais côté génération de shadow map (anti-acne), réglables indépendamment par cascade
+        shadowGenNear.bias = 0.0015;
+        shadowGenNear.normalBias = 0.6;
+        shadowGenFar.bias = 0.0022;
+        shadowGenFar.normalBias = 0.9;
+
         const shadowCtx: TerrainShadowContext = {
-            shadowGen,
-            shadowMap: shadowGen.getShadowMapForRendering()!, // IMPORTANT WebGPU
-            lightMatrix: new Matrix(),
-            texelSize: new Vector2(1 / SHADOW_MAP_SIZE, 1 / SHADOW_MAP_SIZE),
-            bias: 0.00025,     // bias shader constant
-            normalBias: 0.0020, // bias dépendant de l'angle (réduit fortement le shadow acne)
-            darkness: 1.0,
+            near: {
+                shadowGen: shadowGenNear,
+                shadowMap: shadowGenNear.getShadowMapForRendering()!,
+                lightMatrix: new Matrix(),
+                texelSize: new Vector2(1 / SHADOW_MAP_SIZE_NEAR, 1 / SHADOW_MAP_SIZE_NEAR),
+                bias: 0.00025,
+                normalBias: 0.0020,
+                darkness: 1.0,
+            },
+            far: {
+                shadowGen: shadowGenFar,
+                shadowMap: shadowGenFar.getShadowMapForRendering()!,
+                lightMatrix: new Matrix(),
+                texelSize: new Vector2(1 / SHADOW_MAP_SIZE_FAR, 1 / SHADOW_MAP_SIZE_FAR),
+                bias: 0.00035,
+                normalBias: 0.0028,
+                darkness: 1.0,
+            },
+            splitDistance: 9000,
+            splitBlend: SHADOW_SPLIT_BLEND,
             reverseDepth: (engine as any).useReverseDepthBuffer ? 1 : 0,
         };
 
         TerrainShader.setTerrainShadowContext(scene, shadowCtx);
+        let splitDistanceSmoothed = shadowCtx.splitDistance;
+        console.log('[shadows] init', {
+            near: { map: SHADOW_MAP_SIZE_NEAR, range: shadowRangeNear },
+            far: { map: SHADOW_MAP_SIZE_FAR, range: shadowRangeFar },
+            split: { ratio: SHADOW_SPLIT_RATIO, min: SHADOW_SPLIT_MIN, max: SHADOW_SPLIT_MAX, blend: SHADOW_SPLIT_BLEND },
+            reverseDepth: shadowCtx.reverseDepth,
+        });
 
         // --- Active planet selection (closest to camera in WorldDouble) ---
         let activePlanet: PlanetCDLOD | null = null;
@@ -286,79 +327,108 @@ export class FloatingCameraScene {
             lightDir.copyFrom(tmpPlanetRender).subtractInPlace(tmpStarRender);
             if (lightDir.lengthSquared() < 1e-12) return;
             lightDir.normalize();
-            shadowLight.direction.copyFrom(lightDir);
+            shadowLightNear.direction.copyFrom(lightDir);
+            shadowLightFar.direction.copyFrom(lightDir);
 
             // (D) Centre autour caméra (Render-space)
             camPosRender.copyFrom(camera.position);
 
-            // (E) shadowRange dynamique (altitude -> range)
             const distToCenter = camera.distanceToSim(planetCenterWD);
-            // Altitude above surface in sim units
             const altitude = Math.max(0, distToCenter - activePlanet.radiusSim);
-            // targetRange in sim units: grows with altitude (2x altitude + 2000 base)
-            const targetRange = Math.min(
-                MAX_SHADOW_RANGE,
-                Math.max(MIN_SHADOW_RANGE, altitude * 2.0 + 2000.0)
-            );
 
-            // Quantize to power-of-2 steps (sim units) to avoid "resolution pumping" near ground
-            function quantizeRange(r: number) {
-                const base = 2000; // sim units
+            function quantizeRange(r: number, minR: number, maxR: number) {
+                const base = 2000;
                 const q = base * Math.pow(2, Math.round(Math.log(r / base) / Math.log(2)));
-                return Math.min(MAX_SHADOW_RANGE, Math.max(MIN_SHADOW_RANGE, q));
+                return Math.min(maxR, Math.max(minR, q));
             }
 
-            const targetQ = quantizeRange(targetRange);
-            shadowRange += (targetQ - shadowRange) * RANGE_LERP;
-
-            // LIGHT_DISTANCE lié au range (réduit énormément les banding/acne)
-            const lightDistance = shadowRange * LIGHT_DIST_MULT + LIGHT_DIST_ADD;
-
-            // (F) Ortho autour caméra
-            shadowLight.orthoLeft = -shadowRange;
-            shadowLight.orthoRight = shadowRange;
-            shadowLight.orthoTop = shadowRange;
-            shadowLight.orthoBottom = -shadowRange;
-
-            // (G) Profondeur serrée (half extent)
-            const depthHalf = shadowRange * DEPTH_HALF_MULT;
-            shadowLight.shadowMinZ = Math.max(0.1, lightDistance - depthHalf);
-            shadowLight.shadowMaxZ = lightDistance + depthHalf;
-
-            // (H) Position light autour caméra
-            shadowLight.position.copyFrom(camPosRender).subtractInPlace(lightDir.scale(lightDistance));
-
-            // (I) Snap stable (réduit shimmer) — CORRECTION SIGNE dx/dy
-            const worldUnitsPerTexel = (2.0 * shadowRange) / SHADOW_MAP_SIZE;
-
-            Matrix.LookAtLHToRef(
-                shadowLight.position,
-                shadowLight.position.add(shadowLight.direction),
-                Vector3.Up(),
-                lightView
+            const nearTarget = Math.min(
+                NEAR_MAX_RANGE,
+                Math.max(NEAR_MIN_RANGE, altitude * 1.8 + 2000.0)
             );
-            Vector3.TransformCoordinatesToRef(camPosRender, lightView, centerLS);
+            const farTarget = Math.min(
+                FAR_MAX_RANGE,
+                Math.max(FAR_MIN_RANGE, nearTarget * 2.6 + altitude * 1.1)
+            );
 
-            const snappedX = Math.round(centerLS.x / worldUnitsPerTexel) * worldUnitsPerTexel;
-            const snappedY = Math.round(centerLS.y / worldUnitsPerTexel) * worldUnitsPerTexel;
+            shadowRangeNear += (quantizeRange(nearTarget, NEAR_MIN_RANGE, NEAR_MAX_RANGE) - shadowRangeNear) * RANGE_LERP;
+            shadowRangeFar += (quantizeRange(farTarget, FAR_MIN_RANGE, FAR_MAX_RANGE) - shadowRangeFar) * RANGE_LERP;
 
-            // dx/dy = center - snapped (pas l’inverse)
-            const dx = centerLS.x - snappedX;
-            const dy = centerLS.y - snappedY;
+            const splitTarget = Math.min(
+                SHADOW_SPLIT_MAX,
+                Math.max(SHADOW_SPLIT_MIN, shadowRangeNear * SHADOW_SPLIT_RATIO)
+            );
+            splitDistanceSmoothed += (splitTarget - splitDistanceSmoothed) * SHADOW_SPLIT_LERP;
+            shadowCtx.splitDistance = splitDistanceSmoothed;
 
-            // axes right/up de la light en world/render-space (robuste si dir ~ up)
             const upRef = Math.abs(Vector3.Dot(lightDir, Vector3.Up())) > 0.98 ? Vector3.Forward() : Vector3.Up();
             Vector3.CrossToRef(upRef, lightDir, lightRight);
             lightRight.normalize();
             Vector3.CrossToRef(lightDir, lightRight, lightUp);
             lightUp.normalize();
 
-            // déplacer la light dans son plan ortho
-            shadowLight.position.addInPlace(lightRight.scale(dx));
-            shadowLight.position.addInPlace(lightUp.scale(dy));
+            function updateShadowCascade(
+                light: DirectionalLight,
+                generator: ShadowGenerator,
+                range: number,
+                mapSize: number,
+                depthHalfMult: number,
+                lightDistMult: number,
+                outMatrix: Matrix
+            ) {
+                const lightDistance = range * lightDistMult + LIGHT_DIST_ADD;
 
-            // (J) Push lightMatrix finale (après position + snap)
-            shadowCtx.lightMatrix.copyFrom(shadowGen.getTransformMatrix());
+                light.orthoLeft = -range;
+                light.orthoRight = range;
+                light.orthoTop = range;
+                light.orthoBottom = -range;
+
+                const depthHalf = range * depthHalfMult;
+                light.shadowMinZ = Math.max(0.1, lightDistance - depthHalf);
+                light.shadowMaxZ = lightDistance + depthHalf;
+
+                light.position.copyFrom(camPosRender).subtractInPlace(lightDir.scale(lightDistance));
+
+                const worldUnitsPerTexel = (2.0 * range) / mapSize;
+                Matrix.LookAtLHToRef(
+                    light.position,
+                    light.position.add(light.direction),
+                    Vector3.Up(),
+                    lightView
+                );
+                Vector3.TransformCoordinatesToRef(camPosRender, lightView, centerLS);
+
+                const snappedX = Math.round(centerLS.x / worldUnitsPerTexel) * worldUnitsPerTexel;
+                const snappedY = Math.round(centerLS.y / worldUnitsPerTexel) * worldUnitsPerTexel;
+
+                const dx = centerLS.x - snappedX;
+                const dy = centerLS.y - snappedY;
+
+                light.position.addInPlace(lightRight.scale(dx));
+                light.position.addInPlace(lightUp.scale(dy));
+
+                outMatrix.copyFrom(generator.getTransformMatrix());
+            }
+
+            updateShadowCascade(
+                shadowLightNear,
+                shadowGenNear,
+                shadowRangeNear,
+                SHADOW_MAP_SIZE_NEAR,
+                DEPTH_HALF_MULT_NEAR,
+                LIGHT_DIST_MULT_NEAR,
+                shadowCtx.near.lightMatrix
+            );
+
+            updateShadowCascade(
+                shadowLightFar,
+                shadowGenFar,
+                shadowRangeFar,
+                SHADOW_MAP_SIZE_FAR,
+                DEPTH_HALF_MULT_FAR,
+                LIGHT_DIST_MULT_FAR,
+                shadowCtx.far.lightMatrix
+            );
         });
 
         const stars: StarGlowSource[] = [];

@@ -193,9 +193,11 @@ export class ChunkForge {
         const shadowCtx = (this.scene.metadata as any)?.terrainShadow as TerrainShadowContext | null | undefined;
         if (shadowCtx) {
             terrainMesh.receiveShadows = true;
-            shadowCtx.shadowGen.addShadowCaster(terrainMesh);
+            shadowCtx.near.shadowGen.addShadowCaster(terrainMesh);
+            shadowCtx.far.shadowGen.addShadowCaster(terrainMesh);
             terrainMesh.onDisposeObservable.add(() => {
-                shadowCtx.shadowGen.removeShadowCaster(terrainMesh, true);
+                shadowCtx.near.shadowGen.removeShadowCaster(terrainMesh, true);
+                shadowCtx.far.shadowGen.removeShadowCaster(terrainMesh, true);
             });
         }
 
