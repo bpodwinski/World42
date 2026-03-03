@@ -1,0 +1,4 @@
+interface:
+  display_name: "World42 Origin Camera"
+  short_description: "Audit and evolve floating-origin camera flow"
+  default_prompt: "Use $world42-origin-camera to analyze OriginCamera contracts, trace global integrations, and apply safe floating-origin camera changes in World42."
