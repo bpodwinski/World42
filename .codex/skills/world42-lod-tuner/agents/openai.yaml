@@ -1,0 +1,4 @@
+interface:
+  display_name: "World42 LOD Tuner"
+  short_description: "Tune CDLOD stability and frame budgets"
+  default_prompt: "Use $world42-lod-tuner to profile LOD churn, tune split/merge thresholds, and apply safe scheduler budgets."
