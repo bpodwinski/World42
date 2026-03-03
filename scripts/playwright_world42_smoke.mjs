@@ -1,4 +1,6 @@
 import { spawn } from 'node:child_process';
+import { existsSync, readdirSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import process from 'node:process';
 
 const defaultPort =
@@ -6,7 +8,10 @@ const defaultPort =
 let url = process.env.PW_URL || `http://localhost:${defaultPort}/`;
 const headed = process.env.PW_HEADED === '1';
 const session = process.env.PW_SESSION || `world42-smoke-${Date.now()}`;
+const runId = process.env.PW_RUN_ID || `world42-smoke-${Date.now()}`;
 const autoServe = process.env.PW_AUTO_SERVE !== '0';
+const runDir = join(process.cwd(), 'output', 'playwright', runId);
+const localPlaywrightCacheDir = join(process.cwd(), '.playwright-cli');
 
 const runPw = (args) =>
     new Promise((resolve, reject) => {
@@ -16,6 +21,7 @@ const runPw = (args) =>
             env: {
                 ...process.env,
                 PW_SESSION: session,
+                PW_RUN_ID: runId,
             },
         });
 
@@ -33,6 +39,43 @@ const runPw = (args) =>
     });
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function listFilesRecursively(rootDir) {
+    const result = [];
+    if (!existsSync(rootDir)) return result;
+
+    const walk = (dir, base = '') => {
+        const entries = readdirSync(dir, { withFileTypes: true });
+        for (const entry of entries) {
+            const rel = base ? `${base}/${entry.name}` : entry.name;
+            const full = join(dir, entry.name);
+            if (entry.isDirectory()) walk(full, rel);
+            else if (entry.isFile()) result.push(rel);
+        }
+    };
+
+    walk(rootDir);
+    return result.sort();
+}
+
+function assertSmokeArtifacts() {
+    const files = listFilesRecursively(runDir);
+    const png = files.filter((f) => f.toLowerCase().endsWith('.png'));
+    const snapshots = files.filter((f) => {
+        const lower = f.toLowerCase();
+        return lower.endsWith('.yml') || lower.endsWith('.yaml');
+    });
+
+    if (png.length === 0 || snapshots.length === 0) {
+        throw new Error(
+            `missing smoke artifacts in ${runDir} (png=${png.length}, snapshots=${snapshots.length})`
+        );
+    }
+
+    console.log(`[pw-smoke] artifacts=${runDir}`);
+    console.log(`[pw-smoke] screenshot=${png[0]}`);
+    console.log(`[pw-smoke] snapshot=${snapshots[0]}`);
+}
 
 async function isReachable(target) {
     const controller = new AbortController();
@@ -99,6 +142,9 @@ function startDevServer() {
 async function main() {
     let devServer = null;
 
+    // Ensure smoke artifacts reflect this run only.
+    rmSync(localPlaywrightCacheDir, { recursive: true, force: true });
+
     if (!(await isReachable(url)) && autoServe) {
         console.log(`[pw-smoke] ${url} not reachable, starting dev server...`);
         devServer = await startDevServer();
@@ -107,12 +153,14 @@ async function main() {
     }
 
     console.log(`[pw-smoke] session=${session}`);
+    console.log(`[pw-smoke] runId=${runId}`);
     console.log(`[pw-smoke] url=${url}`);
 
     try {
         await runPw(['open', url, ...(headed ? ['--headed'] : [])]);
         await runPw(['snapshot']);
         await runPw(['screenshot']);
+        assertSmokeArtifacts();
         console.log('[pw-smoke] completed: open + snapshot + screenshot');
     } finally {
         // Best effort cleanup for this session.

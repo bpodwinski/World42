@@ -29,6 +29,18 @@
 - Place tests as `*.test.ts` near source files (example: `src/core/scale/scale_manager.test.ts`).
 - Add unit tests for bug fixes and for logic-heavy systems (LOD scheduling, chunk evaluation, scale conversions).
 
+## AI Playwright Validation Policy (Mandatory)
+- Every AI agent task that modifies repository files must run `npm run pw:validate` before considering the task complete.
+- Validation depth is smoke visual and blocking: open app, capture snapshot, capture screenshot.
+- If Playwright validation fails, the task is not validated and must not be reported as done.
+- Validation should auto-start the local dev server when target URL is unreachable (`PW_AUTO_SERVE=1` default behavior).
+- Validation artifacts must be kept under `output/playwright/` and reported in the final task summary.
+- Minimum reporting fields in agent final response:
+  - command executed (`npm run pw:validate`)
+  - validation status (pass/fail)
+  - tested URL
+  - artifact directory path (`output/playwright/<runId>`)
+
 ## Commit & Pull Request Guidelines
 - Follow the repository's style: concise, imperative messages, usually Conventional Commit prefixes (`feat:`, `fix:`, `docs:`).
 - Keep commits focused by concern (rendering, LOD, tooling, docs).

@@ -121,6 +121,9 @@ npm run pw:list
 
 # one-shot smoke check for AI debugging
 npm run pw:world42:smoke
+
+# standard validation command for AI agents (blocking)
+npm run pw:validate
 ```
 
 Notes:
@@ -129,4 +132,4 @@ Notes:
 - `npm run pw:open` auto-starts a local dev server when the target URL is unreachable.
 - Run smoke in headed mode with `PW_HEADED=1 npm run pw:world42:smoke`.
 - Smoke auto-starts a dev server if URL is unreachable (`PW_AUTO_SERVE=0` to disable).
-- Artifacts are stored under `output/playwright/`.
+- Validation artifacts are exported per run under `output/playwright/<runId>/`.
