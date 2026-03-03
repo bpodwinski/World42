@@ -13,6 +13,7 @@
         },
         "Mercury": {
           "type": "planet",
+          "lod_algorithm": "cbt",
           "position_km": [57910000, 0, 0],
           "diameter_km": 4879,
           "rotation_period_days": 58.6
@@ -93,6 +94,7 @@
         },
         "Proxima_b": {
           "type": "planet",
+          "lod_algorithm": "cbt",
           "position_km": [1900007253000, 0, 0],
           "diameter_km": 12742,
           "rotation_period_days": 11.2

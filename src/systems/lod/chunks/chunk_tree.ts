@@ -207,10 +207,10 @@ export class ChunkTree {
         starPosWorldDouble: Vector3 | null,
         starColor: Vector3,
         starIntensity: number,
-        wireframe = false,
+        wireframe = true,
         boundingBox = false,
-        frustumCullingEnabled = true,
-        backsideCullingEnabled = true,
+        frustumCullingEnabled = false,
+        backsideCullingEnabled = false,
         debugLOD = false,
         chunkForge?: ChunkForge
     ) {

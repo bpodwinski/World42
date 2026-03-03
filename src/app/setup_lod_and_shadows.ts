@@ -9,19 +9,32 @@ import {
     WebGPUEngine,
 } from '@babylonjs/core';
 import { OriginCamera } from '../core/camera/camera_manager';
-import { attachStarRayMarchingPostProcess, type StarGlowSource } from '../core/render/star_raymarch_postprocess';
 import { DisposableRegistry } from '../core/lifecycle/disposable_registry';
+import { attachStarRayMarchingPostProcess, type StarGlowSource } from '../core/render/star_raymarch_postprocess';
 import {
+    createCBTForSystem,
     createCDLODForSystem,
     type LoadedSystem,
+    type PlanetCBT,
     type PlanetCDLOD,
 } from '../game_world/stellar_system/stellar_catalog_loader';
 import { TerrainShader, type TerrainShadowContext } from '../game_objects/planets/rocky_planet/terrains_shader';
+import { CbtScheduler } from '../systems/lod/cbt/cbt_scheduler';
 import { LodScheduler } from '../systems/lod/lod_scheduler';
 
+export type LodController = {
+    resetNow: () => void;
+};
+
 export type LodSetupResult = {
-    lod: LodScheduler;
+    lod: LodController;
     refreshActivePlanetSelection: () => void;
+};
+
+type PlanetShadowSource = {
+    entity: PlanetCDLOD['entity'] | PlanetCBT['entity'];
+    radiusSim: number;
+    starPosWorldDouble: Vector3 | null;
 };
 
 export function setupLodAndShadows(
@@ -32,6 +45,7 @@ export function setupLodAndShadows(
     disposables: DisposableRegistry
 ): LodSetupResult {
     const mergedCDLOD = new Map<string, PlanetCDLOD>();
+    const mergedCBT = new Map<string, PlanetCBT>();
 
     for (const system of loadedSystems.values()) {
         const cdlod = createCDLODForSystem(scene, camera, system, {
@@ -42,18 +56,62 @@ export function setupLodAndShadows(
         for (const [name, planet] of cdlod.entries()) {
             mergedCDLOD.set(`${system.systemId}:${name}`, planet);
         }
+
+        const cbt = createCBTForSystem(scene, camera, system, {
+            maxDepth: 9,
+            maxSplitsPerFrame: 12,
+            splitThresholdPx2: 850,
+            splitHysteresis: 0.75,
+        });
+
+        for (const [name, planet] of cbt.entries()) {
+            mergedCBT.set(`${system.systemId}:${name}`, planet);
+        }
     }
 
     const roots = Array.from(mergedCDLOD.values()).flatMap((planet) => planet.chunks);
-    const lod = new LodScheduler(scene, camera, roots, {
-        maxConcurrent: 8,
-        maxStartsPerFrame: 2,
-        rescoreMs: 100,
-        applyDebugEveryFrame: true,
-        budgetMs: 30,
+    const cdlodScheduler =
+        roots.length > 0
+            ? new LodScheduler(scene, camera, roots, {
+                maxConcurrent: 8,
+                maxStartsPerFrame: 2,
+                rescoreMs: 100,
+                applyDebugEveryFrame: true,
+                budgetMs: 30,
+            })
+            : null;
+    cdlodScheduler?.start();
+    disposables.add(() => cdlodScheduler?.stop());
+
+    const cbtPlanets = Array.from(mergedCBT.values()).map((planet) => planet.runtime);
+    const cbtScheduler = new CbtScheduler(scene, camera, cbtPlanets, {
+        budgetMs: 2,
     });
-    lod.start();
-    disposables.add(() => lod.stop());
+    cbtScheduler.start();
+    disposables.add(() => cbtScheduler.dispose());
+
+    const lod: LodController = {
+        resetNow: () => {
+            cdlodScheduler?.resetNow();
+            cbtScheduler.resetNow();
+        },
+    };
+
+    const mergedShadowPlanets = new Map<string, PlanetShadowSource>();
+    for (const [key, planet] of mergedCDLOD.entries()) {
+        mergedShadowPlanets.set(key, {
+            entity: planet.entity,
+            radiusSim: planet.radiusSim,
+            starPosWorldDouble: planet.chunks[0]?.starPosWorldDouble ?? null,
+        });
+    }
+    for (const [key, planet] of mergedCBT.entries()) {
+        mergedShadowPlanets.set(key, {
+            entity: planet.entity,
+            radiusSim: planet.radiusSim,
+            starPosWorldDouble: planet.starPosWorldDouble,
+        });
+    }
 
     const NEAR_SHADOW_MAP_SIZE = 4096;
     const FAR_SHADOW_MAP_SIZE = 4096;
@@ -110,15 +168,15 @@ export function setupLodAndShadows(
     TerrainShader.setTerrainShadowContext(scene, shadowCtx);
     disposables.add(() => TerrainShader.setTerrainShadowContext(scene, null));
 
-    let activePlanet: PlanetCDLOD | null = null;
+    let activePlanet: PlanetShadowSource | null = null;
     let lastPickMs = 0;
     const PICK_MS = 250;
 
     function pickActivePlanetNow(): void {
-        let best: PlanetCDLOD | null = null;
+        let best: PlanetShadowSource | null = null;
         let bestDistance = Number.POSITIVE_INFINITY;
 
-        for (const planet of mergedCDLOD.values()) {
+        for (const planet of mergedShadowPlanets.values()) {
             const distance = camera.distanceToSim(planet.entity.doublepos);
             if (distance < bestDistance) {
                 best = planet;
@@ -183,7 +241,7 @@ export function setupLodAndShadows(
         }
         if (!activePlanet) return;
 
-        const starPosWorldDouble = activePlanet.chunks[0]?.starPosWorldDouble;
+        const starPosWorldDouble = activePlanet.starPosWorldDouble;
         if (!starPosWorldDouble) return;
 
         const camWorld = camera.doublepos;

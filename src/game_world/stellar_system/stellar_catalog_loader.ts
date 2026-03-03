@@ -11,6 +11,7 @@ import { FloatingEntity, OriginCamera } from "../../core/camera/camera_manager";
 import { ScaleManager } from "../../core/scale/scale_manager";
 import { TextureManager } from "../../core/io/texture_manager";
 import { ChunkTree } from "../../systems/lod/chunks/chunk_tree";
+import { CbtPlanet } from "../../systems/lod/cbt/cbt_scheduler";
 import type { Face } from "../../systems/lod/types";
 import {
     normalizeCatalogJSON as normalizeCatalogJSONFromSource,
@@ -24,11 +25,14 @@ export type StarJSON = {
     intensity?: number;
 };
 
+export type LodAlgorithm = "cdlod" | "cbt";
+
 export type BodyJSON = {
     type: string;
     position_km: [number, number, number];
     diameter_km: number;
     rotation_period_days: number | null;
+    lod_algorithm?: LodAlgorithm;
     star?: StarJSON; // ✅ NEW
 };
 
@@ -62,6 +66,7 @@ export type StellarCatalogJSON = {
 export type LoadedBody = {
     systemId: string;
     bodyType: string;
+    lodAlgorithm: LodAlgorithm;
     name: string;
 
     /** Pivot in render-space (rotation/tilt), parented under FloatingEntity. */
@@ -103,11 +108,28 @@ export type PlanetCDLOD = {
     resolution: number;
 };
 
+export type PlanetCBT = {
+    entity: FloatingEntity;
+    runtime: CbtPlanet;
+    /** Planet radius in simulation units. */
+    radiusSim: number;
+    /** Star position in WorldDouble used for terrain lighting. */
+    starPosWorldDouble: Vector3 | null;
+};
+
 export type CDLODOptions = {
     maxLevel?: number;
     resolution?: number;
     skip?: (name: string, body: LoadedBody) => boolean;
     faces?: Face[];
+};
+
+export type CBTOptions = {
+    maxDepth?: number;
+    maxSplitsPerFrame?: number;
+    splitThresholdPx2?: number;
+    splitHysteresis?: number;
+    skip?: (name: string, body: LoadedBody) => boolean;
 };
 
 export type LoadSystemOptions = {
@@ -207,6 +229,7 @@ export async function loadStellarSystemFromCatalog(
         bodies.set(name, {
             systemId,
             bodyType: type,
+            lodAlgorithm: data.lod_algorithm ?? "cdlod",
             name,
             node: pivot,
             meshName,
@@ -249,7 +272,8 @@ export function createCDLODForSystem(
         maxLevel = 8,
         resolution = 64,
         faces = ["front", "back", "left", "right", "top", "bottom"],
-        skip = (_name: string, body: LoadedBody) => body.bodyType === "star",
+        skip = (_name: string, body: LoadedBody) =>
+            body.bodyType === "star" || body.lodAlgorithm !== "cdlod",
     } = opts;
 
     // Extra margin for culling bounding sphere to account for terrain relief (10 km -> sim units).
@@ -309,6 +333,73 @@ export function createCDLODForSystem(
         );
 
         out.set(name, { entity: ent, chunks, radiusSim: radius, maxLevel, resolution });
+    }
+
+    return out;
+}
+
+export function createCBTForSystem(
+    scene: Scene,
+    camera: OriginCamera,
+    loaded: LoadedSystem,
+    opts: CBTOptions = {}
+): Map<string, PlanetCBT> {
+    const {
+        maxDepth = 9,
+        maxSplitsPerFrame = 8,
+        splitThresholdPx2 = 900,
+        splitHysteresis = 0.7,
+        skip = (_name: string, body: LoadedBody) =>
+            body.bodyType === "star" || body.lodAlgorithm !== "cbt",
+    } = opts;
+
+    for (const [name, body] of loaded.bodies) {
+        if (!body.entity) {
+            const ent = new FloatingEntity(`ent_${loaded.systemId}_${name}`, scene);
+            ent.parent = loaded.root;
+            ent.doublepos.copyFrom(body.positionWorldDouble);
+            camera.add(ent);
+
+            body.node.parent = ent;
+            body.node.position.set(0, 0, 0);
+            body.entity = ent;
+        }
+    }
+
+    const out = new Map<string, PlanetCBT>();
+    const stars = Array.from(loaded.bodies.values()).filter((b) => b.bodyType === "star");
+
+    for (const [name, body] of loaded.bodies) {
+        if (skip(name, body)) continue;
+
+        const { pos: starPosWorldDouble, color: starColor, intensity: starIntensity, name: starName } =
+            pickNearestStar(body, stars);
+
+        const ent = body.entity!;
+        const runtime = new CbtPlanet(scene, camera, {
+            key: `${loaded.systemId}:${name}`,
+            entity: ent,
+            renderParent: body.node,
+            radiusSim: body.radiusSim,
+            maxDepth,
+            maxSplitsPerFrame,
+            splitThresholdPx2,
+            splitHysteresis,
+            starPosWorldDouble,
+            starColor,
+            starIntensity,
+        });
+
+        console.log(
+            `[light][cbt] ${loaded.systemId}:${name} -> ${starName} color=${starColor.toString()} I=${starIntensity}`
+        );
+
+        out.set(name, {
+            entity: ent,
+            runtime,
+            radiusSim: body.radiusSim,
+            starPosWorldDouble,
+        });
     }
 
     return out;

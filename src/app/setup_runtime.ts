@@ -14,7 +14,7 @@ import { DisposableRegistry } from '../core/lifecycle/disposable_registry';
 import { PostProcess } from '../core/render/postprocess_manager';
 import { ScaleManager } from '../core/scale/scale_manager';
 import type { LoadedBody, LoadedSystem } from '../game_world/stellar_system/stellar_catalog_loader';
-import { LodScheduler } from '../systems/lod/lod_scheduler';
+import type { LodController } from './setup_lod_and_shadows';
 
 export type RuntimeSetupOptions = {
     scene: Scene;
@@ -23,7 +23,7 @@ export type RuntimeSetupOptions = {
     gui: GuiManager;
     spawnBody: LoadedBody;
     loadedSystems: Map<string, LoadedSystem>;
-    lod: LodScheduler;
+    lod: LodController;
     refreshActivePlanetSelection: () => void;
     disposables: DisposableRegistry;
 };
