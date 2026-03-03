@@ -1,0 +1,4 @@
+interface:
+  display_name: "World42 WASM Worker Kernel"
+  short_description: "Keep Rust TS worker kernel contracts aligned"
+  default_prompt: "Use $world42-wasm-worker-kernel to update mesh-kernel protocol, worker payloads, and Rust/TypeScript chunk data compatibility safely."
