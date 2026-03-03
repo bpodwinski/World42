@@ -118,9 +118,15 @@ npm run pw:snapshot
 npm run pw -- click e1
 npm run pw:screenshot
 npm run pw:list
+
+# one-shot smoke check for AI debugging
+npm run pw:world42:smoke
 ```
 
 Notes:
 - Override target URL with `PW_URL` (default: `http://localhost:19000/`).
 - Reuse a browser session with `PW_SESSION=<name>`.
+- `npm run pw:open` auto-starts a local dev server when the target URL is unreachable.
+- Run smoke in headed mode with `PW_HEADED=1 npm run pw:world42:smoke`.
+- Smoke auto-starts a dev server if URL is unreachable (`PW_AUTO_SERVE=0` to disable).
 - Artifacts are stored under `output/playwright/`.

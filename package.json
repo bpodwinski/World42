@@ -2,7 +2,7 @@
   "name": "world42",
   "version": "0.0.5",
   "scripts": {
-    "serve": "rspack serve",
+    "dev": "rspack serve",
     "build": "rspack --mode=production --node-env=production",
     "deploy": "gh-pages -d dist",
     "test": "vitest",
@@ -11,6 +11,7 @@
     "pw:help": "node ./scripts/playwright_cli.mjs --help",
     "pw:list": "node ./scripts/playwright_cli.mjs list",
     "pw:open": "node ./scripts/playwright_open_world42.mjs",
+    "pw:world42:smoke": "node ./scripts/playwright_world42_smoke.mjs",
     "pw:snapshot": "node ./scripts/playwright_cli.mjs snapshot",
     "pw:screenshot": "node ./scripts/playwright_cli.mjs screenshot",
     "pw:trace:start": "node ./scripts/playwright_cli.mjs tracing-start",
