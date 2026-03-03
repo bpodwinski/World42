@@ -1,67 +1,54 @@
-import { Vector3 } from "@babylonjs/core";
-import { OriginCamera } from "./camera_manager";
+import { Vector3 } from '@babylonjs/core';
+import { OriginCamera } from './camera_manager';
 
 type HasDoublePos = { doublepos: Vector3 };
 type HasPosition = { position: Vector3 };
 
+function hasDoublePos(value: unknown): value is HasDoublePos {
+    return !!value && typeof value === 'object' && 'doublepos' in value;
+}
+
+function hasPosition(value: unknown): value is HasPosition {
+    return !!value && typeof value === 'object' && 'position' in value;
+}
+
+function resolveTargetPosition(target: HasDoublePos | HasPosition | Vector3): Vector3 | null {
+    if (target instanceof Vector3) return target;
+    if (hasDoublePos(target)) return target.doublepos;
+    if (hasPosition(target)) return target.position;
+    return null;
+}
+
 /**
- * Teleports the camera to a point above a target entity, aligned along the current direction from the target to the camera, at a given percentage of the planet diameter.
- *
- * @param camera - Floating-origin aware camera (`OriginCamera`). If it exposes `doublepos`/`doubletgt`, they will be used for high precision; otherwise falls back to `position`/`setTarget`.
- * @param target - Destination anchor: `{ doublepos }`, `{ position }`, or a `Vector3`.
- * @param planetDiameter - Planet diameter.
- * @param diameterOffsetPercent - Percentage of the planet diameter to add along the outward direction.
+ * Teleports camera above a target along the current target->camera direction.
  */
 export function teleportToEntity(
     camera: OriginCamera,
     target: HasDoublePos | HasPosition | Vector3,
     planetDiameter: number,
     diameterOffsetPercent: number
-) {
-    // Resolve "world" (high-precision if available) camera position
-    const camPos: Vector3 = (camera as any).doublepos ?? camera.position;
-    let tgtPos: Vector3 | undefined;
-
-    if ((target as HasDoublePos).doublepos) {
-        tgtPos = (target as HasDoublePos).doublepos;
-    } else if ((target as HasPosition).position) {
-        tgtPos = (target as HasPosition).position;
-        console.warn(
-            "[teleportToEntity] target has no `doublepos`; falling back to `.position` (render-space). " +
-            "For floating-origin, prefer a FloatingEntity exposing `.doublepos`."
-        );
-    } else if (target instanceof Vector3) {
-        tgtPos = target;
-    }
-
-    if (!camPos || !tgtPos) {
-        console.error("[teleportToEntity] Camera or target has no valid position.", { camPos, tgtPos, target });
-
+): void {
+    const cameraPos = camera.doublepos;
+    const targetPos = resolveTargetPosition(target);
+    if (!targetPos) {
+        console.error('[teleportToEntity] Invalid target position.', { target });
         return;
     }
 
-    // Direction: planet/target → camera
-    let dir = camPos.subtract(tgtPos);
-    if (dir.lengthSquared() < 1e-12) dir = new Vector3(0, 1, 0); // avoid zero-length vector
-    dir.normalize();
-
-    // Compute altitude factor from percentage (e.g., 5 → 1.05)
-    const diameterOffset = 1 + diameterOffsetPercent / 100;
-
-    // New high-precision camera position
-    const targetDoublePos = tgtPos.add(
-        dir.scale((planetDiameter * 0.5) * diameterOffset)
-    );
-
-    // Apply high-precision position (or fallback to standard position)
-    (camera as any).doublepos?.copyFrom
-        ? (camera as any).doublepos.copyFrom(targetDoublePos)
-        : camera.position.copyFrom(targetDoublePos);
-
-    // Look at the target using high-precision target if available
-    if ((camera as any).doubletgt) {
-        (camera as any).doubletgt.copyFrom(tgtPos);
+    let direction = cameraPos.subtract(targetPos);
+    if (direction.lengthSquared() < 1e-12) {
+        direction = Vector3.Up();
     } else {
-        camera.setTarget(tgtPos);
+        direction.normalize();
     }
+
+    const diameterOffset = 1 + diameterOffsetPercent / 100;
+    const distanceFromCenter = planetDiameter * 0.5 * diameterOffset;
+    const targetCameraPos = targetPos.add(direction.scale(distanceFromCenter));
+
+    camera.doublepos.copyFrom(targetCameraPos);
+    camera.doubletgt.copyFrom(targetPos);
+    const targetRender = new Vector3();
+    camera.toRenderSpace(targetPos, targetRender);
+    camera.setTarget(targetRender);
 }

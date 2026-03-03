@@ -1,6 +1,6 @@
-export const MESH_KERNEL_PROTOCOL = "mesh-kernel/1" as const;
+export const MESH_KERNEL_PROTOCOL = 'mesh-kernel/1' as const;
 
-export type MeshKernelFace = "front" | "back" | "left" | "right" | "top" | "bottom";
+export type MeshKernelFace = 'front' | 'back' | 'left' | 'right' | 'top' | 'bottom';
 
 export type MeshKernelBounds = {
     uMin: number;
@@ -11,7 +11,6 @@ export type MeshKernelBounds = {
 
 export type MeshKernelNoiseParams = {
     seed: number;
-    // (optionnel) pour figer le contrat dès maintenant
     octaves?: number;
     baseFrequency?: number;
     baseAmplitude?: number;
@@ -28,15 +27,10 @@ export type MeshKernelBuildParams = {
     level: number;
     maxLevel: number;
     noise: MeshKernelNoiseParams;
-    /**
-     * "arrays" = number[] (compat max)
-     * "typed"  = Float32Array/Uint32Array (perf + WASM-friendly)
-     */
-    meshFormat?: "arrays" | "typed";
+    meshFormat?: 'arrays' | 'typed';
 };
 
 export type ChunkBoundsInfo = {
-    // Planet-local (origine planète)
     centerLocal: [number, number, number];
     boundingRadius: number;
     minPlanetRadius: number;
@@ -61,25 +55,29 @@ export type ChunkMeshDataTyped = {
 
 export type ChunkMeshData = ChunkMeshDataArrays | ChunkMeshDataTyped;
 
+export type MeshKernelChunkStats = {
+    ms?: number;
+    vertexCount?: number;
+    indexCount?: number;
+};
+
 export type MeshKernelInitRequest = {
     protocol: typeof MESH_KERNEL_PROTOCOL;
-    kind: "init";
+    kind: 'init';
     id: string;
-    payload?: {
-        // futur: wasmUrl, features, etc.
-    };
+    payload?: Record<string, never>;
 };
 
 export type MeshKernelBuildChunkRequest = {
     protocol: typeof MESH_KERNEL_PROTOCOL;
-    kind: "build_chunk";
+    kind: 'build_chunk';
     id: string;
     payload: MeshKernelBuildParams;
 };
 
 export type MeshKernelCancelRequest = {
     protocol: typeof MESH_KERNEL_PROTOCOL;
-    kind: "cancel";
+    kind: 'cancel';
     id: string;
     payload: { cancelId: string };
 };
@@ -91,29 +89,42 @@ export type MeshKernelRequest =
 
 export type MeshKernelReady = {
     protocol: typeof MESH_KERNEL_PROTOCOL;
-    kind: "ready";
+    kind: 'ready';
     id: string;
     payload: {
-        impl: "js" | "wasm";
-        meshFormats: Array<"arrays" | "typed">;
+        impl: 'js' | 'wasm';
+        meshFormats: Array<'arrays' | 'typed'>;
     };
 };
 
 export type MeshKernelChunkResult = {
     protocol: typeof MESH_KERNEL_PROTOCOL;
-    kind: "chunk_result";
-    id: string; // job id
+    kind: 'chunk_result';
+    id: string;
     payload: {
         meshData: ChunkMeshData;
-        stats?: { ms?: number; vertexCount?: number; indexCount?: number };
+        stats?: MeshKernelChunkStats;
     };
+};
+
+export type MeshKernelErrorPayload = {
+    code: string;
+    message: string;
 };
 
 export type MeshKernelError = {
     protocol: typeof MESH_KERNEL_PROTOCOL;
-    kind: "error";
-    id: string; // job id (ou init id)
-    payload: { code: string; message: string };
+    kind: 'error';
+    id: string;
+    payload: MeshKernelErrorPayload;
 };
 
 export type MeshKernelResponse = MeshKernelReady | MeshKernelChunkResult | MeshKernelError;
+
+export type MeshKernelMessage = MeshKernelRequest | MeshKernelResponse;
+
+export function isMeshKernelMessage(message: unknown): message is MeshKernelMessage {
+    if (!message || typeof message !== 'object') return false;
+    const candidate = message as Partial<MeshKernelMessage>;
+    return candidate.protocol === MESH_KERNEL_PROTOCOL && typeof candidate.kind === 'string';
+}

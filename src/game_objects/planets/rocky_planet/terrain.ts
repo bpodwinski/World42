@@ -1,5 +1,6 @@
 import { Scene, Mesh, Vector3, VertexData } from "@babylonjs/core";
 import { Face } from "../../../systems/lod/types";
+import type { ChunkBoundsInfo } from "../../../systems/lod/workers/worker_protocol";
 
 type FloatLike = Float32Array | number[] | ReadonlyArray<number>;
 type IndexLike = Uint16Array | Uint32Array | number[] | ReadonlyArray<number>;
@@ -9,7 +10,7 @@ export type MeshDataLike = {
     normals: FloatLike;
     uvs: FloatLike;
     indices: IndexLike;
-    boundsInfo?: any;
+    boundsInfo?: ChunkBoundsInfo;
 };
 
 function isMutableNumberArray(a: unknown): a is number[] {
@@ -45,10 +46,10 @@ export class Terrain {
         const mesh = new Mesh(`chunk_${face}_${level}`, scene);
 
         const vd = new VertexData();
-        vd.positions = toFloatArray(meshData.positions) as any;
-        vd.normals = toFloatArray(meshData.normals) as any;
-        vd.uvs = toFloatArray(meshData.uvs) as any;
-        vd.indices = toIndexArray(meshData.indices) as any;
+        vd.positions = toFloatArray(meshData.positions);
+        vd.normals = toFloatArray(meshData.normals);
+        vd.uvs = toFloatArray(meshData.uvs);
+        vd.indices = toIndexArray(meshData.indices);
 
         vd.applyToMesh(mesh, false);
 

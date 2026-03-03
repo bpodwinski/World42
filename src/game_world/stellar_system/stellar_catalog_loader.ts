@@ -12,6 +12,10 @@ import { ScaleManager } from "../../core/scale/scale_manager";
 import { TextureManager } from "../../core/io/texture_manager";
 import { ChunkTree } from "../../systems/lod/chunks/chunk_tree";
 import type { Face } from "../../systems/lod/types";
+import {
+    normalizeCatalogJSON as normalizeCatalogJSONFromSource,
+    normalizeSystemJSON,
+} from "./stellar_catalog_normalizer";
 
 /** ---------- Types JSON (catalogue) ---------- */
 export type StarJSON = {
@@ -115,7 +119,7 @@ export type LoadSystemOptions = {
 /** ---------- API ---------- */
 /** Liste des systèmes disponibles (compat ancien format inclus). */
 export function listStellarSystems(jsonSource: unknown): string[] {
-    const cat = normalizeCatalogJSON(jsonSource);
+    const cat = normalizeCatalogJSONFromSource(jsonSource);
     return Object.keys(cat.systems);
 }
 
@@ -152,7 +156,7 @@ export async function loadStellarSystemFromCatalog(
         },
     } = opts;
 
-    const catalog = normalizeCatalogJSON(jsonSource);
+    const catalog = normalizeCatalogJSONFromSource(jsonSource);
     const sys = catalog.systems[systemId];
     if (!sys) {
         throw new Error(`[stellar] unknown systemId="${systemId}". Available: ${Object.keys(catalog.systems).join(", ")}`);
@@ -168,7 +172,7 @@ export async function loadStellarSystemFromCatalog(
     const bodies = new Map<string, LoadedBody>();
 
     for (const [name, data] of Object.entries(bodiesJson)) {
-        const type = canonicalType(data.type);
+        const type = data.type;
         const isStar = type === "star";
 
         const pivot = new TransformNode(`pivot_${systemId}_${name}`, scene);
@@ -310,89 +314,6 @@ export function createCDLODForSystem(
     return out;
 }
 
-/** ---------- Normalisation / compat ---------- */
-function canonicalType(typeRaw: unknown): string {
-    let t = (typeof typeRaw === "string" ? typeRaw : "planet").toLowerCase().trim();
-    if (t === "sun") t = "star";
-    return t;
-}
-
-/**
- * Compat:
- * - Si raw a {systems:{...}} -> catalogue
- * - Sinon -> on considère que raw est un SystemJSON unique -> wrap sous "Sol"
- */
-function normalizeCatalogJSON(raw: unknown): StellarCatalogJSON {
-    // multi-systèmes
-    if (raw && typeof raw === "object" && (raw as any).systems && typeof (raw as any).systems === "object") {
-        const systemsIn = (raw as any).systems as Record<string, any>;
-        const systems: Record<string, StellarSystemJSON> = {};
-
-        for (const [sysId, sysAny] of Object.entries(systemsIn)) {
-            // accepte soit {bodies:{...}} soit directement {...bodies...} (fallback)
-            const bodiesAny = (sysAny && typeof sysAny === "object" && (sysAny as any).bodies)
-                ? (sysAny as any).bodies
-                : sysAny;
-
-            systems[sysId] = {
-                origin_km: Array.isArray((sysAny as any)?.origin_km) ? (sysAny as any).origin_km : undefined,
-                displayName: typeof (sysAny as any)?.displayName === "string" ? (sysAny as any).displayName : undefined,
-                bodies: normalizeSystemJSON(bodiesAny),
-            };
-        }
-
-        const def = typeof (raw as any).default === "string" ? (raw as any).default : undefined;
-        return { systems, default: def };
-    }
-
-    // ancien format: un seul système bodies
-    return {
-        systems: {
-            Sol: { bodies: normalizeSystemJSON(raw) },
-        },
-        default: "Sol",
-    };
-}
-
-function normalizeSystemJSON(raw: unknown): SystemJSON {
-    const out: SystemJSON = {};
-    if (typeof raw !== "object" || raw === null) return out;
-
-    for (const [name, vAny] of Object.entries(raw as Record<string, any>)) {
-        const v = vAny ?? {};
-        const type = canonicalType(v.type ?? v.Type);
-
-        let x = 0, y = 0, z = 0;
-        if (Array.isArray(v.position_km)) [x = 0, y = 0, z = 0] = v.position_km as number[];
-
-        const diameter_km = Number(v.diameter_km ?? v.diameter ?? 0);
-        const rot = v.rotation_period_days;
-        const rotation_period_days = rot === null || rot === undefined ? null : Number(rot);
-
-        // ✅ NEW: star config
-        const starAny = v.star;
-        const star =
-            starAny && typeof starAny === "object"
-                ? {
-                    temperature_k: Number.isFinite(Number(starAny.temperature_k)) ? Number(starAny.temperature_k) : undefined,
-                    intensity: Number.isFinite(Number(starAny.intensity)) ? Number(starAny.intensity) : undefined,
-                    color_rgb: Array.isArray(starAny.color_rgb) && starAny.color_rgb.length === 3
-                        ? [Number(starAny.color_rgb[0]), Number(starAny.color_rgb[1]), Number(starAny.color_rgb[2])] as [number, number, number]
-                        : undefined,
-                }
-                : undefined;
-
-        out[name] = {
-            type,
-            position_km: [x, y, z],
-            diameter_km: Number.isFinite(diameter_km) ? diameter_km : 0,
-            rotation_period_days: Number.isFinite(Number(rotation_period_days)) ? Number(rotation_period_days) : null,
-            star, // ✅ keep
-        };
-    }
-    return out;
-}
-
 /** ---------- Star helpers ---------- */
 function parseStarLight(star?: StarJSON): { color: Vector3; intensity: number } {
     const intensity = Number.isFinite(star?.intensity) ? (star!.intensity as number) : 1.0;
@@ -465,3 +386,4 @@ function pickNearestStar(body: LoadedBody, stars: LoadedBody[]) {
     const light = best.starLight ?? { color: new Vector3(1, 1, 1), intensity: 1.0 };
     return { pos: best.positionWorldDouble, color: light.color, intensity: light.intensity, name: best.name };
 }
+

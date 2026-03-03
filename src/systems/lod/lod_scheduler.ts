@@ -1,4 +1,4 @@
-import type { Scene } from "@babylonjs/core";
+import type { Observer, Scene } from "@babylonjs/core";
 import type { OriginCamera } from "../../core/camera/camera_manager";
 import { ChunkTree } from "./chunks/chunk_tree";
 import { MinHeap } from "./lod_priority_queue";
@@ -20,7 +20,7 @@ export class LodScheduler {
     private heap = new MinHeap<ChunkTree>();
     private stampMap = new WeakMap<ChunkTree, number>();
     private inFlight = 0;
-    private obs: any = null;
+    private obs: Observer<Scene> | null = null;
 
     private maxConcurrent: number;
     private maxStartsPerFrame: number;

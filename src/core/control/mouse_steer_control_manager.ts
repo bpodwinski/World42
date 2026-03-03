@@ -1,6 +1,15 @@
-import { Scene, Vector3, Quaternion, KeyboardEventTypes, AbstractMesh } from "@babylonjs/core";
+import {
+    Scene,
+    Vector3,
+    Quaternion,
+    KeyboardEventTypes,
+    AbstractMesh,
+    type KeyboardInfo,
+    type Observer,
+} from "@babylonjs/core";
 import { OriginCamera } from "../camera/camera_manager";
 import { GuiManager } from "../gui/gui_manager";
+import { DisposableRegistry } from "../lifecycle/disposable_registry";
 
 /**
  * Configuration options for the space flight mouse-steer controller
@@ -85,7 +94,8 @@ export class MouseSteerControlManager {
     private rect?: DOMRect;
 
     private opts: Required<SpaceFlightOpts>;
-    private beforeRenderObserver?: any;
+    private beforeRenderObserver?: Observer<Scene>;
+    private readonly disposables = new DisposableRegistry();
 
     private mouseActiveInWindow = true;
     private lmbDown = false;
@@ -134,7 +144,7 @@ export class MouseSteerControlManager {
         // Disable native pointer inputs for this camera
         this.camera.inputs.clear();
         // (Optional) reliable keyboard focus
-        (this.canvas as any).tabIndex = 1;
+        this.canvas.tabIndex = 1;
         this.canvas.addEventListener("click", () => this.canvas.focus());
 
         this.bindInputs();
@@ -153,7 +163,7 @@ export class MouseSteerControlManager {
         // Copier le delta (NE PAS réutiliser le même vecteur en input/output)
         this._deltaFrame.copyFrom(deltaRender);
 
-        const ell = (collider as any).ellipsoid as Vector3 | undefined;
+        const ell = (collider as AbstractMesh & { ellipsoid?: Vector3 }).ellipsoid;
         const radiusApprox = ell ? Math.max(ell.x, ell.y, ell.z) : 3;
         const maxStep = Math.max(0.25, radiusApprox * 0.25);
 
@@ -231,20 +241,17 @@ export class MouseSteerControlManager {
         const onResize = () => { updateRect(); centerMouse(); };
         const onWindowFocus = () => { this.mouseActiveInWindow = true; };
 
+        const onWindowBlur = () => {
+            this.mouseActiveInWindow = false;
+            this.lmbDown = false;
 
-        const onWindowBlur = (e: FocusEvent) => {
-            if (!(e.relatedTarget as any) && !(e as any).toElement) {
-                this.mouseActiveInWindow = false;
-                this.lmbDown = false;
+            if (this.gui) this.gui.setMouseCrosshairActive(false);
 
-                if (this.gui) this.gui.setMouseCrosshairActive(false);
-
-                centerMouse();
-            }
+            centerMouse();
         };
 
         const onWindowMouseOut = (e: MouseEvent) => {
-            if (!e.relatedTarget && !(e as any).toElement) {
+            if (!e.relatedTarget) {
                 this.mouseActiveInWindow = false;
                 this.lmbDown = false;
                 centerMouse();
@@ -262,22 +269,23 @@ export class MouseSteerControlManager {
             }
         };
 
-        this.canvas.addEventListener("pointerdown", onPointerDown);
-        this.canvas.addEventListener("pointerup", onPointerUp);
-        this.canvas.addEventListener("pointermove", onPointerMove, { passive: true });
-        this.canvas.addEventListener("contextmenu", onContextMenu);
+        this.disposables.addDomListener(this.canvas, "pointerdown", onPointerDown);
+        this.disposables.addDomListener(this.canvas, "pointerup", onPointerUp);
+        this.disposables.addDomListener(this.canvas, "pointermove", onPointerMove, { passive: true });
+        this.disposables.addDomListener(this.canvas, "contextmenu", onContextMenu);
 
-        window.addEventListener("resize", onResize);
-        window.addEventListener("focus", onWindowFocus);
-        window.addEventListener("blur", onWindowBlur);
-        window.addEventListener("mouseout", onWindowMouseOut);
-        document.addEventListener("visibilitychange", onVisibilityChange);
+        this.disposables.addDomListener(window, "resize", onResize);
+        this.disposables.addDomListener(window, "focus", onWindowFocus);
+        this.disposables.addDomListener(window, "blur", onWindowBlur);
+        this.disposables.addDomListener(window, "mouseout", onWindowMouseOut);
+        this.disposables.addDomListener(document, "visibilitychange", onVisibilityChange);
 
         this.rect = this.canvas.getBoundingClientRect();
         centerMouse();
 
         // --- Keyboard ---
-        this.scene.onKeyboardObservable.add(kb => {
+        const keyboardObserver: Observer<KeyboardInfo> | null =
+            this.scene.onKeyboardObservable.add((kb) => {
             if (kb.type !== KeyboardEventTypes.KEYDOWN && kb.type !== KeyboardEventTypes.KEYUP) return;
             const down = kb.type === KeyboardEventTypes.KEYDOWN;
             const k = kb.event.key.toLowerCase();
@@ -295,28 +303,11 @@ export class MouseSteerControlManager {
             if (k === "shift") this.inputs.boost = down ? 1 : 0;
             if (k === "control") this.inputs.brake = down ? 1 : 0;
         });
-
-        (this as any)._listeners = {
-            onPointerDown, onPointerUp, onPointerMove,
-            onContextMenu,
-            onResize, onWindowFocus, onWindowBlur, onWindowMouseOut, onVisibilityChange
-        };
+        this.disposables.addBabylonObserver(this.scene.onKeyboardObservable, keyboardObserver);
     }
 
     private unbindInputs(): void {
-        const L = (this as any)._listeners;
-        if (!L) return;
-
-        this.canvas.removeEventListener("pointerdown", L.onPointerDown);
-        this.canvas.removeEventListener("pointerup", L.onPointerUp);
-        this.canvas.removeEventListener("pointermove", L.onPointerMove);
-        this.canvas.removeEventListener("contextmenu", L.onContextMenu);
-
-        window.removeEventListener("resize", L.onResize);
-        window.removeEventListener("focus", L.onWindowFocus);
-        window.removeEventListener("blur", L.onWindowBlur);
-        window.removeEventListener("mouseout", L.onWindowMouseOut);
-        document.removeEventListener("visibilitychange", L.onVisibilityChange);
+        this.disposables.dispose();
     }
 
     /**

@@ -1,78 +1,114 @@
 /// <reference lib="webworker" />
 
-import type { MeshKernelRequest, MeshKernelResponse, MeshKernelBuildChunkRequest } from "./worker_protocol";
-import { MESH_KERNEL_PROTOCOL } from "./worker_protocol";
+import type {
+    ChunkMeshData,
+    ChunkMeshDataTyped,
+    MeshKernelBuildChunkRequest,
+    MeshKernelRequest,
+    MeshKernelResponse,
+} from './worker_protocol';
+import {
+    MESH_KERNEL_PROTOCOL,
+    isMeshKernelMessage,
+} from './worker_protocol';
+import initWasm, {
+    build_chunk,
+    type InitInput,
+} from '../../../../terrain/pkg/terrain_generator.js';
 
-// IMPORTANT: importer le glue JS, pas le .wasm
-import initWasm, { build_chunk } from "../../../../terrain/pkg/terrain_generator.js";
-
+const workerScope: DedicatedWorkerGlobalScope = self as DedicatedWorkerGlobalScope;
 const PROTOCOL = MESH_KERNEL_PROTOCOL;
 
 let wasmReady: Promise<void> | null = null;
+let currentJobId: string | null = null;
+let cancelCurrent = false;
 
-function ensureWasmReady() {
+function ensureWasmReady(): Promise<void> {
     if (!wasmReady) {
-        const wasmUrl = new URL(
-            "../../../../terrain/pkg/terrain_generator_bg.wasm",
-            import.meta.url
-        );
-        wasmReady = (initWasm as any)(wasmUrl);
+        const wasmUrl = new URL('../../../../terrain/pkg/terrain_generator_bg.wasm', import.meta.url);
+        wasmReady = initWasm(wasmUrl as InitInput).then(() => undefined);
     }
     return wasmReady;
 }
 
-let currentJobId: string | null = null;
-let cancelCurrent = false;
-
-function post(msg: MeshKernelResponse, transfer?: Transferable[]) {
-    (self as any).postMessage(msg, transfer ?? []);
+function post(msg: MeshKernelResponse, transfer?: Transferable[]): void {
+    workerScope.postMessage(msg, transfer ?? []);
 }
 
-(self as any).onmessage = async (event: MessageEvent<MeshKernelRequest | any>) => {
-    const msg = event.data;
-    if (!msg || typeof msg !== "object" || msg.protocol !== PROTOCOL) return;
+function isArrayLikeNumber(value: unknown): value is ArrayLike<number> {
+    if (Array.isArray(value)) return true;
+    return (
+        value instanceof Float32Array ||
+        value instanceof Uint16Array ||
+        value instanceof Uint32Array
+    );
+}
 
-    if (msg.kind === "init") {
+function isChunkMeshData(value: unknown): value is ChunkMeshData {
+    if (!value || typeof value !== 'object') return false;
+    const candidate = value as Partial<ChunkMeshData>;
+    return (
+        isArrayLikeNumber(candidate.positions) &&
+        isArrayLikeNumber(candidate.normals) &&
+        isArrayLikeNumber(candidate.uvs) &&
+        isArrayLikeNumber(candidate.indices)
+    );
+}
+
+function isTypedMeshData(value: ChunkMeshData): value is ChunkMeshDataTyped {
+    return (
+        value.positions instanceof Float32Array &&
+        value.normals instanceof Float32Array &&
+        value.uvs instanceof Float32Array &&
+        (value.indices instanceof Uint16Array || value.indices instanceof Uint32Array)
+    );
+}
+
+workerScope.onmessage = async (event: MessageEvent<unknown>) => {
+    const message = event.data;
+    if (!isMeshKernelMessage(message)) return;
+
+    if (
+        message.kind === 'ready' ||
+        message.kind === 'chunk_result' ||
+        message.kind === 'error'
+    ) {
+        return;
+    }
+
+    const msg: MeshKernelRequest = message;
+    if (msg.kind === 'init') {
         try {
             await ensureWasmReady();
             post({
                 protocol: PROTOCOL,
-                kind: "ready",
+                kind: 'ready',
                 id: msg.id,
-                payload: { impl: "wasm", meshFormats: ["typed", "arrays"] },
+                payload: { impl: 'wasm', meshFormats: ['typed', 'arrays'] },
             });
-        } catch (e: any) {
+        } catch (error) {
+            const message =
+                error instanceof Error ? error.message : String(error);
             post({
                 protocol: PROTOCOL,
-                kind: "error",
+                kind: 'error',
                 id: msg.id,
-                payload: { code: "wasm_init_failed", message: String(e?.message ?? e) },
+                payload: { code: 'wasm_init_failed', message },
             });
         }
         return;
     }
 
-    if (msg.kind === "cancel") {
+    if (msg.kind === 'cancel') {
         const cancelId = msg.payload?.cancelId;
         if (cancelId && currentJobId === cancelId) cancelCurrent = true;
         return;
     }
 
-    if (msg.kind !== "build_chunk") {
-        post({
-            protocol: PROTOCOL,
-            kind: "error",
-            id: msg.id ?? "unknown",
-            payload: { code: "bad_request", message: "Unknown message kind" },
-        });
-        return;
-    }
-
-    const req = msg as MeshKernelBuildChunkRequest;
-    const id = req.id;
-    const p = req.payload;
-
-    const start = performance.now();
+    const request: MeshKernelBuildChunkRequest = msg;
+    const id = request.id;
+    const payload = request.payload;
+    const startedAt = performance.now();
 
     try {
         await ensureWasmReady();
@@ -80,54 +116,49 @@ function post(msg: MeshKernelResponse, transfer?: Transferable[]) {
         currentJobId = id;
         cancelCurrent = false;
 
-        const seed = (p.noise?.seed ?? 1) | 0;
-        const octaves = p.noise?.octaves ?? 8;
-        const baseFrequency = p.noise?.baseFrequency ?? 0.0;
-        const baseAmplitude = p.noise?.baseAmplitude ?? 0.0;
-        const lacunarity = p.noise?.lacunarity ?? 0.0;
-        const persistence = p.noise?.persistence ?? 0.0;
-        const globalAmp = p.noise?.globalTerrainAmplitude ?? 10.0;
-
-        // NOTE: cast any pour ne pas bloquer sur l’arity tant que Rust n’est pas figé
-        const meshData: any = (build_chunk as any)(
-            p.bounds.uMin,
-            p.bounds.uMax,
-            p.bounds.vMin,
-            p.bounds.vMax,
-            p.resolution,
-            p.radius,
-            p.face,
-            //p.level,      // <= ajoute ça (probable arg manquant)
-            seed,
-            octaves,
-            baseFrequency,
-            baseAmplitude,
-            lacunarity,
-            persistence,
-            globalAmp
+        const meshDataRaw = build_chunk(
+            payload.bounds.uMin,
+            payload.bounds.uMax,
+            payload.bounds.vMin,
+            payload.bounds.vMax,
+            payload.resolution,
+            payload.radius,
+            payload.face,
+            payload.noise.seed ?? 1,
+            payload.noise.octaves ?? 8,
+            payload.noise.baseFrequency ?? 0,
+            payload.noise.baseAmplitude ?? 0,
+            payload.noise.lacunarity ?? 0,
+            payload.noise.persistence ?? 0,
+            payload.noise.globalTerrainAmplitude ?? 10
         );
+
+        if (!isChunkMeshData(meshDataRaw)) {
+            throw new Error('Invalid mesh payload produced by WASM.');
+        }
 
         if (cancelCurrent) {
             post({
                 protocol: PROTOCOL,
-                kind: "error",
+                kind: 'error',
                 id,
-                payload: { code: "cancelled", message: "Job cancelled" },
+                payload: { code: 'cancelled', message: 'Job cancelled' },
             });
             return;
         }
 
+        const meshData = meshDataRaw;
         const stats = {
-            ms: performance.now() - start,
+            ms: performance.now() - startedAt,
             vertexCount: (meshData.positions.length / 3) | 0,
-            indexCount: (meshData.indices.length) | 0,
+            indexCount: meshData.indices.length | 0,
         };
 
-        const meshFormat = p.meshFormat ?? "typed";
-        if (meshFormat === "arrays") {
+        const meshFormat = payload.meshFormat ?? 'typed';
+        if (meshFormat === 'arrays') {
             post({
                 protocol: PROTOCOL,
-                kind: "chunk_result",
+                kind: 'chunk_result',
                 id,
                 payload: {
                     meshData: {
@@ -140,18 +171,34 @@ function post(msg: MeshKernelResponse, transfer?: Transferable[]) {
                     stats,
                 },
             });
-        } else {
-            post(
-                { protocol: PROTOCOL, kind: "chunk_result", id, payload: { meshData, stats } },
-                [meshData.positions.buffer, meshData.normals.buffer, meshData.uvs.buffer, meshData.indices.buffer]
-            );
+            return;
         }
-    } catch (e: any) {
+
+        if (!isTypedMeshData(meshData)) {
+            throw new Error('Typed mesh format requested but worker returned arrays.');
+        }
+
+        post(
+            {
+                protocol: PROTOCOL,
+                kind: 'chunk_result',
+                id,
+                payload: { meshData, stats },
+            },
+            [
+                meshData.positions.buffer,
+                meshData.normals.buffer,
+                meshData.uvs.buffer,
+                meshData.indices.buffer,
+            ]
+        );
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
         post({
             protocol: PROTOCOL,
-            kind: "error",
+            kind: 'error',
             id,
-            payload: { code: "exception", message: String(e?.message ?? e) },
+            payload: { code: 'exception', message },
         });
     } finally {
         currentJobId = null;

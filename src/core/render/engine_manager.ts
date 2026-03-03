@@ -56,7 +56,7 @@ export class EngineManager {
         const mode = (process.env.ENGINE || "auto").toLowerCase();
 
         // Quick runtime capability check to avoid throwing on unsupported browsers
-        const hasWebGPU = typeof (navigator as any).gpu !== "undefined";
+        const hasWebGPU = typeof navigator !== "undefined" && "gpu" in navigator;
 
         if (mode === "webgl2") {
             const engine = new WebGL2Engine(canvas, true, {

@@ -1,6 +1,7 @@
 import { Matrix, Mesh, Plane, Scene, ShaderMaterial, TransformNode, Vector3 } from "@babylonjs/core";
 import type { FloatingEntityInterface, OriginCamera } from "../../../core/camera/camera_manager";
 import type { Bounds, Face } from "../types";
+import type { ChunkBoundsInfo } from "../workers/worker_protocol";
 import { globalWorkerPool } from "../workers/global_worker_pool";
 import { ChunkForge } from "./chunk_forge";
 import { buildBaseGeometry, localToWorldDouble, type ChunkBaseGeometry } from "./chunk_geometry";
@@ -360,7 +361,9 @@ export class ChunkTree {
         let centerWorld = this._centerWorldBase;
         let radiusForCull = bsRadiusFallback + ChunkTree.cullReliefMargin;
 
-        const bi = (this.mesh as any)?.metadata?.boundsInfo;
+        const meshWithBoundsInfo =
+            this.mesh as (Mesh & { metadata?: { boundsInfo?: ChunkBoundsInfo } }) | null;
+        const bi = meshWithBoundsInfo?.metadata?.boundsInfo;
         const hasAccurateBounds =
             Array.isArray(bi?.centerLocal) &&
             bi.centerLocal.length === 3 &&

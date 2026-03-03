@@ -1,11 +1,15 @@
 import { Scene, Mesh, Vector3, TransformNode, Matrix, ShaderMaterial } from "@babylonjs/core";
 import { ChunkTree } from "./chunk_tree";
 import { Terrain } from "../../../game_objects/planets/rocky_planet/terrain";
-import { TerrainShader, TerrainShadowContext } from "../../../game_objects/planets/rocky_planet/terrains_shader";
+import { TerrainShader } from "../../../game_objects/planets/rocky_planet/terrains_shader";
 import type { FloatingEntityInterface } from "../../../core/camera/camera_manager";
 import { WorkerPool } from "../workers/worker_pool";
 import type { Bounds, Face } from "../types";
-import type { MeshKernelBuildChunkRequest } from "../workers/worker_protocol";
+import type {
+    ChunkMeshData,
+    MeshKernelBuildChunkRequest,
+    MeshKernelChunkStats,
+} from "../workers/worker_protocol";
 
 /**
  * Enables detailed timings for worker + Babylon mesh/material construction.
@@ -109,7 +113,7 @@ export class ChunkForge {
      * Lighting direction is computed in **WorldDouble** then converted into **planet-local**.
      */
     private buildMesh(
-        meshData: any,
+        meshData: ChunkMeshData,
         params: ChunkGenerationParams,
         cameraWorldDouble: Vector3,
         planetEntity: FloatingEntityInterface,
@@ -190,7 +194,7 @@ export class ChunkForge {
 
         terrainMesh.material = sm;
 
-        const shadowCtx = (this.scene.metadata as any)?.terrainShadow as TerrainShadowContext | null | undefined;
+        const shadowCtx = TerrainShader.getTerrainShadowContext(this.scene);
         if (shadowCtx) {
             terrainMesh.receiveShadows = true;
             shadowCtx.shadowGen.addShadowCaster(terrainMesh);
@@ -269,7 +273,7 @@ export class ChunkForge {
             this.workerPool.enqueueTask({
                 data: job,
                 priority,
-                callback: (meshData: any, stats?: any) => {
+                callback: (meshData: ChunkMeshData, stats?: MeshKernelChunkStats) => {
                     try {
                         const tBuild0 = performance.now();
                         const mesh = this.buildMesh(

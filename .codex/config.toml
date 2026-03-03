@@ -1,0 +1,22 @@
+approval_policy = "on-request"
+model = "gpt-5.3-codex"
+model_reasoning_effort = "high"
+sandbox_mode = "workspace-write"
+web_search = "cached"
+
+[features]
+collaboration_modes = true
+shell_snapshot = true
+undo = true
+
+[windows]
+sandbox = "elevated"
+
+[mcp_servers.github]
+bearer_token_env_var = "GITHUB_PAT_TOKEN"
+url = "https://api.githubcopilot.com/mcp/"
+
+# [mcp_servers.context7]
+# args = ["-y", "@upstash/context7-mcp", "--api-key", "YOUR_API_KEY"]
+# command = "npx"
+# startup_timeout_ms = 20_000
