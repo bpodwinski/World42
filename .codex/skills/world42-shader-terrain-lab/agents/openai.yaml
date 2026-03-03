@@ -1,0 +1,4 @@
+interface:
+  display_name: "World42 Shader Terrain Lab"
+  short_description: "Tune terrain and atmosphere shader pipeline"
+  default_prompt: "Use $world42-shader-terrain-lab to inspect terrain shader uniforms, debug LOD visuals, and safely evolve atmosphere and lighting shading."
