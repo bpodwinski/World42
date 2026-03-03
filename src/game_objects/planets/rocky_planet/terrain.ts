@@ -8,6 +8,7 @@ type IndexLike = Uint16Array | Uint32Array | number[] | ReadonlyArray<number>;
 export type MeshDataLike = {
     positions: FloatLike;
     normals: FloatLike;
+    morphDeltas?: FloatLike;
     uvs: FloatLike;
     indices: IndexLike;
     boundsInfo?: ChunkBoundsInfo;
@@ -44,14 +45,21 @@ export class Terrain {
 
     static createMesh(scene: Scene, meshData: MeshDataLike, face: Face, level: number): Mesh {
         const mesh = new Mesh(`chunk_${face}_${level}`, scene);
+        const positions = toFloatArray(meshData.positions);
+        const positionCount = positions.length / 3;
+        const morphDeltas =
+            meshData.morphDeltas
+                ? toFloatArray(meshData.morphDeltas)
+                : new Float32Array(positionCount * 3);
 
         const vd = new VertexData();
-        vd.positions = toFloatArray(meshData.positions);
+        vd.positions = positions;
         vd.normals = toFloatArray(meshData.normals);
         vd.uvs = toFloatArray(meshData.uvs);
         vd.indices = toIndexArray(meshData.indices);
 
         vd.applyToMesh(mesh, false);
+        mesh.setVerticesData('morphDelta', morphDeltas, false, 3);
 
         return mesh;
     }

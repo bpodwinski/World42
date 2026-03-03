@@ -150,10 +150,10 @@ export class ChunkTree {
     private _lastSseK = 0;
 
     /** Split threshold in pixels (above => split). */
-    public static sseSplitThresholdPx = 5.0;
+    public static sseSplitThresholdPx = 5.5;
 
     /** Merge threshold in pixels (below => merge). */
-    public static sseMergeThresholdPx = 4.0;
+    public static sseMergeThresholdPx = 3.8;
 
     /** Empirical scale factor applied to geometric error. */
     public static geomErrorScale = 0.5;
@@ -437,7 +437,7 @@ export class ChunkTree {
             const dc = Vector3.Distance(camWorldDouble, centerWorld);
             const distanceToPatch = Math.max(0, dc - radiusForCull);
 
-            const { shouldSplit, shouldMerge } = evalLodDecision({
+            const { ssePx, shouldSplit, shouldMerge } = evalLodDecision({
                 cornersWorld: this._cornersWorldBase,
                 distanceToPatch,
                 resolution: this.resolution,
@@ -449,6 +449,7 @@ export class ChunkTree {
                 minDistEpsilon: ChunkTree.minDistEpsilon,
                 sseK: this._lastSseK,
             });
+            const lodMorph = this.computeGeomorphFactor(ssePx);
 
             // Split path (hysteresis preserved).
             if (shouldSplit || (this.children && !shouldMerge)) {
@@ -472,6 +473,7 @@ export class ChunkTree {
                     // parent visible, children hidden (avoids parent/child overlap).
                     for (const child of children) child.deactivate();
                     this.mesh?.setEnabled(true);
+                    this.applyLodMorph(this.mesh, lodMorph);
                     return;
                 }
 
@@ -493,6 +495,7 @@ export class ChunkTree {
                     // for this frame to avoid parent+child superposition.
                     for (const child of children) child.deactivate();
                     this.mesh?.setEnabled(true);
+                    this.applyLodMorph(this.mesh, lodMorph);
                     return;
                 }
 
@@ -507,6 +510,7 @@ export class ChunkTree {
 
             if (this.children && shouldMerge) this.disposeChildren();
             this.mesh?.setEnabled(true);
+            this.applyLodMorph(this.mesh, lodMorph);
         } finally {
             this.updating = false;
         }
@@ -519,6 +523,18 @@ export class ChunkTree {
     private getCenterWorldDouble(): Vector3 {
         this.updateWorldBaseGeometry();
         return this._centerWorldBase;
+    }
+
+    private computeGeomorphFactor(ssePx: number): number {
+        const den = Math.max(1e-6, ChunkTree.sseSplitThresholdPx - ChunkTree.sseMergeThresholdPx);
+        const t = (ChunkTree.sseSplitThresholdPx - ssePx) / den;
+        return Math.max(0, Math.min(1, t));
+    }
+
+    private applyLodMorph(mesh: Mesh | null, morph: number): void {
+        const mat = mesh?.material;
+        if (!(mat instanceof ShaderMaterial)) return;
+        mat.setFloat("lodMorph", morph);
     }
 
     /**

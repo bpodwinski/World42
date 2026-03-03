@@ -55,6 +55,14 @@ fn scale3(a: [f64; 3], s: f64) -> [f64; 3] {
     [a[0] * s, a[1] * s, a[2] * s]
 }
 
+fn lerp3(a: [f64; 3], b: [f64; 3], t: f64) -> [f64; 3] {
+    [
+        a[0] + (b[0] - a[0]) * t,
+        a[1] + (b[1] - a[1]) * t,
+        a[2] + (b[2] - a[2]) * t,
+    ]
+}
+
 fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
     [
         a[1] * b[2] - a[2] * b[1],
@@ -145,6 +153,7 @@ pub fn build_chunk(
 
     let mut positions_f = vec![0f32; vert_count * 3];
     let mut normals_f = vec![0f32; vert_count * 3];
+    let mut morph_deltas_f = vec![0f32; vert_count * 3];
     let mut uvs_f = vec![0f32; vert_count * 2];
     let mut verts = vec![[0.0f64; 3]; vert_count];
 
@@ -209,6 +218,45 @@ pub fn build_chunk(
             let uv_off = idx * 2;
             uvs_f[uv_off] = uu;
             uvs_f[uv_off + 1] = vv;
+        }
+    }
+
+    // Morph target for CDLOD blending: each fine vertex moves toward a coarse grid
+    // sample (parent-like geometry reconstructed from the current patch vertices).
+    for i in 0..=res {
+        for j in 0..=res {
+            let idx = i * (res + 1) + j;
+
+            let i0 = (i / 2) * 2;
+            let j0 = (j / 2) * 2;
+            let i1 = (i0 + 2).min(res);
+            let j1 = (j0 + 2).min(res);
+
+            let fx = if j1 == j0 {
+                0.0
+            } else {
+                (j - j0) as f64 / (j1 - j0) as f64
+            };
+            let fy = if i1 == i0 {
+                0.0
+            } else {
+                (i - i0) as f64 / (i1 - i0) as f64
+            };
+
+            let v00 = verts[i0 * (res + 1) + j0];
+            let v10 = verts[i0 * (res + 1) + j1];
+            let v01 = verts[i1 * (res + 1) + j0];
+            let v11 = verts[i1 * (res + 1) + j1];
+
+            let row0 = lerp3(v00, v10, fx);
+            let row1 = lerp3(v01, v11, fx);
+            let coarse = lerp3(row0, row1, fy);
+            let delta = sub3(coarse, verts[idx]);
+
+            let p_off = idx * 3;
+            morph_deltas_f[p_off] = delta[0] as f32;
+            morph_deltas_f[p_off + 1] = delta[1] as f32;
+            morph_deltas_f[p_off + 2] = delta[2] as f32;
         }
     }
 
@@ -320,6 +368,10 @@ pub fn build_chunk(
         nor_js.copy_from(&normals_f);
         Reflect::set(&out, &"normals".into(), &nor_js)?;
 
+        let morph_js = Float32Array::new_with_length(morph_deltas_f.len() as u32);
+        morph_js.copy_from(&morph_deltas_f);
+        Reflect::set(&out, &"morphDeltas".into(), &morph_js)?;
+
         let uvs_js = Float32Array::new_with_length(uvs_f.len() as u32);
         uvs_js.copy_from(&uvs_f);
         Reflect::set(&out, &"uvs".into(), &uvs_js)?;
@@ -427,6 +479,10 @@ pub fn build_chunk(
         let nor_js = Float32Array::new_with_length(normals_f.len() as u32);
         nor_js.copy_from(&normals_f);
         Reflect::set(&out, &"normals".into(), &nor_js)?;
+
+        let morph_js = Float32Array::new_with_length(morph_deltas_f.len() as u32);
+        morph_js.copy_from(&morph_deltas_f);
+        Reflect::set(&out, &"morphDeltas".into(), &morph_js)?;
 
         let uvs_js = Float32Array::new_with_length(uvs_f.len() as u32);
         uvs_js.copy_from(&uvs_f);

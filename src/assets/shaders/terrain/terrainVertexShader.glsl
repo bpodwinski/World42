@@ -9,6 +9,7 @@ precision highp float;
 //------------------------------------------------------------------------------
 attribute vec3 position;
 attribute vec3 normal;
+attribute vec3 morphDelta;
 attribute vec2 uv;
 
 //------------------------------------------------------------------------------
@@ -17,6 +18,7 @@ attribute vec2 uv;
 uniform mat4 world;
 uniform mat4 worldViewProjection;
 varying vec3 vWorldPosRender;
+uniform float lodMorph;
 
 uniform float amplitude;
 uniform vec3 uPlanetCenter; // (optionnel) planet-local center, souvent (0,0,0)
@@ -32,7 +34,7 @@ varying vec3 vWorldPos;   // render-space (world matrix applied)
 
 void main(void) {
   // Displace in planet-local
-  vec3 displacedPosition = position + normal * amplitude;
+  vec3 displacedPosition = position + morphDelta * lodMorph + normal * amplitude;
 
   // Varyings
   vPosition = displacedPosition;

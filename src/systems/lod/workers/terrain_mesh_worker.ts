@@ -50,6 +50,7 @@ function isChunkMeshData(value: unknown): value is ChunkMeshData {
     return (
         isArrayLikeNumber(candidate.positions) &&
         isArrayLikeNumber(candidate.normals) &&
+        isArrayLikeNumber(candidate.morphDeltas) &&
         isArrayLikeNumber(candidate.uvs) &&
         isArrayLikeNumber(candidate.indices)
     );
@@ -59,6 +60,7 @@ function isTypedMeshData(value: ChunkMeshData): value is ChunkMeshDataTyped {
     return (
         value.positions instanceof Float32Array &&
         value.normals instanceof Float32Array &&
+        value.morphDeltas instanceof Float32Array &&
         value.uvs instanceof Float32Array &&
         (value.indices instanceof Uint16Array || value.indices instanceof Uint32Array)
     );
@@ -165,6 +167,7 @@ workerScope.onmessage = async (event: MessageEvent<unknown>) => {
                         ...meshData,
                         positions: Array.from(meshData.positions),
                         normals: Array.from(meshData.normals),
+                        morphDeltas: Array.from(meshData.morphDeltas),
                         uvs: Array.from(meshData.uvs),
                         indices: Array.from(meshData.indices),
                     },
@@ -188,6 +191,7 @@ workerScope.onmessage = async (event: MessageEvent<unknown>) => {
             [
                 meshData.positions.buffer,
                 meshData.normals.buffer,
+                meshData.morphDeltas.buffer,
                 meshData.uvs.buffer,
                 meshData.indices.buffer,
             ]
