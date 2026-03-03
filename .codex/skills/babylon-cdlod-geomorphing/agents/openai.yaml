@@ -1,0 +1,4 @@
+interface:
+  display_name: "Babylon CDLOD Geomorphing"
+  short_description: "Implement crack-free CDLOD terrain in Babylon.js"
+  default_prompt: "Use $babylon-cdlod-geomorphing to implement or debug crack-free CDLOD terrain with GPU geomorphing in Babylon.js."
