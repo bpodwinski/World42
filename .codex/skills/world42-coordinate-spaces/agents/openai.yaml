@@ -1,0 +1,4 @@
+interface:
+  display_name: "World42 Coordinate Spaces"
+  short_description: "Enforce WorldDouble Render Local boundaries"
+  default_prompt: "Use $world42-coordinate-spaces to audit coordinate-space boundaries and fix unsafe WorldDouble/Render/Local conversions."
