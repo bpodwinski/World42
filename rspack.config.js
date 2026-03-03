@@ -7,6 +7,7 @@ const Dotenv = require('dotenv-webpack');
 
 const devHost = process.env.HOST || 'localhost';
 const devPort = process.env.PORT || 19000;
+const devHot = process.env.DEV_HOT === '1';
 
 const config = {
     entry: {
@@ -20,7 +21,13 @@ const config = {
     devServer: {
         host: devHost,
         port: devPort,
-        historyApiFallback: true
+        historyApiFallback: true,
+        hot: devHot,
+        liveReload: false,
+        client: {
+            reconnect: false,
+            overlay: false,
+        },
     },
     resolve: {
         extensions: ['.ts', '.js']

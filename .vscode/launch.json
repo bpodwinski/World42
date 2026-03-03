@@ -13,7 +13,8 @@
       "autoAttachChildProcesses": false,
       "env": {
         "NODE_ENV": "development",
-        "PORT": "19000"
+        "PORT": "0",
+        "DEV_HOT": "0"
       },
       "preLaunchTask": "wasm: build (dev)"
     }
