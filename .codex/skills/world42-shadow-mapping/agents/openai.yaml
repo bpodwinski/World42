@@ -1,0 +1,4 @@
+﻿interface:
+  display_name: "World42 Shadow Mapping"
+  short_description: "Tune terrain near/far shadow cascades"
+  default_prompt: "Use $world42-shadow-mapping to diagnose and tune World42 terrain shadow mapping across setup, shaders, and chunk shadow caster lifecycle."
