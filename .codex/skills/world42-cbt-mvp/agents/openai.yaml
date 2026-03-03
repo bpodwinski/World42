@@ -1,0 +1,4 @@
+interface:
+  display_name: "World42 CBT MVP"
+  short_description: "Per-planet CDLOD or CBT routing"
+  default_prompt: "Use $world42-cbt-mvp to implement MVP per-planet LOD selection in World42 where each planet uses either CDLOD or CBT, with no hybrid blending."
