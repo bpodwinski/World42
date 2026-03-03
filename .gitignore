@@ -27,3 +27,4 @@ public/**/*.ktx2
 
 terrain/target/
 Cargo.lock
+output/playwright/

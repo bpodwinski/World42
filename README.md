@@ -98,3 +98,29 @@ World42/
 
 ## Sources
 https://joshanthony.info/2021/12/06/how-i-structure-my-game-projects/
+
+## Playwright CLI (AI debug)
+
+Project scripts now expose Playwright CLI for terminal-driven browser debugging.
+
+```bash
+# install CLI workspace bits (first time)
+npm run pw:install
+npm run pw:install-browser
+npm run pw:help
+
+# open app in browser (headed)
+npm run serve
+npm run pw:open
+
+# inspect and interact
+npm run pw:snapshot
+npm run pw -- click e1
+npm run pw:screenshot
+npm run pw:list
+```
+
+Notes:
+- Override target URL with `PW_URL` (default: `http://localhost:19000/`).
+- Reuse a browser session with `PW_SESSION=<name>`.
+- Artifacts are stored under `output/playwright/`.

@@ -6,7 +6,19 @@
     "build": "rspack --mode=production --node-env=production",
     "deploy": "gh-pages -d dist",
     "test": "vitest",
-    "coverage": "vitest run --coverage"
+    "coverage": "vitest run --coverage",
+    "pw": "node ./scripts/playwright_cli.mjs",
+    "pw:help": "node ./scripts/playwright_cli.mjs --help",
+    "pw:list": "node ./scripts/playwright_cli.mjs list",
+    "pw:open": "node ./scripts/playwright_open_world42.mjs",
+    "pw:snapshot": "node ./scripts/playwright_cli.mjs snapshot",
+    "pw:screenshot": "node ./scripts/playwright_cli.mjs screenshot",
+    "pw:trace:start": "node ./scripts/playwright_cli.mjs tracing-start",
+    "pw:trace:stop": "node ./scripts/playwright_cli.mjs tracing-stop",
+    "pw:console": "node ./scripts/playwright_cli.mjs console",
+    "pw:network": "node ./scripts/playwright_cli.mjs network",
+    "pw:install": "node ./scripts/playwright_cli.mjs install",
+    "pw:install-browser": "node ./scripts/playwright_cli.mjs install-browser"
   },
   "devDependencies": {
     "@rsbuild/core": "^1.4.12",
