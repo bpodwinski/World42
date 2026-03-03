@@ -7,7 +7,7 @@ import { ChunkForge } from "./chunk_forge";
 import { buildBaseGeometry, localToWorldDouble, type ChunkBaseGeometry } from "./chunk_geometry";
 import { computeSSEFactor, distanceToPatchBoundingSphere } from "./chunk_metrics";
 import { evalChunkCulling } from "./chunk_culling_eval";
-import { evalLodDecision } from "./chunk_lod_eval";
+import { computeLodMorphFactor, evalLodDecision } from "./chunk_lod_eval";
 
 /**
  * One quadtree node (one terrain patch).
@@ -160,6 +160,12 @@ export class ChunkTree {
 
     /** Minimum distance epsilon to avoid division by zero. */
     public static minDistEpsilon = 1e-3;
+
+    /** Morph window start in normalized [split..merge] space (0..1). */
+    public static lodMorphStart = 0.35;
+
+    /** Morph window end in normalized [split..merge] space (0..1). */
+    public static lodMorphEnd = 0.65;
 
     /** Optional margin to expand culling radius to account for relief (fallback bounds only). */
     public static cullReliefMargin = 0.0;
@@ -449,7 +455,13 @@ export class ChunkTree {
                 minDistEpsilon: ChunkTree.minDistEpsilon,
                 sseK: this._lastSseK,
             });
-            const lodMorph = this.computeGeomorphFactor(ssePx);
+            const lodMorph = computeLodMorphFactor({
+                ssePx,
+                splitTh: ChunkTree.sseSplitThresholdPx,
+                mergeTh: ChunkTree.sseMergeThresholdPx,
+                morphStart: ChunkTree.lodMorphStart,
+                morphEnd: ChunkTree.lodMorphEnd,
+            });
 
             // Split path (hysteresis preserved).
             if (shouldSplit || (this.children && !shouldMerge)) {
@@ -523,12 +535,6 @@ export class ChunkTree {
     private getCenterWorldDouble(): Vector3 {
         this.updateWorldBaseGeometry();
         return this._centerWorldBase;
-    }
-
-    private computeGeomorphFactor(ssePx: number): number {
-        const den = Math.max(1e-6, ChunkTree.sseSplitThresholdPx - ChunkTree.sseMergeThresholdPx);
-        const t = (ChunkTree.sseSplitThresholdPx - ssePx) / den;
-        return Math.max(0, Math.min(1, t));
     }
 
     private applyLodMorph(mesh: Mesh | null, morph: number): void {
