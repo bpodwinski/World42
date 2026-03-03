@@ -5,12 +5,15 @@
       "name": "Run Dev",
       "type": "node",
       "request": "launch",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "serve"],
+      "runtimeExecutable": "node",
+      "program": "${workspaceFolder}/node_modules/@rspack/cli/bin/rspack.js",
+      "args": ["serve"],
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
+      "autoAttachChildProcesses": false,
       "env": {
-        "NODE_ENV": "development"
+        "NODE_ENV": "development",
+        "PORT": "19000"
       },
       "preLaunchTask": "wasm: build (dev)"
     }

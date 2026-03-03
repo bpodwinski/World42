@@ -5,6 +5,9 @@ const HtmlWebpackPlugin = require('html-webpack-plugin');
 const { TsCheckerRspackPlugin } = require('ts-checker-rspack-plugin');
 const Dotenv = require('dotenv-webpack');
 
+const devHost = process.env.HOST || 'localhost';
+const devPort = process.env.PORT || 19000;
+
 const config = {
     entry: {
         index: './src/index.ts'
@@ -15,8 +18,8 @@ const config = {
         clean: true
     },
     devServer: {
-        host: "localhost",
-        port: 19300,
+        host: devHost,
+        port: devPort,
         historyApiFallback: true
     },
     resolve: {
@@ -49,7 +52,8 @@ const config = {
     ],
     experiments: {
         css: true,
-        topLevelAwait: true
+        topLevelAwait: true,
+        lazyCompilation: false
     }
 };
 
