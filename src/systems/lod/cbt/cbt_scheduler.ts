@@ -138,7 +138,8 @@ export class CbtPlanet {
         this.material = new StandardMaterial(`cbt_mat_${this.key}`, this.scene);
         this.material.backFaceCulling = false;
         this.material.disableLighting = true;
-        this.material.emissiveColor = new Color3(0.38, 0.48, 0.62);
+        this.material.emissiveColor = new Color3(0.2, 1.0, 0.2);
+        this.material.wireframe = true;
     }
 
     private updateMaterialUniforms(): void {

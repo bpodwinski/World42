@@ -68,13 +68,13 @@ export async function bootstrapScene(
     disposables.add(() => gui.dispose());
 
     const spawnPosWorldDouble = spawnBody.positionWorldDouble.clone();
-    spawnPosWorldDouble.y += spawnBody.radiusSim * 1.04;
+    spawnPosWorldDouble.y += spawnBody.radiusSim * 1.01;
 
     const camera = new OriginCamera('camera_player', spawnPosWorldDouble, scene);
     camera.debugMode = true;
     camera.minZ = 0.001;
     camera.maxZ = 1_000_000;
-    camera.fov = 1.2;
+    camera.fov = 1.4;
     camera.applyGravity = false;
     camera.inertia = 0;
     camera.inputs.clear();
