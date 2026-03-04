@@ -1,9 +1,9 @@
 import {
-    Matrix,
+    Color3,
     Mesh,
     Observer,
     Scene,
-    ShaderMaterial,
+    StandardMaterial,
     TransformNode,
     Vector3,
     VertexData,
@@ -12,7 +12,6 @@ import type {
     FloatingEntityInterface,
     OriginCamera,
 } from '../../../core/camera/camera_manager';
-import { TerrainShader } from '../../../game_objects/planets/rocky_planet/terrains_shader';
 import { classifySplitCandidates } from './cbt_classify';
 import { emitMeshFromLeaves } from './cbt_emit';
 import { CbtState } from './cbt_state';
@@ -38,23 +37,15 @@ export class CbtPlanet {
     readonly starPosWorldDouble: Vector3 | null;
 
     private mesh: Mesh | null = null;
-    private material: ShaderMaterial | null = null;
+    private material: StandardMaterial | null = null;
     private state: CbtState;
     private pendingFullRefresh = true;
     private shadowAttached = false;
 
     private readonly renderParent: TransformNode;
-    private readonly starColor: Vector3;
-    private readonly starIntensity: number;
     private readonly maxSplitsPerFrame: number;
     private readonly splitThresholdPx2: number;
     private readonly splitHysteresis: number;
-
-    private readonly tmpWorldInv = new Matrix();
-    private readonly tmpCameraLocal = new Vector3();
-    private readonly tmpRotatedLocal = new Vector3();
-    private readonly tmpLightDir = new Vector3();
-    private readonly tmpLightDirLocal = new Vector3();
 
     constructor(
         private scene: Scene,
@@ -66,8 +57,6 @@ export class CbtPlanet {
         this.radiusSim = opts.radiusSim;
         this.renderParent = opts.renderParent;
         this.starPosWorldDouble = opts.starPosWorldDouble;
-        this.starColor = opts.starColor.clone();
-        this.starIntensity = opts.starIntensity;
         this.maxSplitsPerFrame = opts.maxSplitsPerFrame;
         this.splitThresholdPx2 = opts.splitThresholdPx2;
         this.splitHysteresis = opts.splitHysteresis;
@@ -146,62 +135,21 @@ export class CbtPlanet {
     private ensureMaterial(): void {
         if (this.material) return;
 
-        this.material = new TerrainShader(this.scene).create(
-            64,
-            0,
-            1,
-            Vector3.Zero(),
-            this.radiusSim,
-            Vector3.Zero(),
-            false,
-            false
-        ) as ShaderMaterial;
-
-        this.material.setVector3('lightColor', this.starColor);
-        this.material.setFloat('lightIntensity', this.starIntensity);
+        this.material = new StandardMaterial(`cbt_mat_${this.key}`, this.scene);
+        this.material.backFaceCulling = false;
+        this.material.disableLighting = true;
+        this.material.emissiveColor = new Color3(0.38, 0.48, 0.62);
     }
 
     private updateMaterialUniforms(): void {
-        if (!this.material) return;
-
-        this.renderParent.getWorldMatrix().invertToRef(this.tmpWorldInv);
-
-        this.camera.doublepos.subtractToRef(this.entity.doublepos, this.tmpRotatedLocal);
-        Vector3.TransformNormalToRef(this.tmpRotatedLocal, this.tmpWorldInv, this.tmpCameraLocal);
-        this.material.setVector3('cameraPosition', this.tmpCameraLocal);
-
-        if (this.starPosWorldDouble) {
-            this.entity.doublepos.subtractToRef(this.starPosWorldDouble, this.tmpLightDir);
-            if (this.tmpLightDir.lengthSquared() < 1e-12) {
-                this.tmpLightDir.set(1, 0, 0);
-            } else {
-                this.tmpLightDir.normalize();
-            }
-
-            Vector3.TransformNormalToRef(this.tmpLightDir, this.tmpWorldInv, this.tmpLightDirLocal);
-            if (this.tmpLightDirLocal.lengthSquared() < 1e-12) {
-                this.tmpLightDirLocal.set(1, 0, 0);
-            } else {
-                this.tmpLightDirLocal.normalize();
-            }
-            this.material.setVector3('lightDirection', this.tmpLightDirLocal);
-        }
+        // Intentionally empty for the emissive MVP material path.
     }
 
     private ensureShadowCaster(): void {
+        // MVP: keep CBT visible first; cascade shadow integration can over-darken
+        // coarse CBT triangles and make the surface appear black.
         if (!this.mesh) return;
-        const shadowCtx = TerrainShader.getTerrainShadowContext(this.scene);
-        if (!shadowCtx) return;
-        if (this.shadowAttached) return;
-        const mesh = this.mesh;
-        mesh.receiveShadows = true;
-        shadowCtx.near.shadowGen.addShadowCaster(mesh);
-        shadowCtx.far.shadowGen.addShadowCaster(mesh);
-        mesh.onDisposeObservable.add(() => {
-            shadowCtx.near.shadowGen.removeShadowCaster(mesh, true);
-            shadowCtx.far.shadowGen.removeShadowCaster(mesh, true);
-        });
-        this.shadowAttached = true;
+        this.mesh.receiveShadows = false;
     }
 }
 

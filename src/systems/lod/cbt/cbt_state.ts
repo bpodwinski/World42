@@ -38,6 +38,17 @@ type Triangle = {
     c: Vector3;
 };
 
+function orientOutward(a: Vector3, b: Vector3, c: Vector3): Triangle {
+    const e0 = b.subtract(a);
+    const e1 = c.subtract(a);
+    const n = Vector3.Cross(e0, e1);
+    const centroid = a.add(b).addInPlace(c).scaleInPlace(1 / 3);
+    if (Vector3.Dot(n, centroid) >= 0) {
+        return { a, b, c };
+    }
+    return { a, b: c, c: b };
+}
+
 function midpointOnSphere(a: Vector3, b: Vector3, radius: number): Vector3 {
     const m = a.add(b).scaleInPlace(0.5);
     if (m.lengthSquared() < 1e-12) {
@@ -55,23 +66,23 @@ function splitByLongestEdge(v0: Vector3, v1: Vector3, v2: Vector3, radius: numbe
     if (e01 >= e12 && e01 >= e20) {
         const m = midpointOnSphere(v0, v1, radius);
         return [
-            { a: v0.clone(), b: m, c: v2.clone() },
-            { a: m.clone(), b: v1.clone(), c: v2.clone() },
+            orientOutward(v0.clone(), m, v2.clone()),
+            orientOutward(m.clone(), v1.clone(), v2.clone()),
         ];
     }
 
     if (e12 >= e20) {
         const m = midpointOnSphere(v1, v2, radius);
         return [
-            { a: v1.clone(), b: m, c: v0.clone() },
-            { a: m.clone(), b: v2.clone(), c: v0.clone() },
+            orientOutward(v1.clone(), m, v0.clone()),
+            orientOutward(m.clone(), v2.clone(), v0.clone()),
         ];
     }
 
     const m = midpointOnSphere(v2, v0, radius);
     return [
-        { a: v2.clone(), b: m, c: v1.clone() },
-        { a: m.clone(), b: v0.clone(), c: v1.clone() },
+        orientOutward(v2.clone(), m, v1.clone()),
+        orientOutward(m.clone(), v0.clone(), v1.clone()),
     ];
 }
 
@@ -116,6 +127,7 @@ export class CbtState {
     }
 
     private createRootNode(v0: Vector3, v1: Vector3, v2: Vector3): void {
+        const oriented = orientOutward(v0, v1, v2);
         const id = this.nextId++;
         const node: CbtNode = {
             id,
@@ -123,9 +135,9 @@ export class CbtState {
             parentId: null,
             leftId: null,
             rightId: null,
-            v0,
-            v1,
-            v2,
+            v0: oriented.a,
+            v1: oriented.b,
+            v2: oriented.c,
             isLeaf: true,
         };
         this.nodes.set(id, node);
