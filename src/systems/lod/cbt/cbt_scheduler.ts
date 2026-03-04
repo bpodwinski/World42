@@ -12,7 +12,7 @@ import type {
     FloatingEntityInterface,
     OriginCamera,
 } from '../../../core/camera/camera_manager';
-import { classifySplitCandidates } from './cbt_classify';
+import { classifySplitCandidates, measureLeafProjectedAreas } from './cbt_classify';
 import { emitMeshFromLeaves } from './cbt_emit';
 import { CbtState } from './cbt_state';
 
@@ -23,6 +23,7 @@ export type CbtPlanetOptions = {
     radiusSim: number;
     maxDepth: number;
     maxSplitsPerFrame: number;
+    maxMergesPerFrame?: number;
     splitThresholdPx2: number;
     splitHysteresis: number;
     starPosWorldDouble: Vector3 | null;
@@ -44,6 +45,7 @@ export class CbtPlanet {
 
     private readonly renderParent: TransformNode;
     private readonly maxSplitsPerFrame: number;
+    private readonly maxMergesPerFrame: number;
     private readonly splitThresholdPx2: number;
     private readonly splitHysteresis: number;
 
@@ -58,6 +60,7 @@ export class CbtPlanet {
         this.renderParent = opts.renderParent;
         this.starPosWorldDouble = opts.starPosWorldDouble;
         this.maxSplitsPerFrame = opts.maxSplitsPerFrame;
+        this.maxMergesPerFrame = opts.maxMergesPerFrame ?? opts.maxSplitsPerFrame;
         this.splitThresholdPx2 = opts.splitThresholdPx2;
         this.splitHysteresis = opts.splitHysteresis;
         this.state = new CbtState(opts.radiusSim, opts.maxDepth);
@@ -77,6 +80,15 @@ export class CbtPlanet {
         if (performance.now() >= deadline) return;
 
         const leaves = this.state.getLeafNodes();
+        const leafMetrics = measureLeafProjectedAreas({
+            leaves,
+            cameraWorldDouble: this.camera.doublepos,
+            planetCenterWorldDouble: this.entity.doublepos,
+            renderParentWorldMatrix: this.renderParent.getWorldMatrix(),
+            viewportHeightPx: Math.max(1, this.scene.getEngine().getRenderHeight()),
+            cameraFovRadians: this.camera.fov,
+        });
+
         const candidates = classifySplitCandidates({
             leaves,
             cameraWorldDouble: this.camera.doublepos,
@@ -93,7 +105,27 @@ export class CbtPlanet {
             this.maxSplitsPerFrame
         );
 
-        if (splitCount > 0 || this.pendingFullRefresh) {
+        const mergeThresholdPx2 = this.splitThresholdPx2 * this.splitHysteresis;
+        const parentAgg = new Map<number, { children: number; maxAreaPx2: number }>();
+        for (const metric of leafMetrics) {
+            if (metric.parentId === null) continue;
+            const prev = parentAgg.get(metric.parentId) ?? { children: 0, maxAreaPx2: 0 };
+            prev.children++;
+            prev.maxAreaPx2 = Math.max(prev.maxAreaPx2, metric.projectedAreaPx2);
+            parentAgg.set(metric.parentId, prev);
+        }
+
+        const mergeParentIds = Array.from(parentAgg.entries())
+            .filter(([, agg]) => agg.children === 2 && agg.maxAreaPx2 <= mergeThresholdPx2)
+            .sort((a, b) => a[1].maxAreaPx2 - b[1].maxAreaPx2)
+            .map(([parentId]) => parentId);
+
+        const mergeCount = this.state.mergeByParentPriority(
+            mergeParentIds,
+            this.maxMergesPerFrame
+        );
+
+        if (splitCount > 0 || mergeCount > 0 || this.pendingFullRefresh) {
             this.rebuildMesh();
             this.pendingFullRefresh = false;
         }

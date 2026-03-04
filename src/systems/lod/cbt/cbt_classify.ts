@@ -7,6 +7,12 @@ export type CbtSplitCandidate = {
     projectedAreaPx2: number;
 };
 
+export type CbtLeafMetric = {
+    nodeId: number;
+    parentId: number | null;
+    projectedAreaPx2: number;
+};
+
 export type CbtClassifyParams = {
     leaves: ReadonlyArray<CbtNode>;
     cameraWorldDouble: Vector3;
@@ -70,4 +76,41 @@ export function classifySplitCandidates({
 
     candidates.sort((a, b) => b.score - a.score);
     return candidates;
+}
+
+export function measureLeafProjectedAreas({
+    leaves,
+    cameraWorldDouble,
+    planetCenterWorldDouble,
+    renderParentWorldMatrix,
+    viewportHeightPx,
+    cameraFovRadians,
+}: Omit<CbtClassifyParams, 'splitThresholdPx2' | 'splitHysteresis'>): CbtLeafMetric[] {
+    const focal = viewportHeightPx / (2 * Math.tan(cameraFovRadians * 0.5));
+    const tmpCentroidLocal = new Vector3();
+    const tmpCentroidRotated = new Vector3();
+    const tmpCentroidWorld = new Vector3();
+
+    const metrics: CbtLeafMetric[] = [];
+    for (const leaf of leaves) {
+        tmpCentroidLocal
+            .copyFrom(leaf.v0)
+            .addInPlace(leaf.v1)
+            .addInPlace(leaf.v2)
+            .scaleInPlace(1 / 3);
+
+        Vector3.TransformNormalToRef(tmpCentroidLocal, renderParentWorldMatrix, tmpCentroidRotated);
+        tmpCentroidWorld.copyFrom(planetCenterWorldDouble).addInPlace(tmpCentroidRotated);
+
+        const distance = Math.max(MIN_DISTANCE, Vector3.Distance(cameraWorldDouble, tmpCentroidWorld));
+        const areaWorld = triangleArea(leaf.v0, leaf.v1, leaf.v2);
+        const projectedAreaPx2 = areaWorld * (focal * focal) / (distance * distance);
+        metrics.push({
+            nodeId: leaf.id,
+            parentId: leaf.parentId,
+            projectedAreaPx2,
+        });
+    }
+
+    return metrics;
 }

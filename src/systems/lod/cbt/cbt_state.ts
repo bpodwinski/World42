@@ -126,6 +126,15 @@ export class CbtState {
         return splitCount;
     }
 
+    mergeByParentPriority(parentIds: ReadonlyArray<number>, maxMerges: number): number {
+        let mergeCount = 0;
+        for (const id of parentIds) {
+            if (mergeCount >= maxMerges) break;
+            if (this.merge(id)) mergeCount++;
+        }
+        return mergeCount;
+    }
+
     private createRootNode(v0: Vector3, v1: Vector3, v2: Vector3): void {
         const oriented = orientOutward(v0, v1, v2);
         const id = this.nextId++;
@@ -194,6 +203,29 @@ export class CbtState {
         this.nodes.set(leftId, leftNode);
         this.nodes.set(rightId, rightNode);
         this.nodes.set(node.id, node);
+        return true;
+    }
+
+    private merge(parentId: number): boolean {
+        const parent = this.nodes.get(parentId);
+        if (!parent || parent.isLeaf) return false;
+        if (parent.leftId === null || parent.rightId === null) return false;
+
+        const left = this.nodes.get(parent.leftId);
+        const right = this.nodes.get(parent.rightId);
+        if (!left || !right) return false;
+        if (!left.isLeaf || !right.isLeaf) return false;
+
+        this.leafIds.delete(left.id);
+        this.leafIds.delete(right.id);
+        this.nodes.delete(left.id);
+        this.nodes.delete(right.id);
+
+        parent.leftId = null;
+        parent.rightId = null;
+        parent.isLeaf = true;
+        this.nodes.set(parent.id, parent);
+        this.leafIds.add(parent.id);
         return true;
     }
 }

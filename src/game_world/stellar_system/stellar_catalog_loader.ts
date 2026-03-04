@@ -127,6 +127,7 @@ export type CDLODOptions = {
 export type CBTOptions = {
     maxDepth?: number;
     maxSplitsPerFrame?: number;
+    maxMergesPerFrame?: number;
     splitThresholdPx2?: number;
     splitHysteresis?: number;
     skip?: (name: string, body: LoadedBody) => boolean;
@@ -347,6 +348,7 @@ export function createCBTForSystem(
     const {
         maxDepth = 9,
         maxSplitsPerFrame = 8,
+        maxMergesPerFrame = 8,
         splitThresholdPx2 = 900,
         splitHysteresis = 0.7,
         skip = (_name: string, body: LoadedBody) =>
@@ -383,6 +385,7 @@ export function createCBTForSystem(
             radiusSim: body.radiusSim,
             maxDepth,
             maxSplitsPerFrame,
+            maxMergesPerFrame,
             splitThresholdPx2,
             splitHysteresis,
             starPosWorldDouble,

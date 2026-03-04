@@ -60,6 +60,7 @@ export function setupLodAndShadows(
         const cbt = createCBTForSystem(scene, camera, system, {
             maxDepth: 24,
             maxSplitsPerFrame: 8,
+            maxMergesPerFrame: 8,
             splitThresholdPx2: 900,
             splitHysteresis: 0.75,
         });

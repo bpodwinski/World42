@@ -21,4 +21,17 @@ describe('CbtState', () => {
         expect(splitCount).toBe(0);
         expect(state.leafCount).toBe(8);
     });
+
+    it('merges siblings back to parent', () => {
+        const state = new CbtState(100, 4);
+        const firstLeaf = state.getLeafNodes()[0];
+        const splitCount = state.splitByPriority([firstLeaf.id], 1);
+        expect(splitCount).toBe(1);
+        expect(state.leafCount).toBe(9);
+
+        const parentId = firstLeaf.id;
+        const mergeCount = state.mergeByParentPriority([parentId], 1);
+        expect(mergeCount).toBe(1);
+        expect(state.leafCount).toBe(8);
+    });
 });
