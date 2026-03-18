@@ -1,4 +1,5 @@
 import {
+    BoundingInfo,
     Color3,
     Mesh,
     Observer,
@@ -22,6 +23,7 @@ export type CbtPlanetOptions = {
     renderParent: TransformNode;
     radiusSim: number;
     maxDepth: number;
+    minDepth?: number;
     maxSplitsPerFrame: number;
     maxMergesPerFrame?: number;
     splitThresholdPx2: number;
@@ -63,7 +65,7 @@ export class CbtPlanet {
         this.maxMergesPerFrame = opts.maxMergesPerFrame ?? opts.maxSplitsPerFrame;
         this.splitThresholdPx2 = opts.splitThresholdPx2;
         this.splitHysteresis = opts.splitHysteresis;
-        this.state = new CbtState(opts.radiusSim, opts.maxDepth);
+        this.state = new CbtState(opts.radiusSim, opts.maxDepth, opts.minDepth ?? 0);
 
         this.rebuildMesh();
     }
@@ -125,10 +127,9 @@ export class CbtPlanet {
             this.maxMergesPerFrame
         );
 
-        if (splitCount > 0 || mergeCount > 0 || this.pendingFullRefresh) {
-            this.rebuildMesh();
-            this.pendingFullRefresh = false;
-        }
+        // Always rebuild: backside culling depends on camera position each frame
+        this.rebuildMesh();
+        this.pendingFullRefresh = false;
 
         this.updateMaterialUniforms();
         this.ensureShadowCaster();
@@ -143,13 +144,19 @@ export class CbtPlanet {
     }
 
     private rebuildMesh(): void {
-        const meshData = emitMeshFromLeaves(this.state.getLeafNodes(), this.radiusSim);
+        // Camera position in planet-local space for backside culling
+        const camLocal = {
+            x: this.camera.doublepos.x - this.entity.doublepos.x,
+            y: this.camera.doublepos.y - this.entity.doublepos.y,
+            z: this.camera.doublepos.z - this.entity.doublepos.z,
+        };
+        const meshData = emitMeshFromLeaves(this.state.getLeafNodes(), this.radiusSim, camLocal);
 
         if (!this.mesh) {
             this.mesh = new Mesh(`cbt_${this.key}`, this.scene);
             this.mesh.parent = this.renderParent;
             this.mesh.checkCollisions = true;
-            this.mesh.alwaysSelectAsActiveMesh = false;
+            this.mesh.alwaysSelectAsActiveMesh = true;
             this.ensureMaterial();
             this.mesh.material = this.material;
         }
@@ -160,6 +167,12 @@ export class CbtPlanet {
         vertexData.uvs = meshData.uvs;
         vertexData.indices = meshData.indices;
         vertexData.applyToMesh(this.mesh, true);
+
+        const R = this.radiusSim;
+        this.mesh.setBoundingInfo(
+            new BoundingInfo(new Vector3(-R, -R, -R), new Vector3(R, R, R))
+        );
+
         this.mesh.setVerticesData('morphDelta', meshData.morphDeltas, true, 3);
         this.shadowAttached = false;
     }
@@ -168,10 +181,11 @@ export class CbtPlanet {
         if (this.material) return;
 
         this.material = new StandardMaterial(`cbt_mat_${this.key}`, this.scene);
+        this.material.useLogarithmicDepth = true;
         this.material.backFaceCulling = false;
         this.material.disableLighting = true;
         this.material.emissiveColor = new Color3(0.2, 1.0, 0.2);
-        this.material.wireframe = true;
+        this.material.wireframe = false;
     }
 
     private updateMaterialUniforms(): void {

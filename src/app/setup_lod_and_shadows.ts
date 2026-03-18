@@ -58,9 +58,10 @@ export function setupLodAndShadows(
         }
 
         const cbt = createCBTForSystem(scene, camera, system, {
-            maxDepth: 24,
-            maxSplitsPerFrame: 8,
-            maxMergesPerFrame: 8,
+            maxDepth: 16,
+            minDepth: 0,
+            maxSplitsPerFrame: 32,
+            maxMergesPerFrame: 32,
             splitThresholdPx2: 900,
             splitHysteresis: 0.75,
         });
@@ -86,7 +87,7 @@ export function setupLodAndShadows(
 
     const cbtPlanets = Array.from(mergedCBT.values()).map((planet) => planet.runtime);
     const cbtScheduler = new CbtScheduler(scene, camera, cbtPlanets, {
-        budgetMs: 2,
+        budgetMs: 8,
     });
     cbtScheduler.start();
     disposables.add(() => cbtScheduler.dispose());

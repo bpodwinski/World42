@@ -18,6 +18,13 @@
           "diameter_km": 4879,
           "rotation_period_days": 58.6
         },
+        "Mercury_CDLOD": {
+          "type": "planet",
+          "lod_algorithm": "cdlod",
+          "position_km": [57910000, 0, 15000],
+          "diameter_km": 4879,
+          "rotation_period_days": 58.6
+        },
         "Venus": {
           "type": "planet",
           "position_km": [108200000, 0, 0],

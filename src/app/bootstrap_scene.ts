@@ -4,7 +4,6 @@ import {
     Scene,
     UniversalCamera,
     Vector3,
-    Viewport,
     WebGPUEngine,
 } from '@babylonjs/core';
 import { OriginCamera } from '../core/camera/camera_manager';
@@ -110,9 +109,7 @@ export async function bootstrapScene(
     let debugDoublePos = camera.doublepos.clone().add(new Vector3(0, 0, spawnBody.radiusSim * 3.0));
     const debugDoubleTgt = spawnBody.positionWorldDouble.clone();
 
-    camera.viewport = new Viewport(0, 0, 1, 1);
-    debugCam.viewport = new Viewport(0.5, 0.5, 0.5, 0.5);
-    scene.activeCameras = [camera, debugCam];
+    scene.activeCamera = camera;
 
     const tmpTgtRender = new Vector3();
     const debugCamObserver = scene.onBeforeRenderObservable.add(() => {

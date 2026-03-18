@@ -126,6 +126,7 @@ export type CDLODOptions = {
 
 export type CBTOptions = {
     maxDepth?: number;
+    minDepth?: number;
     maxSplitsPerFrame?: number;
     maxMergesPerFrame?: number;
     splitThresholdPx2?: number;
@@ -347,6 +348,7 @@ export function createCBTForSystem(
 ): Map<string, PlanetCBT> {
     const {
         maxDepth = 9,
+        minDepth = 0,
         maxSplitsPerFrame = 8,
         maxMergesPerFrame = 8,
         splitThresholdPx2 = 900,
@@ -384,6 +386,7 @@ export function createCBTForSystem(
             renderParent: body.node,
             radiusSim: body.radiusSim,
             maxDepth,
+            minDepth,
             maxSplitsPerFrame,
             maxMergesPerFrame,
             splitThresholdPx2,

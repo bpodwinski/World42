@@ -93,7 +93,8 @@ export class CbtState {
 
     constructor(
         readonly radiusSim: number,
-        readonly maxDepth: number
+        readonly maxDepth: number,
+        readonly minDepth: number = 0
     ) {
         for (const [ia, ib, ic] of ROOT_TRIANGLES) {
             this.createRootNode(
@@ -101,6 +102,16 @@ export class CbtState {
                 ROOT_VERTICES[ib].clone().scaleInPlace(radiusSim),
                 ROOT_VERTICES[ic].clone().scaleInPlace(radiusSim)
             );
+        }
+
+        if (minDepth > 0) {
+            const clampedMin = Math.min(minDepth, maxDepth);
+            for (let d = 0; d < clampedMin; d++) {
+                const leaves = [...this.leafIds];
+                for (const id of leaves) {
+                    this.split(id);
+                }
+            }
         }
     }
 
