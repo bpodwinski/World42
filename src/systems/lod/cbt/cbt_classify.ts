@@ -43,7 +43,7 @@ export function classifySplitCandidates({
     splitHysteresis,
 }: CbtClassifyParams): CbtSplitCandidate[] {
     const focal = viewportHeightPx / (2 * Math.tan(cameraFovRadians * 0.5));
-    const threshold = splitThresholdPx2 * Math.max(0.05, Math.min(1.0, splitHysteresis));
+    const threshold = splitThresholdPx2;
 
     const tmpCentroidLocal = new Vector3();
     const tmpCentroidRotated = new Vector3();

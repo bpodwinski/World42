@@ -58,12 +58,13 @@ export function setupLodAndShadows(
         }
 
         const cbt = createCBTForSystem(scene, camera, system, {
-            maxDepth: 16,
+            maxDepth: 12,
             minDepth: 0,
-            maxSplitsPerFrame: 32,
-            maxMergesPerFrame: 32,
-            splitThresholdPx2: 900,
-            splitHysteresis: 0.75,
+            resolution: 96,
+            maxSplitsPerFrame: 64,
+            maxMergesPerFrame: 64,
+            splitThresholdPx2: 120000,
+            splitHysteresis: 0.4,
         });
 
         for (const [name, planet] of cbt.entries()) {

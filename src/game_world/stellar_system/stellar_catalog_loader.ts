@@ -127,6 +127,7 @@ export type CDLODOptions = {
 export type CBTOptions = {
     maxDepth?: number;
     minDepth?: number;
+    resolution?: number;
     maxSplitsPerFrame?: number;
     maxMergesPerFrame?: number;
     splitThresholdPx2?: number;
@@ -349,6 +350,7 @@ export function createCBTForSystem(
     const {
         maxDepth = 9,
         minDepth = 0,
+        resolution = 32,
         maxSplitsPerFrame = 8,
         maxMergesPerFrame = 8,
         splitThresholdPx2 = 900,
@@ -387,6 +389,7 @@ export function createCBTForSystem(
             radiusSim: body.radiusSim,
             maxDepth,
             minDepth,
+            resolution,
             maxSplitsPerFrame,
             maxMergesPerFrame,
             splitThresholdPx2,

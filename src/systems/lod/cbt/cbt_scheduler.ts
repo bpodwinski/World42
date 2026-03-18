@@ -1,21 +1,33 @@
 import {
-    BoundingInfo,
-    Color3,
     Mesh,
     Observer,
     Scene,
-    StandardMaterial,
     TransformNode,
     Vector3,
-    VertexData,
 } from '@babylonjs/core';
 import type {
     FloatingEntityInterface,
     OriginCamera,
 } from '../../../core/camera/camera_manager';
+import { globalWorkerPool } from '../workers/global_worker_pool';
 import { classifySplitCandidates, measureLeafProjectedAreas } from './cbt_classify';
-import { emitMeshFromLeaves } from './cbt_emit';
-import { CbtState } from './cbt_state';
+import { CbtForge, type CbtLeafBuildParams } from './cbt_forge';
+import { CbtState, type CbtNode } from './cbt_state';
+
+// ---------------------------------------------------------------------------
+// Per-leaf mesh tracking
+// ---------------------------------------------------------------------------
+
+type LeafMeshEntry = {
+    mesh: Mesh | null;
+    pending: boolean;
+    /** Monotonic token — reject stale async results. */
+    token: number;
+};
+
+// ---------------------------------------------------------------------------
+// CbtPlanet
+// ---------------------------------------------------------------------------
 
 export type CbtPlanetOptions = {
     key: string;
@@ -24,6 +36,7 @@ export type CbtPlanetOptions = {
     radiusSim: number;
     maxDepth: number;
     minDepth?: number;
+    resolution?: number;
     maxSplitsPerFrame: number;
     maxMergesPerFrame?: number;
     splitThresholdPx2: number;
@@ -39,17 +52,20 @@ export class CbtPlanet {
     readonly radiusSim: number;
     readonly starPosWorldDouble: Vector3 | null;
 
-    private mesh: Mesh | null = null;
-    private material: StandardMaterial | null = null;
     private state: CbtState;
-    private pendingFullRefresh = true;
-    private shadowAttached = false;
+    private forge: CbtForge;
+    private leafMeshes = new Map<number, LeafMeshEntry>();
+    private nextToken = 1;
 
     private readonly renderParent: TransformNode;
+    private readonly resolution: number;
+    private readonly maxDepth: number;
     private readonly maxSplitsPerFrame: number;
     private readonly maxMergesPerFrame: number;
     private readonly splitThresholdPx2: number;
     private readonly splitHysteresis: number;
+    private readonly starColor: Vector3;
+    private readonly starIntensity: number;
 
     constructor(
         private scene: Scene,
@@ -61,13 +77,20 @@ export class CbtPlanet {
         this.radiusSim = opts.radiusSim;
         this.renderParent = opts.renderParent;
         this.starPosWorldDouble = opts.starPosWorldDouble;
+        this.starColor = opts.starColor;
+        this.starIntensity = opts.starIntensity;
+        this.resolution = opts.resolution ?? 32;
+        this.maxDepth = opts.maxDepth;
         this.maxSplitsPerFrame = opts.maxSplitsPerFrame;
         this.maxMergesPerFrame = opts.maxMergesPerFrame ?? opts.maxSplitsPerFrame;
         this.splitThresholdPx2 = opts.splitThresholdPx2;
         this.splitHysteresis = opts.splitHysteresis;
-        this.state = new CbtState(opts.radiusSim, opts.maxDepth, opts.minDepth ?? 0);
 
-        this.rebuildMesh();
+        this.state = new CbtState(opts.radiusSim, opts.maxDepth, opts.minDepth ?? 0);
+        this.forge = new CbtForge(scene, globalWorkerPool);
+
+        // Request meshes for initial leaves
+        this.syncLeafMeshes();
     }
 
     estimatePriority(camera: OriginCamera): number {
@@ -75,8 +98,16 @@ export class CbtPlanet {
     }
 
     resetNow(): void {
-        this.pendingFullRefresh = true;
+        // Dispose all leaf meshes and rebuild from scratch
+        for (const entry of this.leafMeshes.values()) {
+            entry.mesh?.dispose();
+            entry.token = -1; // invalidate pending
+        }
+        this.leafMeshes.clear();
+        this.syncLeafMeshes();
     }
+
+    private _debugTimer = 0;
 
     update(deadline: number): void {
         if (performance.now() >= deadline) return;
@@ -103,11 +134,24 @@ export class CbtPlanet {
         });
 
         const splitCount = this.state.splitByPriority(
-            candidates.map((candidate) => candidate.nodeId),
+            candidates.map((c) => c.nodeId),
             this.maxSplitsPerFrame
         );
 
         const mergeThresholdPx2 = this.splitThresholdPx2 * this.splitHysteresis;
+
+        // Debug log every ~60 frames
+        if (++this._debugTimer % 60 === 0) {
+            const maxArea = leafMetrics.reduce((m, l) => Math.max(m, l.projectedAreaPx2), 0);
+            const maxLevel = leaves.reduce((m, l) => Math.max(m, l.level), 0);
+            const dist = Vector3.Distance(this.camera.doublepos, this.entity.doublepos);
+            console.log(
+                `[cbt][${this.key}] leaves=${leaves.length} maxLevel=${maxLevel}` +
+                ` candidates=${candidates.length} splits=${splitCount}` +
+                ` maxAreaPx2=${maxArea.toFixed(1)} dist=${dist.toFixed(1)}` +
+                ` splitTh=${this.splitThresholdPx2} mergeTh=${mergeThresholdPx2.toFixed(1)}`
+            );
+        }
         const parentAgg = new Map<number, { children: number; maxAreaPx2: number }>();
         for (const metric of leafMetrics) {
             if (metric.parentId === null) continue;
@@ -122,83 +166,93 @@ export class CbtPlanet {
             .sort((a, b) => a[1].maxAreaPx2 - b[1].maxAreaPx2)
             .map(([parentId]) => parentId);
 
-        const mergeCount = this.state.mergeByParentPriority(
-            mergeParentIds,
-            this.maxMergesPerFrame
-        );
+        this.state.mergeByParentPriority(mergeParentIds, this.maxMergesPerFrame);
 
-        // Always rebuild: backside culling depends on camera position each frame
-        this.rebuildMesh();
-        this.pendingFullRefresh = false;
-
-        this.updateMaterialUniforms();
-        this.ensureShadowCaster();
+        // Sync per-leaf meshes with current tree state
+        this.syncLeafMeshes();
     }
 
     dispose(): void {
-        this.material?.dispose();
-        this.material = null;
-        this.mesh?.dispose();
-        this.mesh = null;
-        this.shadowAttached = false;
+        for (const entry of this.leafMeshes.values()) {
+            entry.mesh?.dispose();
+            entry.token = -1;
+        }
+        this.leafMeshes.clear();
     }
 
-    private rebuildMesh(): void {
-        // Camera position in planet-local space for backside culling
-        const camLocal = {
-            x: this.camera.doublepos.x - this.entity.doublepos.x,
-            y: this.camera.doublepos.y - this.entity.doublepos.y,
-            z: this.camera.doublepos.z - this.entity.doublepos.z,
-        };
-        const meshData = emitMeshFromLeaves(this.state.getLeafNodes(), this.radiusSim, camLocal);
+    // ------------------------------------------------------------------
+    // Per-leaf mesh lifecycle
+    // ------------------------------------------------------------------
 
-        if (!this.mesh) {
-            this.mesh = new Mesh(`cbt_${this.key}`, this.scene);
-            this.mesh.parent = this.renderParent;
-            this.mesh.checkCollisions = true;
-            this.mesh.alwaysSelectAsActiveMesh = true;
-            this.ensureMaterial();
-            this.mesh.material = this.material;
+    private syncLeafMeshes(): void {
+        const currentLeaves = this.state.getLeafNodes();
+        const currentIds = new Set(currentLeaves.map((l) => l.id));
+
+        // Remove meshes for nodes that are no longer leaves
+        for (const [id, entry] of this.leafMeshes) {
+            if (!currentIds.has(id)) {
+                entry.mesh?.dispose();
+                entry.token = -1; // invalidate any pending async result
+                this.leafMeshes.delete(id);
+            }
         }
 
-        const vertexData = new VertexData();
-        vertexData.positions = meshData.positions;
-        vertexData.normals = meshData.normals;
-        vertexData.uvs = meshData.uvs;
-        vertexData.indices = meshData.indices;
-        vertexData.applyToMesh(this.mesh, true);
-
-        const R = this.radiusSim;
-        this.mesh.setBoundingInfo(
-            new BoundingInfo(new Vector3(-R, -R, -R), new Vector3(R, R, R))
-        );
-
-        this.mesh.setVerticesData('morphDelta', meshData.morphDeltas, true, 3);
-        this.shadowAttached = false;
+        // Request meshes for new leaves
+        for (const leaf of currentLeaves) {
+            if (!this.leafMeshes.has(leaf.id)) {
+                this.requestLeafMesh(leaf);
+            }
+        }
     }
 
-    private ensureMaterial(): void {
-        if (this.material) return;
+    private requestLeafMesh(leaf: CbtNode): void {
+        const token = this.nextToken++;
+        const entry: LeafMeshEntry = { mesh: null, pending: true, token };
+        this.leafMeshes.set(leaf.id, entry);
 
-        this.material = new StandardMaterial(`cbt_mat_${this.key}`, this.scene);
-        this.material.useLogarithmicDepth = true;
-        this.material.backFaceCulling = false;
-        this.material.disableLighting = true;
-        this.material.emissiveColor = new Color3(0.2, 1.0, 0.2);
-        this.material.wireframe = false;
-    }
+        const params: CbtLeafBuildParams = {
+            v0: [leaf.v0.x, leaf.v0.y, leaf.v0.z],
+            v1: [leaf.v1.x, leaf.v1.y, leaf.v1.z],
+            v2: [leaf.v2.x, leaf.v2.y, leaf.v2.z],
+            resolution: this.resolution,
+            radius: this.radiusSim,
+            level: leaf.level,
+            maxLevel: this.maxDepth,
+        };
 
-    private updateMaterialUniforms(): void {
-        // Intentionally empty for the emissive MVP material path.
-    }
-
-    private ensureShadowCaster(): void {
-        // MVP: keep CBT visible first; cascade shadow integration can over-darken
-        // coarse CBT triangles and make the surface appear black.
-        if (!this.mesh) return;
-        this.mesh.receiveShadows = false;
+        this.forge
+            .buildLeaf(
+                params,
+                this.camera.doublepos,
+                this.entity,
+                this.renderParent,
+                this.starPosWorldDouble,
+                this.starColor,
+                this.starIntensity
+            )
+            .then((mesh) => {
+                const current = this.leafMeshes.get(leaf.id);
+                if (!current || current.token !== token) {
+                    // Leaf was merged/split while worker was busy — discard result
+                    mesh.dispose();
+                    return;
+                }
+                current.mesh = mesh;
+                current.pending = false;
+            })
+            .catch((err) => {
+                console.warn(`[cbt] mesh build failed for leaf ${leaf.id}:`, err);
+                const current = this.leafMeshes.get(leaf.id);
+                if (current && current.token === token) {
+                    current.pending = false;
+                }
+            });
     }
 }
+
+// ---------------------------------------------------------------------------
+// CbtScheduler (unchanged)
+// ---------------------------------------------------------------------------
 
 export type CbtSchedulerOptions = {
     budgetMs?: number;

@@ -4,6 +4,7 @@ import type {
     ChunkMeshData,
     ChunkMeshDataTyped,
     MeshKernelBuildChunkRequest,
+    MeshKernelBuildTriangleChunkRequest,
     MeshKernelRequest,
     MeshKernelResponse,
 } from './worker_protocol';
@@ -13,6 +14,7 @@ import {
 } from './worker_protocol';
 import initWasm, {
     build_chunk,
+    build_triangle_chunk,
     type InitInput,
 } from '../../../../terrain/pkg/terrain_generator.js';
 
@@ -107,9 +109,7 @@ workerScope.onmessage = async (event: MessageEvent<unknown>) => {
         return;
     }
 
-    const request: MeshKernelBuildChunkRequest = msg;
-    const id = request.id;
-    const payload = request.payload;
+    const id = msg.id;
     const startedAt = performance.now();
 
     try {
@@ -118,22 +118,46 @@ workerScope.onmessage = async (event: MessageEvent<unknown>) => {
         currentJobId = id;
         cancelCurrent = false;
 
-        const meshDataRaw = build_chunk(
-            payload.bounds.uMin,
-            payload.bounds.uMax,
-            payload.bounds.vMin,
-            payload.bounds.vMax,
-            payload.resolution,
-            payload.radius,
-            payload.face,
-            payload.noise.seed ?? 1,
-            payload.noise.octaves ?? 8,
-            payload.noise.baseFrequency ?? 0,
-            payload.noise.baseAmplitude ?? 0,
-            payload.noise.lacunarity ?? 0,
-            payload.noise.persistence ?? 0,
-            payload.noise.globalTerrainAmplitude ?? 10
-        );
+        let meshDataRaw: unknown;
+        let meshFormat: 'arrays' | 'typed' = 'typed';
+
+        if (msg.kind === 'build_chunk') {
+            const payload = (msg as MeshKernelBuildChunkRequest).payload;
+            meshFormat = payload.meshFormat ?? 'typed';
+            meshDataRaw = build_chunk(
+                payload.bounds.uMin,
+                payload.bounds.uMax,
+                payload.bounds.vMin,
+                payload.bounds.vMax,
+                payload.resolution,
+                payload.radius,
+                payload.face,
+                payload.noise.seed ?? 1,
+                payload.noise.octaves ?? 8,
+                payload.noise.baseFrequency ?? 0,
+                payload.noise.baseAmplitude ?? 0,
+                payload.noise.lacunarity ?? 0,
+                payload.noise.persistence ?? 0,
+                payload.noise.globalTerrainAmplitude ?? 10
+            );
+        } else {
+            const payload = (msg as MeshKernelBuildTriangleChunkRequest).payload;
+            meshFormat = payload.meshFormat ?? 'typed';
+            meshDataRaw = build_triangle_chunk(
+                payload.v0[0], payload.v0[1], payload.v0[2],
+                payload.v1[0], payload.v1[1], payload.v1[2],
+                payload.v2[0], payload.v2[1], payload.v2[2],
+                payload.resolution,
+                payload.radius,
+                payload.noise.seed ?? 1,
+                payload.noise.octaves ?? 8,
+                payload.noise.baseFrequency ?? 0,
+                payload.noise.baseAmplitude ?? 0,
+                payload.noise.lacunarity ?? 0,
+                payload.noise.persistence ?? 0,
+                payload.noise.globalTerrainAmplitude ?? 10
+            );
+        }
 
         if (!isChunkMeshData(meshDataRaw)) {
             throw new Error('Invalid mesh payload produced by WASM.');
@@ -156,7 +180,7 @@ workerScope.onmessage = async (event: MessageEvent<unknown>) => {
             indexCount: meshData.indices.length | 0,
         };
 
-        const meshFormat = payload.meshFormat ?? 'typed';
+        // meshFormat already set above
         if (meshFormat === 'arrays') {
             post({
                 protocol: PROTOCOL,

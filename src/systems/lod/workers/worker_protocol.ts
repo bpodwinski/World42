@@ -77,6 +77,25 @@ export type MeshKernelBuildChunkRequest = {
     payload: MeshKernelBuildParams;
 };
 
+export type MeshKernelTriangleBuildParams = {
+    v0: [number, number, number];
+    v1: [number, number, number];
+    v2: [number, number, number];
+    resolution: number;
+    radius: number;
+    level: number;
+    maxLevel: number;
+    noise: MeshKernelNoiseParams;
+    meshFormat?: 'arrays' | 'typed';
+};
+
+export type MeshKernelBuildTriangleChunkRequest = {
+    protocol: typeof MESH_KERNEL_PROTOCOL;
+    kind: 'build_triangle_chunk';
+    id: string;
+    payload: MeshKernelTriangleBuildParams;
+};
+
 export type MeshKernelCancelRequest = {
     protocol: typeof MESH_KERNEL_PROTOCOL;
     kind: 'cancel';
@@ -87,6 +106,7 @@ export type MeshKernelCancelRequest = {
 export type MeshKernelRequest =
     | MeshKernelInitRequest
     | MeshKernelBuildChunkRequest
+    | MeshKernelBuildTriangleChunkRequest
     | MeshKernelCancelRequest;
 
 export type MeshKernelReady = {
