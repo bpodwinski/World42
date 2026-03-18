@@ -13,6 +13,7 @@ import { globalWorkerPool } from '../workers/global_worker_pool';
 import { classifySplitCandidates, measureLeafProjectedAreas } from './cbt_classify';
 import { CbtForge, type CbtLeafBuildParams } from './cbt_forge';
 import { CbtState, type CbtNode } from './cbt_state';
+import { TerrainShader } from '../../../game_objects/planets/rocky_planet/terrains_shader';
 
 // ---------------------------------------------------------------------------
 // Per-leaf mesh tracking
@@ -61,6 +62,15 @@ export type CbtPlanetOptions = {
 };
 
 export class CbtPlanet {
+    /** Remove a mesh from shadow generators without disposing it. */
+    static removeShadowCaster(scene: Scene, mesh: Mesh): void {
+        const ctx = TerrainShader.getTerrainShadowContext(scene);
+        if (ctx) {
+            ctx.near.shadowGen.removeShadowCaster(mesh, true);
+            ctx.far.shadowGen.removeShadowCaster(mesh, true);
+        }
+    }
+
     readonly key: string;
     readonly entity: FloatingEntityInterface;
     readonly radiusSim: number;
@@ -211,6 +221,12 @@ export class CbtPlanet {
         for (const [id, entry] of this.leafMeshes) {
             if (!currentIds.has(id)) {
                 if (entry.mesh) {
+                    // Remove from shadow generators immediately to avoid
+                    // flickering when replacement meshes are added.
+                    // The mesh stays visible (prevents holes) but stops
+                    // casting shadows — children take over as they arrive.
+                    CbtPlanet.removeShadowCaster(this.scene, entry.mesh);
+
                     // Keep the mesh visible until replacements are ready
                     this.retiringMeshes.push({
                         mesh: entry.mesh,

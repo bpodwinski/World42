@@ -49,8 +49,8 @@ export function setupLodAndShadows(
 
     for (const system of loadedSystems.values()) {
         const cdlod = createCDLODForSystem(scene, camera, system, {
-            maxLevel: 12,
-            resolution: 96,
+            maxLevel: 8,
+            resolution: 64,
         });
 
         for (const [name, planet] of cdlod.entries()) {
@@ -58,12 +58,12 @@ export function setupLodAndShadows(
         }
 
         const cbt = createCBTForSystem(scene, camera, system, {
-            maxDepth: 12,
+            maxDepth: 16,
             minDepth: 0,
-            resolution: 96,
-            maxSplitsPerFrame: 64,
-            maxMergesPerFrame: 64,
-            splitThresholdPx2: 120000,
+            resolution: 64,
+            maxSplitsPerFrame: 16,
+            maxMergesPerFrame: 16,
+            splitThresholdPx2: 150000,
             splitHysteresis: 0.4,
         });
 
@@ -79,7 +79,7 @@ export function setupLodAndShadows(
                 maxConcurrent: 8,
                 maxStartsPerFrame: 2,
                 rescoreMs: 100,
-                applyDebugEveryFrame: true,
+                applyDebugEveryFrame: false,
                 budgetMs: 30,
             })
             : null;

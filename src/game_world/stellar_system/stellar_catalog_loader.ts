@@ -327,11 +327,11 @@ export function createCDLODForSystem(
                 starPosWorldDouble,
                 starColor,
                 starIntensity,
-                false,
+                process.env.CBT_WIREFRAME === '1',
                 false,
                 true,
                 true,
-                true
+                process.env.CBT_DEBUG_LOD === '1'
             )
         );
 

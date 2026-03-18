@@ -194,15 +194,17 @@ export class ChunkForge {
 
         terrainMesh.material = sm;
 
-        const shadowCtx = TerrainShader.getTerrainShadowContext(this.scene);
-        if (shadowCtx) {
-            terrainMesh.receiveShadows = true;
-            shadowCtx.near.shadowGen.addShadowCaster(terrainMesh);
-            shadowCtx.far.shadowGen.addShadowCaster(terrainMesh);
-            terrainMesh.onDisposeObservable.add(() => {
-                shadowCtx.near.shadowGen.removeShadowCaster(terrainMesh, true);
-                shadowCtx.far.shadowGen.removeShadowCaster(terrainMesh, true);
-            });
+        if (process.env.SHADOWS !== '0') {
+            const shadowCtx = TerrainShader.getTerrainShadowContext(this.scene);
+            if (shadowCtx) {
+                terrainMesh.receiveShadows = true;
+                shadowCtx.near.shadowGen.addShadowCaster(terrainMesh);
+                shadowCtx.far.shadowGen.addShadowCaster(terrainMesh);
+                terrainMesh.onDisposeObservable.add(() => {
+                    shadowCtx.near.shadowGen.removeShadowCaster(terrainMesh, true);
+                    shadowCtx.far.shadowGen.removeShadowCaster(terrainMesh, true);
+                });
+            }
         }
 
         const tMat1 = performance.now();
