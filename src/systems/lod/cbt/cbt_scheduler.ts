@@ -23,6 +23,20 @@ type LeafMeshEntry = {
     pending: boolean;
     /** Monotonic token — reject stale async results. */
     token: number;
+    /** Parent node id at time of creation (for merge tracking). */
+    parentId: number | null;
+};
+
+/**
+ * Mesh kept visible while its replacement leaf meshes are loading.
+ * Prevents holes during split/merge transitions.
+ */
+type RetiringMesh = {
+    mesh: Mesh;
+    /** Original node id this mesh belonged to. */
+    nodeId: number;
+    /** For merge: the parent that became a leaf and needs a mesh. */
+    parentId: number | null;
 };
 
 // ---------------------------------------------------------------------------
@@ -55,6 +69,7 @@ export class CbtPlanet {
     private state: CbtState;
     private forge: CbtForge;
     private leafMeshes = new Map<number, LeafMeshEntry>();
+    private retiringMeshes: RetiringMesh[] = [];
     private nextToken = 1;
 
     private readonly renderParent: TransformNode;
@@ -104,6 +119,8 @@ export class CbtPlanet {
             entry.token = -1; // invalidate pending
         }
         this.leafMeshes.clear();
+        for (const r of this.retiringMeshes) r.mesh.dispose();
+        this.retiringMeshes = [];
         this.syncLeafMeshes();
     }
 
@@ -178,6 +195,8 @@ export class CbtPlanet {
             entry.token = -1;
         }
         this.leafMeshes.clear();
+        for (const r of this.retiringMeshes) r.mesh.dispose();
+        this.retiringMeshes = [];
     }
 
     // ------------------------------------------------------------------
@@ -188,10 +207,17 @@ export class CbtPlanet {
         const currentLeaves = this.state.getLeafNodes();
         const currentIds = new Set(currentLeaves.map((l) => l.id));
 
-        // Remove meshes for nodes that are no longer leaves
+        // Retire meshes for nodes that are no longer leaves
         for (const [id, entry] of this.leafMeshes) {
             if (!currentIds.has(id)) {
-                entry.mesh?.dispose();
+                if (entry.mesh) {
+                    // Keep the mesh visible until replacements are ready
+                    this.retiringMeshes.push({
+                        mesh: entry.mesh,
+                        nodeId: id,
+                        parentId: entry.parentId,
+                    });
+                }
                 entry.token = -1; // invalidate any pending async result
                 this.leafMeshes.delete(id);
             }
@@ -203,11 +229,56 @@ export class CbtPlanet {
                 this.requestLeafMesh(leaf);
             }
         }
+
+        // Dispose retiring meshes whose replacements are all ready
+        this.retiringMeshes = this.retiringMeshes.filter((retiring) => {
+            const node = this.state.getNode(retiring.nodeId);
+            if (node && !node.isLeaf) {
+                // SPLIT case: node still in tree as internal node.
+                // Keep mesh until all descendant leaves have meshes.
+                if (this.allDescendantLeavesReady(retiring.nodeId)) {
+                    retiring.mesh.dispose();
+                    return false;
+                }
+                return true;
+            }
+            // MERGE case: node was removed from tree, parent became a leaf.
+            if (retiring.parentId !== null) {
+                const parentEntry = this.leafMeshes.get(retiring.parentId);
+                if (parentEntry?.mesh) {
+                    retiring.mesh.dispose();
+                    return false;
+                }
+                return true;
+            }
+            // Unknown state — dispose to prevent leaks
+            retiring.mesh.dispose();
+            return false;
+        });
+    }
+
+    /** Check if every leaf descendant of `nodeId` has a loaded mesh. */
+    private allDescendantLeavesReady(nodeId: number): boolean {
+        const node = this.state.getNode(nodeId);
+        if (!node) return true;
+        if (node.isLeaf) {
+            const entry = this.leafMeshes.get(nodeId);
+            return entry?.mesh != null;
+        }
+        return (
+            (node.leftId !== null && this.allDescendantLeavesReady(node.leftId)) &&
+            (node.rightId !== null && this.allDescendantLeavesReady(node.rightId))
+        );
     }
 
     private requestLeafMesh(leaf: CbtNode): void {
         const token = this.nextToken++;
-        const entry: LeafMeshEntry = { mesh: null, pending: true, token };
+        const entry: LeafMeshEntry = {
+            mesh: null,
+            pending: true,
+            token,
+            parentId: leaf.parentId,
+        };
         this.leafMeshes.set(leaf.id, entry);
 
         const params: CbtLeafBuildParams = {

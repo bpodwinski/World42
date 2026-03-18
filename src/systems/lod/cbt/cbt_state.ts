@@ -119,6 +119,10 @@ export class CbtState {
         return this.leafIds.size;
     }
 
+    getNode(id: number): CbtNode | undefined {
+        return this.nodes.get(id);
+    }
+
     getLeafNodes(): CbtNode[] {
         const out: CbtNode[] = [];
         for (const id of this.leafIds) {
