@@ -228,7 +228,7 @@ void main(void) {
   vec3 terrainN = normalize(radialN - totalSG / pr);
 
   // Blend terrain normal toward sphere normal at distance to hide LOD seams
-  float lodBlend = 0.9 * smoothstep(pr * 0.005, pr * 0.05, dist);
+  float lodBlend = 0.6 * smoothstep(pr * 0.05, pr * 0.5, dist);
   vec3 n = mix(terrainN, radialN, lodBlend);
 
   vec4 baseColor = sampleTriplanarDiffuse(vPosition, radialN, textureScale);
