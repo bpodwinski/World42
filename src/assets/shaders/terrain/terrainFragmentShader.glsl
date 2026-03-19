@@ -229,8 +229,11 @@ void main(void) {
   vec3 totalSG = vSgCoarse + detailAtt * vSgDetail;
 
   // Reconstruct normal from surface gradient: N = normalize(radial - SG / pr)
-  // Division by length(vPosition) matches the original: normalize(unit*pr - grad_t) = normalize(unit - grad_t/pr)
-  vec3 n = normalize(radialN - totalSG / length(vPosition));
+  vec3 terrainN = normalize(radialN - totalSG / length(vPosition));
+
+  // Blend terrain normal toward sphere normal at distance to hide LOD seams
+  float lodBlend = 0.9 * smoothstep(sgDetailAttenStart, sgDetailAttenEnd, dist);
+  vec3 n = mix(terrainN, radialN, lodBlend);
 
   vec4 baseColor = sampleTriplanarDiffuse(vPosition, radialN, textureScale);
   vec4 detailColor = sampleTriplanarDetail(vPosition, radialN, detailScale);
