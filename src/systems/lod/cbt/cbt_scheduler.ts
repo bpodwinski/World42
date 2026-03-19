@@ -44,6 +44,7 @@ export class CbtPlanet {
     private state: CbtState;
     private pendingFullRefresh = true;
     private shadowAttached = false;
+    private debugLod = false;
 
     private readonly renderParent: TransformNode;
     private readonly maxSplitsPerFrame: number;
@@ -166,8 +167,10 @@ export class CbtPlanet {
         vertexData.normals = meshData.normals;
         vertexData.uvs = meshData.uvs;
         vertexData.indices = meshData.indices;
+        vertexData.colors = meshData.colors;
         vertexData.applyToMesh(this.mesh, true);
         this.mesh.setVerticesData('morphDelta', meshData.morphDeltas, true, 3);
+        this.mesh.useVertexColors = this.debugLod;
         this.shadowAttached = false;
     }
 
@@ -191,6 +194,23 @@ export class CbtPlanet {
 
     setWireframe(on: boolean): void {
         if (this.material) this.material.wireframe = on;
+    }
+
+    setDebugLod(on: boolean): void {
+        this.debugLod = on;
+        if (!this.material) return;
+        if (on) {
+            this.material.disableLighting = true;
+            this.material.emissiveColor = new Color3(1, 1, 1);
+            this.material.diffuseColor = new Color3(0, 0, 0);
+        } else {
+            this.material.disableLighting = false;
+            this.material.emissiveColor = new Color3(0, 0, 0);
+            this.material.diffuseColor = new Color3(0.6, 0.55, 0.4);
+        }
+        if (this.mesh) {
+            this.mesh.useVertexColors = on;
+        }
     }
 
     private updateSunDirection(): void {
@@ -219,6 +239,7 @@ export class CbtScheduler {
     private budgetMs: number;
     private robin = 0;
     private wireframe = false;
+    private debugLodMode = false;
     private readonly onKeyDown: (e: KeyboardEvent) => void;
 
     constructor(
@@ -235,6 +256,12 @@ export class CbtScheduler {
                 this.wireframe = !this.wireframe;
                 for (const planet of this.planets) {
                     planet.setWireframe(this.wireframe);
+                }
+            }
+            if (e.key === 'x' || e.key === 'X') {
+                this.debugLodMode = !this.debugLodMode;
+                for (const planet of this.planets) {
+                    planet.setDebugLod(this.debugLodMode);
                 }
             }
         };

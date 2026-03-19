@@ -82,6 +82,11 @@ export type EmitOptions = {
     noise?: NoiseParams | null;
 };
 
+export type EmitResult = ChunkMeshDataTyped & {
+    /** RGBA vertex colors encoding leaf LOD level. */
+    colors: Float32Array;
+};
+
 /**
  * Emit a single mesh from all CBT leaf triangles.
  *
@@ -89,11 +94,31 @@ export type EmitOptions = {
  * Vertices are projected onto the sphere and displaced by noise.
  * Normals are computed via surface gradient (noise finite differences).
  */
+/** LOD level color palette (up to 16 levels). */
+const LEVEL_COLORS: ReadonlyArray<readonly [number, number, number]> = [
+    [0.15, 0.15, 0.80], // 0  dark blue
+    [0.10, 0.50, 0.90], // 1  blue
+    [0.10, 0.75, 0.75], // 2  cyan
+    [0.10, 0.80, 0.30], // 3  green
+    [0.50, 0.85, 0.10], // 4  lime
+    [0.90, 0.90, 0.10], // 5  yellow
+    [1.00, 0.65, 0.05], // 6  orange
+    [1.00, 0.35, 0.05], // 7  red-orange
+    [0.90, 0.10, 0.10], // 8  red
+    [0.80, 0.10, 0.50], // 9  magenta
+    [0.60, 0.10, 0.70], // 10 purple
+    [0.40, 0.10, 0.80], // 11 violet
+    [1.00, 1.00, 1.00], // 12 white
+    [0.70, 0.70, 0.70], // 13 light gray
+    [0.40, 0.40, 0.40], // 14 dark gray
+    [1.00, 0.00, 1.00], // 15 pink
+];
+
 export function emitMeshFromLeaves(
     leaves: ReadonlyArray<CbtNode>,
     radius: number,
     options: EmitOptions = {}
-): ChunkMeshDataTyped {
+): EmitResult {
     const N = Math.max(1, options.subdiv ?? DEFAULT_SUBDIV);
     const noise = options.noise === undefined ? DEFAULT_NOISE : options.noise;
 
@@ -107,6 +132,7 @@ export function emitMeshFromLeaves(
     const normals = new Float32Array(totalVertices * 3);
     const morphDeltas = new Float32Array(totalVertices * 3);
     const uvs = new Float32Array(totalVertices * 2);
+    const colors = new Float32Array(totalVertices * 4);
     const indices =
         totalVertices > 65535
             ? new Uint32Array(totalIndices)
@@ -116,11 +142,16 @@ export function emitMeshFromLeaves(
     let uvOff = 0;
     let iOff = 0;
 
+    let cOff = 0; // color float offset
+
     for (const leaf of leaves) {
         const baseVertex = vOff / 3;
         const v0x = leaf.v0.x, v0y = leaf.v0.y, v0z = leaf.v0.z;
         const v1x = leaf.v1.x, v1y = leaf.v1.y, v1z = leaf.v1.z;
         const v2x = leaf.v2.x, v2y = leaf.v2.y, v2z = leaf.v2.z;
+
+        // LOD color for this leaf
+        const lc = LEVEL_COLORS[leaf.level % LEVEL_COLORS.length];
 
         const rowStart: number[] = new Array(N + 2);
         let localIdx = 0;
@@ -171,8 +202,15 @@ export function emitMeshFromLeaves(
                 uvs[uvOff] = u;
                 uvs[uvOff + 1] = v;
 
+                // LOD level color (RGBA)
+                colors[cOff] = lc[0];
+                colors[cOff + 1] = lc[1];
+                colors[cOff + 2] = lc[2];
+                colors[cOff + 3] = 1;
+
                 vOff += 3;
                 uvOff += 2;
+                cOff += 4;
                 localIdx++;
             }
         }
@@ -205,5 +243,6 @@ export function emitMeshFromLeaves(
         morphDeltas,
         uvs,
         indices,
+        colors,
     };
 }
