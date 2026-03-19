@@ -2,9 +2,6 @@ import type { ChunkMeshDataTyped } from '../workers/worker_protocol';
 import type { CbtNode } from './cbt_state';
 import { fbmNoise, type NoiseParams, DEFAULT_NOISE } from './cbt_noise';
 
-/** Default subdivisions per leaf edge. N=8 → 36 verts, 64 tris per leaf. */
-const DEFAULT_SUBDIV = 8;
-
 /** Finite-difference step for surface gradient normals (in unit-sphere space). */
 const GRAD_EPS = 5e-3;
 
@@ -14,16 +11,10 @@ function sphericalUV(nx: number, ny: number, nz: number): [number, number] {
     return [u, v];
 }
 
-/**
- * Build two tangent vectors for a point on the unit sphere.
- * Returns [tx, ty, tz, bx, by, bz].
- */
 function sphereTangents(nx: number, ny: number, nz: number): [number, number, number, number, number, number] {
-    // Pick an axis not parallel to n
     let ax = 0, ay = 1, az = 0;
     if (Math.abs(ny) > 0.9) { ax = 1; ay = 0; az = 0; }
 
-    // tangent = normalize(cross(n, arbitrary))
     let tx = ny * az - nz * ay;
     let ty = nz * ax - nx * az;
     let tz = nx * ay - ny * ax;
@@ -31,7 +22,6 @@ function sphereTangents(nx: number, ny: number, nz: number): [number, number, nu
     const tInv = tLen > 1e-12 ? 1 / tLen : 0;
     tx *= tInv; ty *= tInv; tz *= tInv;
 
-    // bitangent = cross(n, tangent)
     const bx = ny * tz - nz * ty;
     const by = nz * tx - nx * tz;
     const bz = nx * ty - ny * tx;
@@ -39,10 +29,6 @@ function sphereTangents(nx: number, ny: number, nz: number): [number, number, nu
     return [tx, ty, tz, bx, by, bz];
 }
 
-/**
- * Compute a perturbed normal from the noise surface gradient.
- * Uses central finite differences along two sphere-tangent directions.
- */
 function noiseNormal(
     nx: number, ny: number, nz: number,
     radius: number,
@@ -51,7 +37,6 @@ function noiseNormal(
     const [tx, ty, tz, bx, by, bz] = sphereTangents(nx, ny, nz);
     const eps = GRAD_EPS;
 
-    // Sample noise at offset positions along tangent and bitangent
     const sampleHeight = (dx: number, dy: number, dz: number) => {
         const sx = nx + dx, sy = ny + dy, sz = nz + dz;
         const len = Math.sqrt(sx * sx + sy * sy + sz * sz);
@@ -64,7 +49,6 @@ function noiseNormal(
     const dhdb = (sampleHeight(bx * eps, by * eps, bz * eps)
                -  sampleHeight(-bx * eps, -by * eps, -bz * eps)) / (2 * eps);
 
-    // Scale gradient by 1/radius so perturbation is proportional to surface
     const scale = 1 / radius;
     let pnx = nx - dhdt * scale * tx - dhdb * scale * bx;
     let pny = ny - dhdt * scale * ty - dhdb * scale * by;
@@ -78,22 +62,13 @@ function noiseNormal(
 }
 
 export type EmitOptions = {
-    subdiv?: number;
     noise?: NoiseParams | null;
 };
 
 export type EmitResult = ChunkMeshDataTyped & {
-    /** RGBA vertex colors encoding leaf LOD level. */
     colors: Float32Array;
 };
 
-/**
- * Emit a single mesh from all CBT leaf triangles.
- *
- * Each leaf is subdivided into a barycentric grid of `subdiv²` sub-triangles.
- * Vertices are projected onto the sphere and displaced by noise.
- * Normals are computed via surface gradient (noise finite differences).
- */
 /** LOD level color palette (up to 16 levels). */
 const LEVEL_COLORS: ReadonlyArray<readonly [number, number, number]> = [
     [0.15, 0.15, 0.80], // 0  dark blue
@@ -114,19 +89,22 @@ const LEVEL_COLORS: ReadonlyArray<readonly [number, number, number]> = [
     [1.00, 0.00, 1.00], // 15 pink
 ];
 
+/**
+ * Emit a single mesh from all CBT leaf triangles.
+ *
+ * True CBT: each leaf = 1 triangle (3 vertices).
+ * Noise displacement + surface gradient normals applied per vertex.
+ * No internal subdivision — the CBT depth IS the mesh resolution.
+ */
 export function emitMeshFromLeaves(
     leaves: ReadonlyArray<CbtNode>,
     radius: number,
     options: EmitOptions = {}
 ): EmitResult {
-    const N = Math.max(1, options.subdiv ?? DEFAULT_SUBDIV);
     const noise = options.noise === undefined ? DEFAULT_NOISE : options.noise;
 
-    const vertsPerLeaf = ((N + 1) * (N + 2)) / 2;
-    const trisPerLeaf = N * N;
-
-    const totalVertices = leaves.length * vertsPerLeaf;
-    const totalIndices = leaves.length * trisPerLeaf * 3;
+    const totalVertices = leaves.length * 3;
+    const totalIndices = leaves.length * 3;
 
     const positions = new Float32Array(totalVertices * 3);
     const normals = new Float32Array(totalVertices * 3);
@@ -140,101 +118,63 @@ export function emitMeshFromLeaves(
 
     let vOff = 0;
     let uvOff = 0;
-    let iOff = 0;
-
-    let cOff = 0; // color float offset
+    let cOff = 0;
+    let idx = 0;
 
     for (const leaf of leaves) {
-        const baseVertex = vOff / 3;
-        const v0x = leaf.v0.x, v0y = leaf.v0.y, v0z = leaf.v0.z;
-        const v1x = leaf.v1.x, v1y = leaf.v1.y, v1z = leaf.v1.z;
-        const v2x = leaf.v2.x, v2y = leaf.v2.y, v2z = leaf.v2.z;
-
-        // LOD color for this leaf
         const lc = LEVEL_COLORS[leaf.level % LEVEL_COLORS.length];
+        const verts = [leaf.v0, leaf.v1, leaf.v2] as const;
 
-        const rowStart: number[] = new Array(N + 2);
-        let localIdx = 0;
+        for (const vert of verts) {
+            // Project onto unit sphere
+            const len = Math.sqrt(vert.x * vert.x + vert.y * vert.y + vert.z * vert.z);
+            const invLen = len > 1e-12 ? 1 / len : 0;
+            const nx = vert.x * invLen;
+            const ny = vert.y * invLen;
+            const nz = vert.z * invLen;
 
-        // --- Vertices ---
-        for (let i = 0; i <= N; i++) {
-            rowStart[i] = localIdx;
-            const cols = N - i;
-            for (let j = 0; j <= cols; j++) {
-                const a = i / N;
-                const b = j / N;
-                const c = 1 - a - b;
-
-                const px = v0x * c + v1x * a + v2x * b;
-                const py = v0y * c + v1y * a + v2y * b;
-                const pz = v0z * c + v1z * a + v2z * b;
-
-                // Project onto unit sphere
-                const len = Math.sqrt(px * px + py * py + pz * pz);
-                const invLen = len > 1e-12 ? 1 / len : 0;
-                const nx = px * invLen;
-                const ny = py * invLen;
-                const nz = pz * invLen;
-
-                // Noise displacement along radial
-                let r = radius;
-                if (noise) {
-                    r += fbmNoise(nx, ny, nz, noise);
-                }
-
-                positions[vOff] = nx * r;
-                positions[vOff + 1] = ny * r;
-                positions[vOff + 2] = nz * r;
-
-                // Surface gradient normal (perturbed by noise)
-                if (noise) {
-                    const [pnx, pny, pnz] = noiseNormal(nx, ny, nz, radius, noise);
-                    normals[vOff] = pnx;
-                    normals[vOff + 1] = pny;
-                    normals[vOff + 2] = pnz;
-                } else {
-                    normals[vOff] = nx;
-                    normals[vOff + 1] = ny;
-                    normals[vOff + 2] = nz;
-                }
-
-                const [u, v] = sphericalUV(nx, ny, nz);
-                uvs[uvOff] = u;
-                uvs[uvOff + 1] = v;
-
-                // LOD level color (RGBA)
-                colors[cOff] = lc[0];
-                colors[cOff + 1] = lc[1];
-                colors[cOff + 2] = lc[2];
-                colors[cOff + 3] = 1;
-
-                vOff += 3;
-                uvOff += 2;
-                cOff += 4;
-                localIdx++;
+            // Noise displacement along radial
+            let r = radius;
+            if (noise) {
+                r += fbmNoise(nx, ny, nz, noise);
             }
+
+            positions[vOff] = nx * r;
+            positions[vOff + 1] = ny * r;
+            positions[vOff + 2] = nz * r;
+
+            // Surface gradient normal
+            if (noise) {
+                const [pnx, pny, pnz] = noiseNormal(nx, ny, nz, radius, noise);
+                normals[vOff] = pnx;
+                normals[vOff + 1] = pny;
+                normals[vOff + 2] = pnz;
+            } else {
+                normals[vOff] = nx;
+                normals[vOff + 1] = ny;
+                normals[vOff + 2] = nz;
+            }
+
+            const [u, v] = sphericalUV(nx, ny, nz);
+            uvs[uvOff] = u;
+            uvs[uvOff + 1] = v;
+
+            colors[cOff] = lc[0];
+            colors[cOff + 1] = lc[1];
+            colors[cOff + 2] = lc[2];
+            colors[cOff + 3] = 1;
+
+            vOff += 3;
+            uvOff += 2;
+            cOff += 4;
+            idx++;
         }
 
-        // --- Indices ---
-        for (let i = 0; i < N; i++) {
-            const cols = N - i;
-            for (let j = 0; j < cols; j++) {
-                const ia = baseVertex + rowStart[i] + j;
-                const ib = baseVertex + rowStart[i] + j + 1;
-                const id = baseVertex + rowStart[i + 1] + j;
-
-                indices[iOff++] = ia;
-                indices[iOff++] = ib;
-                indices[iOff++] = id;
-
-                if (j < cols - 1) {
-                    const ie = baseVertex + rowStart[i + 1] + j + 1;
-                    indices[iOff++] = ib;
-                    indices[iOff++] = ie;
-                    indices[iOff++] = id;
-                }
-            }
-        }
+        // Emit indices with flipped winding (CW for BabylonJS front-face)
+        const base = idx - 3;
+        indices[base] = base;
+        indices[base + 1] = base + 2;
+        indices[base + 2] = base + 1;
     }
 
     return {
