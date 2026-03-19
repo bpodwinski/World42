@@ -3,11 +3,12 @@ import type { FloatingEntityInterface, OriginCamera } from "../../../core/camera
 import type { Bounds, Face } from "../types";
 import type { ChunkBoundsInfo } from "../workers/worker_protocol";
 import { globalWorkerPool } from "../workers/global_worker_pool";
-import { ChunkForge } from "./chunk_forge";
-import { buildBaseGeometry, localToWorldDouble, type ChunkBaseGeometry } from "./chunk_geometry";
-import { computeSSEFactor, distanceToPatchBoundingSphere } from "./chunk_metrics";
-import { evalChunkCulling } from "./chunk_culling_eval";
-import { computeLodMorphFactor, evalLodDecision } from "./chunk_lod_eval";
+import { ChunkForge } from "./cdlod_forge";
+import { buildBaseGeometry, localToWorldDouble, type ChunkBaseGeometry } from "./cdlod_geometry";
+import { computeSSEFactor, distanceToPatchBoundingSphere } from "./cdlod_metrics";
+import { evalChunkCulling } from "./cdlod_culling_eval";
+import { computeLodMorphFactor, evalLodDecision } from "./cdlod_lod_eval";
+import { LodConfig } from "../lod_config";
 
 /**
  * One quadtree node (one terrain patch).
@@ -17,7 +18,7 @@ import { computeLodMorphFactor, evalLodDecision } from "./chunk_lod_eval";
  * - Planet-local: worker-generated vertices + `baseGeom` (center/corners on base sphere)
  * - Render-space: frustum checks via `centerRender = centerWorldDouble - camWorldDouble`
  */
-export class ChunkTree {
+export class ChunkNode {
     /** Babylon scene used for mesh/material creation and rendering. */
     scene: Scene;
 
@@ -40,7 +41,7 @@ export class ChunkTree {
     resolution: number;
 
     /** Children nodes (4 quadrants) or null if leaf. */
-    children: ChunkTree[] | null;
+    children: ChunkNode[] | null;
 
     /** Babylon mesh for this patch (generated asynchronously) or null if missing. */
     mesh: Mesh | null;
@@ -99,8 +100,9 @@ export class ChunkTree {
     /** Instance-level debug flag (forwarded to shader). */
     public debugLOD: boolean;
 
-    /** Global debug flag toggled externally (forwarded to shader). */
-    public static debugLODEnabled = false;
+    /** @deprecated Use LodConfig.debugLODEnabled instead. */
+    public static get debugLODEnabled(): boolean { return LodConfig.debugLODEnabled; }
+    public static set debugLODEnabled(v: boolean) { LodConfig.debugLODEnabled = v; }
 
     /** Frustum guard-band scale for prefetching (tune for camera speed). */
     public static frustumPrefetchScale = 1.2;
@@ -251,8 +253,8 @@ export class ChunkTree {
      *
      * @param bounds Child patch bounds.
      */
-    private createChild(bounds: Bounds): ChunkTree {
-        return new ChunkTree(
+    private createChild(bounds: Bounds): ChunkNode {
+        return new ChunkNode(
             this.scene,
             this.camera,
             bounds,
@@ -365,7 +367,7 @@ export class ChunkTree {
         );
 
         let centerWorld = this._centerWorldBase;
-        let radiusForCull = bsRadiusFallback + ChunkTree.cullReliefMargin;
+        let radiusForCull = bsRadiusFallback + ChunkNode.cullReliefMargin;
 
         const meshWithBoundsInfo =
             this.mesh as (Mesh & { metadata?: { boundsInfo?: ChunkBoundsInfo } }) | null;
@@ -421,8 +423,8 @@ export class ChunkTree {
                 radiusForCull,
                 frustumEnabled: this.frustumCullingEnabled,
                 backsideEnabled: this.backsideCullingEnabled,
-                frustumPrefetchScale: ChunkTree.frustumPrefetchScale,
-                horizonPrefetchScale: ChunkTree.horizonPrefetchScale,
+                frustumPrefetchScale: ChunkNode.frustumPrefetchScale,
+                horizonPrefetchScale: ChunkNode.horizonPrefetchScale,
                 centerRenderTmp: this._centerRenderTmp,
             });
 
@@ -449,18 +451,18 @@ export class ChunkTree {
                 resolution: this.resolution,
                 level: this.level,
                 maxLevel: this.maxLevel,
-                splitTh: ChunkTree.sseSplitThresholdPx,
-                mergeTh: ChunkTree.sseMergeThresholdPx,
-                geomErrorScale: ChunkTree.geomErrorScale,
-                minDistEpsilon: ChunkTree.minDistEpsilon,
+                splitTh: ChunkNode.sseSplitThresholdPx,
+                mergeTh: ChunkNode.sseMergeThresholdPx,
+                geomErrorScale: ChunkNode.geomErrorScale,
+                minDistEpsilon: ChunkNode.minDistEpsilon,
                 sseK: this._lastSseK,
             });
             const lodMorph = computeLodMorphFactor({
                 ssePx,
-                splitTh: ChunkTree.sseSplitThresholdPx,
-                mergeTh: ChunkTree.sseMergeThresholdPx,
-                morphStart: ChunkTree.lodMorphStart,
-                morphEnd: ChunkTree.lodMorphEnd,
+                splitTh: ChunkNode.sseSplitThresholdPx,
+                mergeTh: ChunkNode.sseMergeThresholdPx,
+                morphStart: ChunkNode.lodMorphStart,
+                morphEnd: ChunkNode.lodMorphEnd,
             });
 
             // Split path (hysteresis preserved).
@@ -614,7 +616,7 @@ export class ChunkTree {
                 this.currentLODLevel = this.level;
             })
             .catch((e) => {
-                console.error("[ChunkTree] mesh build failed", e);
+                console.error("[ChunkNode] mesh build failed", e);
             })
             .finally(() => {
                 if (token === this.pendingMeshToken) this.pendingMeshPromise = null;

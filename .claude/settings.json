@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mv chunk_culling_eval.ts cdlod_culling_eval.ts)",
+      "Bash(mv chunk_forge.ts cdlod_forge.ts)",
+      "Bash(mv chunk_geometry.ts cdlod_geometry.ts)",
+      "Bash(mv chunk_lod_eval.ts cdlod_lod_eval.ts)",
+      "Bash(mv chunk_lod_eval.test.ts cdlod_lod_eval.test.ts)"
+    ]
+  }
+}

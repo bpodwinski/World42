@@ -10,7 +10,7 @@ import {
 import { FloatingEntity, OriginCamera } from "../../core/camera/camera_manager";
 import { ScaleManager } from "../../core/scale/scale_manager";
 import { TextureManager } from "../../core/io/texture_manager";
-import { ChunkTree } from "../../systems/lod/chunks/chunk_tree";
+import { ChunkTree } from "../../systems/lod/cdlod/cdlod_tree";
 import { CbtPlanet } from "../../systems/lod/cbt/cbt_scheduler";
 import type { Face } from "../../systems/lod/types";
 import {

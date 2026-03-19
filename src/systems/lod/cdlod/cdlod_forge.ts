@@ -1,5 +1,5 @@
 import { Scene, Mesh, Vector3, TransformNode, Matrix, ShaderMaterial } from "@babylonjs/core";
-import { ChunkTree } from "./chunk_tree";
+import { LodConfig } from "../lod_config";
 import { Terrain } from "../../../game_objects/planets/rocky_planet/terrain";
 import { TerrainShader } from "../../../game_objects/planets/rocky_planet/terrains_shader";
 import type { FloatingEntityInterface } from "../../../core/camera/camera_manager";
@@ -167,7 +167,7 @@ export class ChunkForge {
             params.radius,
             this._patchCenterLocal,
             wireframe,
-            ChunkTree.debugLODEnabled
+            LodConfig.debugLODEnabled
         ) as ShaderMaterial;
 
         terrainMesh.material = mat;

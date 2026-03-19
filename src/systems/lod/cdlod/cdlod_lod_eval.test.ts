@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeLodMorphFactor } from './chunk_lod_eval';
+import { computeLodMorphFactor } from './cdlod_lod_eval';
 
 describe('computeLodMorphFactor', () => {
     const splitTh = 5.5;

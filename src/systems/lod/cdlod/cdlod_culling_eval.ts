@@ -1,5 +1,5 @@
 import type { Plane, Vector3 } from "@babylonjs/core";
-import { isSphereInFrustum } from "./chunk_metrics";
+import { isSphereInFrustum } from "./cdlod_metrics";
 import { backsideCulling } from "./backside_culling";
 import type { OriginCamera } from "../../../core/camera/camera_manager";
 

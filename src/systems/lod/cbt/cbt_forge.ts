@@ -2,7 +2,6 @@ import { Mesh, Matrix, Scene, ShaderMaterial, TransformNode, Vector3 } from '@ba
 import type { FloatingEntityInterface } from '../../../core/camera/camera_manager';
 import { Terrain } from '../../../game_objects/planets/rocky_planet/terrain';
 import { TerrainShader } from '../../../game_objects/planets/rocky_planet/terrains_shader';
-import { ChunkTree } from '../chunks/chunk_tree';
 import { WorkerPool } from '../workers/worker_pool';
 import type {
     ChunkMeshData,

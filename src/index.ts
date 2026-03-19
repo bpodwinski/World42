@@ -1,7 +1,7 @@
 import { FloatingCameraScene } from "./app";
 import { EngineManager } from "./core/render/engine_manager";
 import { DisposableRegistry } from "./core/lifecycle/disposable_registry";
-import { ChunkTree } from "./systems/lod/chunks/chunk_tree";
+import { LodConfig } from "./systems/lod/lod_config";
 
 let debugLayerReady: Promise<void> | null = null;
 
@@ -38,7 +38,7 @@ window.addEventListener("DOMContentLoaded", async () => {
         }
 
         if (e.key === "m") {
-            ChunkTree.debugLODEnabled = !ChunkTree.debugLODEnabled;
+            LodConfig.debugLODEnabled = !LodConfig.debugLODEnabled;
         }
     });
 

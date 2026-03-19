@@ -1,5 +1,5 @@
 import type { Vector3 } from "@babylonjs/core";
-import { computeSSEPxFast, estimatePatchWorldSize4 } from "./chunk_metrics";
+import { computeSSEPxFast, estimatePatchWorldSize4 } from "./cdlod_metrics";
 
 export type LodDecision = {
     ssePx: number;
