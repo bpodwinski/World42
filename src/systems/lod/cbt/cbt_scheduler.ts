@@ -189,6 +189,10 @@ export class CbtPlanet {
         this.material.useLogarithmicDepth = true;
     }
 
+    setWireframe(on: boolean): void {
+        if (this.material) this.material.wireframe = on;
+    }
+
     private updateSunDirection(): void {
         if (!this.sunLight || !this.starPosWorldDouble) return;
 
@@ -214,6 +218,8 @@ export class CbtScheduler {
     private observer: Observer<Scene> | null = null;
     private budgetMs: number;
     private robin = 0;
+    private wireframe = false;
+    private readonly onKeyDown: (e: KeyboardEvent) => void;
 
     constructor(
         private scene: Scene,
@@ -223,6 +229,16 @@ export class CbtScheduler {
     ) {
         this.planets = planets;
         this.budgetMs = options.budgetMs ?? 2;
+
+        this.onKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'w' || e.key === 'W') {
+                this.wireframe = !this.wireframe;
+                for (const planet of this.planets) {
+                    planet.setWireframe(this.wireframe);
+                }
+            }
+        };
+        window.addEventListener('keydown', this.onKeyDown);
     }
 
     setPlanets(planets: CbtPlanet[]): void {
@@ -248,6 +264,7 @@ export class CbtScheduler {
     }
 
     dispose(): void {
+        window.removeEventListener('keydown', this.onKeyDown);
         this.stop();
         for (const planet of this.planets) {
             planet.dispose();
