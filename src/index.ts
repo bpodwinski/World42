@@ -40,6 +40,11 @@ window.addEventListener("DOMContentLoaded", async () => {
         if (e.key === "m") {
             LodConfig.debugLODEnabled = !LodConfig.debugLODEnabled;
         }
+
+        if (e.key === "w") {
+            LodConfig.wireframeOverlay = !LodConfig.wireframeOverlay;
+            console.log(`[debug] wireframeOverlay = ${LodConfig.wireframeOverlay}`);
+        }
     });
 
     // Resize

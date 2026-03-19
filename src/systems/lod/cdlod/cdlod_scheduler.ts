@@ -155,7 +155,10 @@ export class LodScheduler {
         }
 
         if (this.applyDebugEveryFrame) {
-            for (const r of this.roots) r.updateDebugLOD(LodConfig.debugLODEnabled);
+            for (const r of this.roots) {
+                r.updateDebugLOD(LodConfig.debugLODEnabled);
+                r.updateWireframeOverlay(LodConfig.wireframeOverlay);
+            }
         }
 
         // Round-robin: itère sur tous les roots en commençant par _rootRobin.

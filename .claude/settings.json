@@ -6,6 +6,9 @@
       "Bash(mv chunk_geometry.ts cdlod_geometry.ts)",
       "Bash(mv chunk_lod_eval.ts cdlod_lod_eval.ts)",
       "Bash(mv chunk_lod_eval.test.ts cdlod_lod_eval.test.ts)"
+    ],
+    "additionalDirectories": [
+      "d:\\Dev\\World42\\.claude"
     ]
   }
 }

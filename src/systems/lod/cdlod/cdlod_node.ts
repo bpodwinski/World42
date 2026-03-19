@@ -559,6 +559,22 @@ export class ChunkNode {
     }
 
     /**
+     * Toggle wireframe overlay on this chunk mesh and all descendants.
+     */
+    public updateWireframeOverlay(enabled: boolean): void {
+        if (this.mesh) {
+            if (enabled && !this.mesh.edgesRenderer) {
+                this.mesh.enableEdgesRendering();
+                this.mesh.edgesWidth = 4.0;
+                this.mesh.edgesColor.set(0, 1, 0, 1);
+            } else if (!enabled && this.mesh.edgesRenderer) {
+                this.mesh.disableEdgesRendering();
+            }
+        }
+        this.children?.forEach((c) => c.updateWireframeOverlay(enabled));
+    }
+
+    /**
      * Priority hint for the scheduler (smaller = more urgent).
      * Uses WorldDouble distance-to-patch based on culling radius.
      */

@@ -14,6 +14,7 @@ import { classifySplitCandidates, measureLeafProjectedAreas } from './cbt_classi
 import { CbtForge, type CbtLeafBuildParams } from './cbt_forge';
 import { CbtState, type CbtNode } from './cbt_state';
 import { TerrainShader } from '../../../game_objects/planets/rocky_planet/terrains_shader';
+import { LodConfig } from '../lod_config';
 
 // ---------------------------------------------------------------------------
 // Per-leaf mesh tracking
@@ -166,6 +167,18 @@ export class CbtPlanet {
         );
 
         const mergeThresholdPx2 = this.splitThresholdPx2 * this.splitHysteresis;
+
+        // Wireframe overlay on leaf meshes
+        for (const [, entry] of this.leafMeshes) {
+            if (!entry.mesh) continue;
+            if (LodConfig.wireframeOverlay && !entry.mesh.edgesRenderer) {
+                entry.mesh.enableEdgesRendering();
+                entry.mesh.edgesWidth = 4.0;
+                entry.mesh.edgesColor.set(0, 1, 0, 1);
+            } else if (!LodConfig.wireframeOverlay && entry.mesh.edgesRenderer) {
+                entry.mesh.disableEdgesRendering();
+            }
+        }
 
         // Debug log every ~60 frames
         if (++this._debugTimer % 60 === 0) {
