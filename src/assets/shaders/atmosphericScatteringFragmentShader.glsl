@@ -45,9 +45,23 @@ uniform float ozoneFalloff; // Ozone falloff around the ozone layer in meters
 
 uniform float sunIntensity; // Controls overall atmosphere brightness
 
+uniform float logarithmicDepthConstant; // 2.0 / log2(maxZ + 1.0), 0 = linear depth
+
 // Remaps a value from one range to another
 float remap(float value, float low1, float high1, float low2, float high2) {
     return low2 + (value - low1) * (high2 - low2) / (high1 - low1);
+}
+
+// Decode depth buffer value to linear view-space distance
+float decodeDepth(float rawDepth) {
+    if (logarithmicDepthConstant > 0.0) {
+        // Logarithmic depth: rawDepth = log2(1 + z) * C * 0.5
+        // Invert: z = pow(2, rawDepth / (C * 0.5)) - 1
+        float halfC = logarithmicDepthConstant * 0.5;
+        return pow(2.0, rawDepth / halfC) - 1.0;
+    }
+    // Linear depth fallback
+    return remap(rawDepth, 0.0, 0.9, cameraNear, cameraFar);
 }
 
 // Compute the world position of a pixel from its UV coordinates and depth
@@ -58,8 +72,8 @@ vec3 worldFromUV(vec2 UV, float depth) {
     // Unproject the pixel to view space
     vec4 posVS = inverseProjection * ndc;
 
-    // Now account for the depth (we can't do it before because of the perspective projection being non uniform)
-    posVS.xyz *= remap(depth, 0.0, 0.9, cameraNear, cameraFar);
+    // Account for depth
+    posVS.xyz *= decodeDepth(depth);
 
     // Unproject the point to world space
     vec4 posWS = inverseView * vec4(posVS.xyz, 1.0);

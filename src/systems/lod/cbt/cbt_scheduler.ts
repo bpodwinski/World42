@@ -172,6 +172,7 @@ export class CbtPlanet {
         this.material.disableLighting = true;
         this.material.emissiveColor = new Color3(0.2, 1.0, 0.2);
         this.material.wireframe = true;
+        this.material.useLogarithmicDepth = true;
     }
 
     private updateMaterialUniforms(): void {

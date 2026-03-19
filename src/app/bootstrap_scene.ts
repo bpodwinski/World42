@@ -72,8 +72,8 @@ export async function bootstrapScene(
 
     const camera = new OriginCamera('camera_player', spawnPosWorldDouble, scene);
     camera.debugMode = true;
-    camera.minZ = 0.001;
-    camera.maxZ = 1_000_000;
+    camera.minZ = 0.1;
+    camera.maxZ = 1e9;
     camera.fov = 1.4;
     camera.applyGravity = false;
     camera.inertia = 0;

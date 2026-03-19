@@ -102,6 +102,13 @@ export class AtmosphericScatteringPostProcess extends PostProcess {
             effect.setFloat('cameraNear', camera.minZ);
             effect.setFloat('cameraFar', camera.maxZ);
 
+            // logarithmic depth constant: C = 2 / log2(maxZ + 1)
+            // 0 means linear depth (fallback in shader)
+            const logC = camera.maxZ > 0
+                ? 2.0 / Math.log2(camera.maxZ + 1.0)
+                : 0.0;
+            effect.setFloat('logarithmicDepthConstant', logC);
+
             effect.setFloat('planetRadius', planetRadius);
             effect.setFloat('atmosphereRadius', atmosphereRadius);
 
