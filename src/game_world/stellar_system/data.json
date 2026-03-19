@@ -21,7 +21,7 @@
         "Mercury_CDLOD": {
           "type": "planet",
           "lod_algorithm": "cdlod",
-          "position_km": [57910000, 5000, 0],
+          "position_km": [57910000, 10000, 0],
           "diameter_km": 4879,
           "rotation_period_days": 58.6
         },

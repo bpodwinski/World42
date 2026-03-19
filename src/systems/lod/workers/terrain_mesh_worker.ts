@@ -51,7 +51,8 @@ function isChunkMeshData(value: unknown): value is ChunkMeshData {
     const candidate = value as Partial<ChunkMeshData>;
     return (
         isArrayLikeNumber(candidate.positions) &&
-        isArrayLikeNumber(candidate.normals) &&
+        isArrayLikeNumber(candidate.sgCoarse) &&
+        isArrayLikeNumber(candidate.sgDetail) &&
         isArrayLikeNumber(candidate.morphDeltas) &&
         isArrayLikeNumber(candidate.uvs) &&
         isArrayLikeNumber(candidate.indices)
@@ -61,7 +62,8 @@ function isChunkMeshData(value: unknown): value is ChunkMeshData {
 function isTypedMeshData(value: ChunkMeshData): value is ChunkMeshDataTyped {
     return (
         value.positions instanceof Float32Array &&
-        value.normals instanceof Float32Array &&
+        value.sgCoarse instanceof Float32Array &&
+        value.sgDetail instanceof Float32Array &&
         value.morphDeltas instanceof Float32Array &&
         value.uvs instanceof Float32Array &&
         (value.indices instanceof Uint16Array || value.indices instanceof Uint32Array)
@@ -190,7 +192,8 @@ workerScope.onmessage = async (event: MessageEvent<unknown>) => {
                     meshData: {
                         ...meshData,
                         positions: Array.from(meshData.positions),
-                        normals: Array.from(meshData.normals),
+                        sgCoarse: Array.from(meshData.sgCoarse),
+                        sgDetail: Array.from(meshData.sgDetail),
                         morphDeltas: Array.from(meshData.morphDeltas),
                         uvs: Array.from(meshData.uvs),
                         indices: Array.from(meshData.indices),
@@ -214,7 +217,8 @@ workerScope.onmessage = async (event: MessageEvent<unknown>) => {
             },
             [
                 meshData.positions.buffer,
-                meshData.normals.buffer,
+                meshData.sgCoarse.buffer,
+                meshData.sgDetail.buffer,
                 meshData.morphDeltas.buffer,
                 meshData.uvs.buffer,
                 meshData.indices.buffer,

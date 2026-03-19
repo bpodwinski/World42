@@ -7,7 +7,8 @@ type IndexLike = Uint16Array | Uint32Array | number[] | ReadonlyArray<number>;
 
 export type MeshDataLike = {
     positions: FloatLike;
-    normals: FloatLike;
+    sgCoarse: FloatLike;
+    sgDetail: FloatLike;
     morphDeltas?: FloatLike;
     uvs: FloatLike;
     indices: IndexLike;
@@ -54,11 +55,12 @@ export class Terrain {
 
         const vd = new VertexData();
         vd.positions = positions;
-        vd.normals = toFloatArray(meshData.normals);
         vd.uvs = toFloatArray(meshData.uvs);
         vd.indices = toIndexArray(meshData.indices);
 
         vd.applyToMesh(mesh, false);
+        mesh.setVerticesData('sgCoarse', toFloatArray(meshData.sgCoarse), false, 3);
+        mesh.setVerticesData('sgDetail', toFloatArray(meshData.sgDetail), false, 3);
         mesh.setVerticesData('morphDelta', morphDeltas, false, 3);
 
         return mesh;

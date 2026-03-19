@@ -129,7 +129,7 @@ export class TerrainShader {
             this.scene,
             { vertex: 'terrain', fragment: 'terrain' },
             {
-                attributes: ['position', 'normal', 'morphDelta', 'uv'],
+                attributes: ['position', 'sgCoarse', 'sgDetail', 'morphDelta', 'uv'],
                 uniforms: [
                     'worldViewProjection',
                     'world',
@@ -164,6 +164,8 @@ export class TerrainShader {
                     'shadowBlendStart',
                     'shadowBlendEnd',
                     'cameraPosRender',
+                    'sgDetailAttenStart',
+                    'sgDetailAttenEnd',
                 ],
                 samplers: ['diffuseTexture', 'detailTexture', 'shadowSamplerNear', 'shadowSamplerFar'],
             }
@@ -213,6 +215,8 @@ export class TerrainShader {
         shader.setVector3('cameraPosRender', Vector3.Zero());
         shader.setTexture('shadowSamplerNear', TerrainShader.getDummyShadow(this.scene));
         shader.setTexture('shadowSamplerFar', TerrainShader.getDummyShadow(this.scene));
+        shader.setFloat('sgDetailAttenStart', 0);
+        shader.setFloat('sgDetailAttenEnd', 1);
 
         shader.onBindObservable.add(() => {
             const ctx = TerrainShader.getTerrainShadowContext(this.scene);

@@ -39,7 +39,8 @@ export type ChunkBoundsInfo = {
 
 export type ChunkMeshDataArrays = {
     positions: number[];
-    normals: number[];
+    sgCoarse: number[];
+    sgDetail: number[];
     morphDeltas: number[];
     uvs: number[];
     indices: number[];
@@ -48,7 +49,8 @@ export type ChunkMeshDataArrays = {
 
 export type ChunkMeshDataTyped = {
     positions: Float32Array;
-    normals: Float32Array;
+    sgCoarse: Float32Array;
+    sgDetail: Float32Array;
     morphDeltas: Float32Array;
     uvs: Float32Array;
     indices: Uint16Array | Uint32Array;

@@ -67,7 +67,7 @@ interface ChunkGenerationParams {
  *
  * Coordinate spaces (critical):
  * - `cameraWorldDouble`, `planetEntity.doublepos`, `patchCenterWorldDouble`, `starPosWorldDouble` are **WorldDouble**.
- * - Worker mesh positions/normals and shader inputs like `uPatchCenter` are **planet-local**.
+ * - Worker mesh positions/surface gradients and shader inputs like `uPatchCenter` are **planet-local**.
  * - Conversions WorldDouble -> planet-local are done using `renderParent` world matrix inverse.
  */
 export class ChunkForge {
@@ -171,6 +171,11 @@ export class ChunkForge {
         ) as ShaderMaterial;
 
         terrainMesh.material = mat;
+
+        // Surface gradient detail attenuation based on patch size
+        const patchSize = params.radius * Math.pow(2, -params.level);
+        mat.setFloat('sgDetailAttenStart', patchSize * 10);
+        mat.setFloat('sgDetailAttenEnd', patchSize * 20);
 
         const sm = mat as ShaderMaterial;
 

@@ -8,7 +8,8 @@ precision highp float;
 // Attributes
 //------------------------------------------------------------------------------
 attribute vec3 position;
-attribute vec3 normal;
+attribute vec3 sgCoarse;
+attribute vec3 sgDetail;
 attribute vec3 morphDelta;
 attribute vec2 uv;
 
@@ -20,25 +21,26 @@ uniform mat4 worldViewProjection;
 varying vec3 vWorldPosRender;
 uniform float lodMorph;
 
-uniform float amplitude;
 uniform vec3 uPlanetCenter; // (optionnel) planet-local center, souvent (0,0,0)
 uniform vec3 uPatchCenter;  // patch center (planet-local)
 
 //------------------------------------------------------------------------------
 // Varyings (to fragment shader)
 //------------------------------------------------------------------------------
-varying vec3 vPosition;   // planet-local
-varying vec2 vUV;         // patch-relative UV
-varying vec3 vNormal;     // planet-local normal
-varying vec3 vWorldPos;   // render-space (world matrix applied)
+varying vec3 vPosition;      // planet-local
+varying vec2 vUV;            // patch-relative UV
+varying vec3 vSgCoarse;      // surface gradient coarse band
+varying vec3 vSgDetail;      // surface gradient detail band
+varying vec3 vWorldPos;      // render-space (world matrix applied)
 
 void main(void) {
   // Displace in planet-local
-  vec3 displacedPosition = position + morphDelta * lodMorph + normal * amplitude;
+  vec3 displacedPosition = position + morphDelta * lodMorph;
 
   // Varyings
   vPosition = displacedPosition;
-  vNormal = normalize(normal);
+  vSgCoarse = sgCoarse;
+  vSgDetail = sgDetail;
 
   // Patch-stable spherical UV (debug/optional)
   vec3 diff = normalize(displacedPosition - uPatchCenter);

@@ -99,6 +99,11 @@ export class CbtForge {
 
         terrainMesh.material = mat;
 
+        // Surface gradient detail attenuation based on patch size
+        const patchSize = params.radius * Math.pow(2, -params.level);
+        mat.setFloat('sgDetailAttenStart', patchSize * 10);
+        mat.setFloat('sgDetailAttenEnd', patchSize * 20);
+
         mat.setVector3('lightColor', starColor);
         mat.setFloat('lightIntensity', starIntensity);
 

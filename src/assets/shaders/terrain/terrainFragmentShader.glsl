@@ -6,7 +6,8 @@ precision highp int;
 //------------------------------------------------------------------------------
 varying vec3 vPosition;      // planet-local
 varying vec2 vUV;
-varying vec3 vNormal;
+varying vec3 vSgCoarse;      // surface gradient coarse band
+varying vec3 vSgDetail;      // surface gradient detail band
 varying vec3 vWorldPosRender; // render-space (world * position)
 
 //------------------------------------------------------------------------------
@@ -59,6 +60,8 @@ uniform float shadowNdcHalfZRange; // 1 si WebGPU (z NDC 0..1)
 uniform float shadowBlendStart;
 uniform float shadowBlendEnd;
 uniform vec3 cameraPosRender;
+uniform float sgDetailAttenStart;
+uniform float sgDetailAttenEnd;
 
 float shadowDepthMetric(float clipZ) {
   float z01 = (shadowNdcHalfZRange > 0.5) ? clipZ : (clipZ * 0.5 + 0.5);
@@ -183,7 +186,7 @@ float computeShadowCascaded(vec3 worldPosRender, vec3 n, vec3 L) {
 // Triplanar weights
 //------------------------------------------------------------------------------
 vec3 triplanarWeights(vec3 n) {
-  vec3 w = pow(abs(n), vec3(4.0));
+  vec3 w = pow(abs(n), vec3(2.0));
   return w / (w.x + w.y + w.z);
 }
 
@@ -213,10 +216,24 @@ void main(void) {
     return;
   }
 
-  vec3 n = normalize(vNormal);
+  vec3 radialN = normalize(vPosition);                                  // continuous on sphere — triplanar
 
-  vec4 baseColor = sampleTriplanarDiffuse(vPosition, n, textureScale);
-  vec4 detailColor = sampleTriplanarDetail(vPosition - uPatchCenter, n, detailScale);
+  // Distance-based attenuation for detail surface gradient band
+  float dist = length(vWorldPosRender);  // render-space, camera at origin
+  float detailAtt = 1.0 - clamp(
+      (dist - sgDetailAttenStart) / max(sgDetailAttenEnd - sgDetailAttenStart, 0.001),
+      0.0, 1.0
+  );
+
+  // Composite surface gradients (additive blending)
+  vec3 totalSG = vSgCoarse + detailAtt * vSgDetail;
+
+  // Reconstruct normal from surface gradient: N = normalize(radial - SG / pr)
+  // Division by length(vPosition) matches the original: normalize(unit*pr - grad_t) = normalize(unit - grad_t/pr)
+  vec3 n = normalize(radialN - totalSG / length(vPosition));
+
+  vec4 baseColor = sampleTriplanarDiffuse(vPosition, radialN, textureScale);
+  vec4 detailColor = sampleTriplanarDetail(vPosition, radialN, detailScale);
   vec4 combined = mix(baseColor, baseColor * detailColor, detailBlend);
 
   vec3 L = normalize(-lightDirection);
@@ -225,7 +242,7 @@ void main(void) {
   vec3 ambient = vec3(0.01);
   vec3 diffuse = lightColor * (ndl * lightIntensity);
 
-  float vis = computeShadowCascaded(vWorldPosRender, n, L);           // 0..1 (lit)
+  float vis = computeShadowCascaded(vWorldPosRender, n, L);            // 0..1 (lit)
   float shadowFactor = mix(1.0 - shadowDarkness, 1.0, vis);           // lit=1, shadow=(1-darkness)
 
   vec3 lighting = ambient + diffuse * shadowFactor;

@@ -64,7 +64,8 @@ export function emitMeshFromLeaves(
     const totalIndices = visibleLeaves.length * trisPerLeaf * 3;
 
     const positions = new Float32Array(totalVertices * 3);
-    const normals = new Float32Array(totalVertices * 3);
+    const sgCoarse = new Float32Array(totalVertices * 3);  // zero = pure sphere (no noise gradient)
+    const sgDetail = new Float32Array(totalVertices * 3);
     const morphDeltas = new Float32Array(totalVertices * 3);
     const uvs = new Float32Array(totalVertices * 2);
     const indices =
@@ -111,9 +112,7 @@ export function emitMeshFromLeaves(
                 positions[vOff + 1] = py;
                 positions[vOff + 2] = pz;
 
-                normals[vOff] = nx;
-                normals[vOff + 1] = ny;
-                normals[vOff + 2] = nz;
+                // sgCoarse/sgDetail stay zero — pure sphere has no noise gradient
 
                 const [u, v] = sphericalUV(nx, ny, nz);
                 uvs[uvOff] = u;
@@ -149,7 +148,8 @@ export function emitMeshFromLeaves(
 
     return {
         positions,
-        normals,
+        sgCoarse,
+        sgDetail,
         morphDeltas,
         uvs,
         indices,
