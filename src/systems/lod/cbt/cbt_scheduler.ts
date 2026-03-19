@@ -1,5 +1,6 @@
 import {
     Color3,
+    DirectionalLight,
     Mesh,
     Observer,
     Scene,
@@ -39,6 +40,7 @@ export class CbtPlanet {
 
     private mesh: Mesh | null = null;
     private material: StandardMaterial | null = null;
+    private sunLight: DirectionalLight | null = null;
     private state: CbtState;
     private pendingFullRefresh = true;
     private shadowAttached = false;
@@ -130,11 +132,13 @@ export class CbtPlanet {
             this.pendingFullRefresh = false;
         }
 
-        this.updateMaterialUniforms();
+        this.updateSunDirection();
         this.ensureShadowCaster();
     }
 
     dispose(): void {
+        this.sunLight?.dispose();
+        this.sunLight = null;
         this.material?.dispose();
         this.material = null;
         this.mesh?.dispose();
@@ -143,7 +147,10 @@ export class CbtPlanet {
     }
 
     private rebuildMesh(): void {
-        const meshData = emitMeshFromLeaves(this.state.getLeafNodes(), this.radiusSim);
+        const meshData = emitMeshFromLeaves(
+            this.state.getLeafNodes(),
+            this.radiusSim
+        );
 
         if (!this.mesh) {
             this.mesh = new Mesh(`cbt_${this.key}`, this.scene);
@@ -167,21 +174,32 @@ export class CbtPlanet {
     private ensureMaterial(): void {
         if (this.material) return;
 
+        // DirectionalLight oriented from star → planet
+        this.sunLight = new DirectionalLight(
+            `cbt_sun_${this.key}`,
+            new Vector3(0, -1, 0), // placeholder, updated each frame
+            this.scene
+        );
+        this.sunLight.intensity = 1.5;
+
         this.material = new StandardMaterial(`cbt_mat_${this.key}`, this.scene);
-        this.material.backFaceCulling = false;
-        this.material.disableLighting = true;
-        this.material.emissiveColor = new Color3(0.2, 1.0, 0.2);
-        this.material.wireframe = true;
+        this.material.backFaceCulling = true;
+        this.material.diffuseColor = new Color3(0.6, 0.55, 0.4);
+        this.material.specularColor = new Color3(0.05, 0.05, 0.05);
         this.material.useLogarithmicDepth = true;
     }
 
-    private updateMaterialUniforms(): void {
-        // Intentionally empty for the emissive MVP material path.
+    private updateSunDirection(): void {
+        if (!this.sunLight || !this.starPosWorldDouble) return;
+
+        // Direction = normalize(starPos - planetCenter) → points from star toward planet
+        const dir = this.starPosWorldDouble.subtract(this.entity.doublepos);
+        if (dir.lengthSquared() < 1e-12) return;
+        dir.normalize();
+        this.sunLight.direction.copyFrom(dir);
     }
 
     private ensureShadowCaster(): void {
-        // MVP: keep CBT visible first; cascade shadow integration can over-darken
-        // coarse CBT triangles and make the surface appear black.
         if (!this.mesh) return;
         this.mesh.receiveShadows = false;
     }
