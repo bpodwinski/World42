@@ -60,8 +60,6 @@ uniform float shadowNdcHalfZRange; // 1 si WebGPU (z NDC 0..1)
 uniform float shadowBlendStart;
 uniform float shadowBlendEnd;
 uniform vec3 cameraPosRender;
-uniform float sgDetailAttenStart;
-uniform float sgDetailAttenEnd;
 
 float shadowDepthMetric(float clipZ) {
   float z01 = (shadowNdcHalfZRange > 0.5) ? clipZ : (clipZ * 0.5 + 0.5);
@@ -217,22 +215,20 @@ void main(void) {
   }
 
   vec3 radialN = normalize(vPosition);                                  // continuous on sphere — triplanar
+  float pr = length(vPosition);                                          // planet radius at vertex
+  float dist = length(vWorldPosRender);                                  // camera distance (render-space)
 
-  // Distance-based attenuation for detail surface gradient band
-  float dist = length(vWorldPosRender);  // render-space, camera at origin
-  float detailAtt = 1.0 - clamp(
-      (dist - sgDetailAttenStart) / max(sgDetailAttenEnd - sgDetailAttenStart, 0.001),
-      0.0, 1.0
-  );
+  // Distance-based attenuation for detail SG band (global, scale-invariant)
+  float detailAtt = 1.0 - smoothstep(pr * 0.002, pr * 0.02, dist);
 
   // Composite surface gradients (additive blending)
   vec3 totalSG = vSgCoarse + detailAtt * vSgDetail;
 
   // Reconstruct normal from surface gradient: N = normalize(radial - SG / pr)
-  vec3 terrainN = normalize(radialN - totalSG / length(vPosition));
+  vec3 terrainN = normalize(radialN - totalSG / pr);
 
   // Blend terrain normal toward sphere normal at distance to hide LOD seams
-  float lodBlend = 0.9 * smoothstep(sgDetailAttenStart, sgDetailAttenEnd, dist);
+  float lodBlend = 0.9 * smoothstep(pr * 0.005, pr * 0.05, dist);
   vec3 n = mix(terrainN, radialN, lodBlend);
 
   vec4 baseColor = sampleTriplanarDiffuse(vPosition, radialN, textureScale);
