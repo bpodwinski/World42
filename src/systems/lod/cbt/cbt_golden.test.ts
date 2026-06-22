@@ -33,20 +33,28 @@ function fnv1a(str: string): string {
     return (h >>> 0).toString(16).padStart(8, '0');
 }
 
+function centroidKey(leaf: CbtNode): string {
+    const cx = (leaf.v0.x + leaf.v1.x + leaf.v2.x) / 3;
+    const cy = (leaf.v0.y + leaf.v1.y + leaf.v2.y) / 3;
+    const cz = (leaf.v0.z + leaf.v1.z + leaf.v2.z) / 3;
+    return `${q(cx)},${q(cy)},${q(cz)}`;
+}
+
+// Canonical order: sort leaves by centroid. This makes both hashes independent of
+// node-id assignment and leaf iteration order, so they assert the GEOMETRY of the
+// tree, not bookkeeping. A structural refactor that preserves geometry (e.g. the
+// Map→typed-array pool migration) must keep these hashes unchanged.
+function canonical(leaves: ReadonlyArray<CbtNode>): CbtNode[] {
+    return [...leaves].sort((a, b) => centroidKey(a).localeCompare(centroidKey(b)));
+}
+
 function topologyHash(leaves: ReadonlyArray<CbtNode>): string {
-    const rows = leaves
-        .map((leaf) => {
-            const cx = (leaf.v0.x + leaf.v1.x + leaf.v2.x) / 3;
-            const cy = (leaf.v0.y + leaf.v1.y + leaf.v2.y) / 3;
-            const cz = (leaf.v0.z + leaf.v1.z + leaf.v2.z) / 3;
-            return `${leaf.id}:${leaf.level}:${q(cx)},${q(cy)},${q(cz)}`;
-        })
-        .sort();
+    const rows = canonical(leaves).map((leaf) => `${leaf.level}:${centroidKey(leaf)}`);
     return fnv1a(rows.join('|'));
 }
 
 function meshHash(leaves: ReadonlyArray<CbtNode>): string {
-    const mesh = emitMeshFromLeaves(leaves, GOLD_RADIUS);
+    const mesh = emitMeshFromLeaves(canonical(leaves), GOLD_RADIUS);
     let acc = '';
     for (let i = 0; i < mesh.positions.length; i++) acc += q(mesh.positions[i]) + ',';
     acc += '#';
@@ -56,19 +64,23 @@ function meshHash(leaves: ReadonlyArray<CbtNode>): string {
 
 /**
  * Deterministic descent: camera close to the planet, repeatedly classify and
- * split the top candidates, then pull back and merge. Exercises the real
- * classify→split→merge code path.
+ * split EVERY candidate above threshold. Splitting all candidates (no per-round
+ * cap) keeps the resulting leaf set independent of leaf iteration order — so the
+ * geometry is determined purely by the classify threshold + bisection, and the
+ * hashes are stable across structural refactors (e.g. the typed-array pool).
  */
 function runScenario(): CbtState {
     const state = new CbtState(GOLD_RADIUS, GOLD_MAX_DEPTH);
 
-    // Grow: 6 rounds of split toward a near camera.
     for (let round = 0; round < 6; round++) {
         const leaves = state.getLeafNodes();
         const candidates = classifySplitCandidates(
             makeClassifyParams(leaves, GOLD_RADIUS, { cameraDistance: GOLD_RADIUS * 1.05 })
         );
-        state.splitByPriority(candidates.map((c) => c.nodeId), 64);
+        state.splitByPriority(
+            candidates.map((c) => c.nodeId),
+            candidates.length
+        );
     }
 
     return state;

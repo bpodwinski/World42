@@ -72,6 +72,50 @@ reclaimed. Flag-gated (`cullBackface`, default **off** in the classify functions
   silhouette pop or cracks. Tune `cullMinDot` (more negative = wider guard band,
   less pop, fewer culled). Disable per-planet via `CbtPlanetOptions.cullBackface`.
 
+## Phase A1 — typed-array pool (replaces Map/Set)
+
+`CbtState` internals rewritten to a Structure-of-Arrays pool (paper P1+P2): `verts`
+(Float64Array, f64 to preserve tree precision), `level`/`parent`/`child0`/`child1`, plus
+`alive` and `leafBits` bitfields and a free-list allocator. Pure geometry helpers
+(`splitByLongestEdge` etc.) reused verbatim. Public API unchanged.
+
+- **Geometry preserved**: golden hashes were first made **id- and order-independent**
+  (canonical by centroid) so they assert geometry not bookkeeping; the pool keeps them green.
+  (Also fixed a latent test flaw: the golden scenario now splits *all* candidates per round,
+  removing an order-dependent tie at the per-round split cap.)
+- **`getLeafNodes()`** is now cached (dirty-flagged on split/merge) and returns reused,
+  per-slot pooled `CbtNode` views — **free on cache hits** (steady camera) and **zero-alloc**
+  when rebuilt on churn frames (vs the old Map returning fresh refs each call).
+- Enables the neighbour table (A2) and incremental mesh (A3): every node now has a stable
+  integer slot id.
+
+## Phase A2 — neighbour table + conformity (fixes cracks)
+
+`CbtState` is now a **ROAM binary-triangle** tree: each node is `(apex, left, right)`
+with the split edge as its hypotenuse, so the base neighbour is always well defined.
+A `neighbors Int32Array(cap*3)` table (`[base, left, right]`) is maintained on every
+split/merge, and refinement uses the **forced-diamond split** (Rivara/Duchaineau
+compatibility chain): splitting a triangle first force-splits its base neighbour so the two
+refine together, keeping the mesh watertight. Decimation is conservative — a diamond
+collapses only when all four of its triangles are leaves.
+
+- **Seeding**: the 8 octahedron faces are paired into 4 base-edge diamonds
+  (`{0,4} {1,5} {2,6} {3,7}`), apex at the poles, hypotenuse on the equator.
+- **Crack fix proven by test** (`cbt_conformity.test.ts`, geometry-only — no neighbour
+  introspection): after deep single-spot and multi-spot adaptive refinement, **every edge
+  is shared by exactly two leaves (no T-junctions)** and the mesh stays **restricted**
+  (edge-adjacent leaves differ by ≤1 level).
+- **Emit winding fix**: `emitMeshFromLeaves` now orients each triangle's front face outward
+  from the geometric normal (bintree vertex order isn't consistently wound), replacing the
+  old fixed flip — prevents back-face-culled holes.
+- **Semantics change**: a split now refines a *diamond* (+2 leaves, plus any forced
+  neighbours), and a merge collapses a diamond (−2). Existing state/invariant tests and the
+  golden snapshots were updated/re-blessed accordingly (geometry is the new bintree surface;
+  the golden hashes remain id/order-independent).
+- **Visual check (required, user step)**: `npm run serve` → fly to a CBT planet, **W**
+  (wireframe) / **X** (LOD colours); confirm no cracks at level boundaries and silhouettes.
+  Tune the merge cadence if pop is visible; geomorph (popping) is intentionally out of scope.
+
 ## Deferred (not in this pass)
 
 - Typed-array heap + bitfield replacing `Map<number, CbtNode>` (paper structure;

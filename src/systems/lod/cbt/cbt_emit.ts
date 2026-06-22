@@ -170,11 +170,32 @@ export function emitMeshFromLeaves(
             idx++;
         }
 
-        // Emit indices with flipped winding (CW for BabylonJS front-face)
+        // Orient each triangle so its front face points outward. Bintree node
+        // vertex order (apex, left, right) is not consistently wound, so choose
+        // the winding per-triangle from the geometric normal vs the radial.
         const base = idx - 3;
+        const b0 = base * 3;
+        const b1 = b0 + 3;
+        const b2 = b0 + 6;
+        const ax = positions[b0], ay = positions[b0 + 1], az = positions[b0 + 2];
+        const bx = positions[b1], by = positions[b1 + 1], bz = positions[b1 + 2];
+        const cx = positions[b2], cy = positions[b2 + 1], cz = positions[b2 + 2];
+        const e1x = bx - ax, e1y = by - ay, e1z = bz - az;
+        const e2x = cx - ax, e2y = cy - ay, e2z = cz - az;
+        const nrx = e1y * e2z - e1z * e2y;
+        const nry = e1z * e2x - e1x * e2z;
+        const nrz = e1x * e2y - e1y * e2x;
+        // Outward if the natural normal agrees with the centroid direction.
+        const outward = nrx * (ax + bx + cx) + nry * (ay + by + cy) + nrz * (az + bz + cz) > 0;
         indices[base] = base;
-        indices[base + 1] = base + 2;
-        indices[base + 2] = base + 1;
+        if (outward) {
+            // Match the previous convention for outward-wound triangles.
+            indices[base + 1] = base + 2;
+            indices[base + 2] = base + 1;
+        } else {
+            indices[base + 1] = base + 1;
+            indices[base + 2] = base + 2;
+        }
     }
 
     return {

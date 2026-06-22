@@ -216,19 +216,20 @@ describe('CBT invariants — backside culling (Phase 2)', () => {
 });
 
 describe('CBT invariants — topology', () => {
-    it('conserves leaf count: +1 per split', () => {
+    it('conserves leaf count: +2 per conformal (diamond) split', () => {
         const state = new CbtState(RADIUS, MAX_DEPTH);
         const before = state.leafCount;
         const ids = state.getLeafNodes().map((l) => l.id);
         const splits = state.splitByPriority(ids, ids.length);
-        expect(state.leafCount).toBe(before + splits);
+        // Each successful diamond split refines a node + its same-level base partner.
+        expect(state.leafCount).toBe(before + 2 * splits);
     });
 
-    it('conserves leaf count: -1 per merge, restoring the parent as a leaf', () => {
+    it('conserves leaf count: -2 per diamond merge, restoring the coarse pair', () => {
         const state = new CbtState(RADIUS, MAX_DEPTH);
         const target = state.getLeafNodes()[0];
         state.splitByPriority([target.id], 1);
-        expect(state.leafCount).toBe(9);
+        expect(state.leafCount).toBe(10); // diamond split
 
         // The split node is no longer a leaf; its children are.
         const leafIdsAfterSplit = new Set(state.getLeafNodes().map((l) => l.id));
