@@ -5,6 +5,7 @@ import {
     TextBlock,
 } from "@babylonjs/gui";
 import { SpeedHUD } from "./components/speed_hud";
+import { PerfHUD } from "./components/perf_hud";
 import { CenterCrosshair } from "./components/center_crosshair";
 import { MouseCrosshair } from "./components/mouse_crosshair";
 
@@ -65,6 +66,7 @@ export class GuiManager {
     private ui: AdvancedDynamicTexture;
 
     private speedHud: SpeedHUD;
+    private perfHud: PerfHUD;
     private center: CenterCrosshair;
     private mouse!: MouseCrosshair;
 
@@ -104,6 +106,9 @@ export class GuiManager {
             outlineWidth: 4,
         });
 
+        // Performance HUD (hidden by default; toggle with the P key)
+        this.perfHud = new PerfHUD(this.ui);
+
         // Crosshairs
         this.center = new CenterCrosshair(this.ui, {
             src: this.opts.src,
@@ -136,6 +141,21 @@ export class GuiManager {
     /** Update the speed label (expects m/s) */
     public setSpeed(ms: number) {
         this.speedHud.set(ms);
+    }
+
+    /** Update the performance HUD text (multi-line, caller-formatted). */
+    public setPerfText(text: string) {
+        this.perfHud.set(text);
+    }
+
+    /** Toggle the performance HUD; returns the new visibility. */
+    public togglePerf(): boolean {
+        return this.perfHud.toggle();
+    }
+
+    /** Whether the performance HUD is currently visible. */
+    public isPerfVisible(): boolean {
+        return this.perfHud.isVisible();
     }
 
     // Center crosshair
@@ -190,6 +210,7 @@ export class GuiManager {
      */
     public dispose() {
         this.speedHud.dispose();
+        this.perfHud.dispose();
         this.center.dispose();
         this.mouse.dispose();
         this.ui.dispose();

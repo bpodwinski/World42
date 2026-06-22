@@ -7,6 +7,7 @@
     "build": "rspack --mode=production --node-env=production",
     "deploy": "gh-pages -d dist",
     "test": "vitest",
+    "bench": "vitest bench --run",
     "coverage": "vitest run --coverage",
     "pw": "node ./scripts/playwright_cli.mjs",
     "pw:help": "node ./scripts/playwright_cli.mjs --help",

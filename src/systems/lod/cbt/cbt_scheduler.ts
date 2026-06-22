@@ -13,7 +13,7 @@ import type {
     FloatingEntityInterface,
     OriginCamera,
 } from '../../../core/camera/camera_manager';
-import { classifySplitCandidates, measureLeafProjectedAreas } from './cbt_classify';
+import { classifyLeaves } from './cbt_classify';
 import { emitMeshFromLeaves } from './cbt_emit';
 import { CbtState } from './cbt_state';
 
@@ -30,6 +30,47 @@ export type CbtPlanetOptions = {
     starPosWorldDouble: Vector3 | null;
     starColor: Vector3;
     starIntensity: number;
+    /** Enable backside culling of split candidates (default true). */
+    cullBackface?: boolean;
+    /** Guard-band cosine threshold for the backside cull (default -0.05). */
+    cullMinDot?: number;
+};
+
+/** Per-planet telemetry, refreshed on each {@link CbtPlanet.update}. */
+export type CbtStats = {
+    /** Current leaf (triangle) count. */
+    leafCount: number;
+    /** Splits applied during the last update. */
+    splitsThisFrame: number;
+    /** Merges applied during the last update. */
+    mergesThisFrame: number;
+    /** Wall-clock ms for the classify (measure + split-candidate) section. */
+    classifyMs: number;
+    /** Wall-clock ms for the last mesh rebuild (0 if no rebuild occurred). */
+    rebuildMs: number;
+    /** Vertex count of the most recently emitted mesh. */
+    lastVertexCount: number;
+};
+
+/** Minimal per-planet geometry for deterministic headless capture. */
+export type CbtPlanetInfo = {
+    key: string;
+    /** Planet center in WorldDouble (sim units). */
+    center: [number, number, number];
+    radiusSim: number;
+};
+
+/** Scene-wide CBT telemetry aggregated across all planets. */
+export type CbtAggregateStats = {
+    planetCount: number;
+    leafCount: number;
+    splitsThisFrame: number;
+    mergesThisFrame: number;
+    /** Worst-case classify ms across planets (the frame-budget pressure point). */
+    classifyMs: number;
+    /** Worst-case rebuild ms across planets. */
+    rebuildMs: number;
+    vertexCount: number;
 };
 
 export class CbtPlanet {
@@ -45,12 +86,22 @@ export class CbtPlanet {
     private pendingFullRefresh = true;
     private shadowAttached = false;
     private debugLod = false;
+    private readonly stats: CbtStats = {
+        leafCount: 0,
+        splitsThisFrame: 0,
+        mergesThisFrame: 0,
+        classifyMs: 0,
+        rebuildMs: 0,
+        lastVertexCount: 0,
+    };
 
     private readonly renderParent: TransformNode;
     private readonly maxSplitsPerFrame: number;
     private readonly maxMergesPerFrame: number;
     private readonly splitThresholdPx2: number;
     private readonly splitHysteresis: number;
+    private readonly cullBackface: boolean;
+    private readonly cullMinDot: number;
 
     constructor(
         private scene: Scene,
@@ -66,6 +117,8 @@ export class CbtPlanet {
         this.maxMergesPerFrame = opts.maxMergesPerFrame ?? opts.maxSplitsPerFrame;
         this.splitThresholdPx2 = opts.splitThresholdPx2;
         this.splitHysteresis = opts.splitHysteresis;
+        this.cullBackface = opts.cullBackface ?? true;
+        this.cullMinDot = opts.cullMinDot ?? -0.05;
         this.state = new CbtState(opts.radiusSim, opts.maxDepth);
 
         this.rebuildMesh();
@@ -79,20 +132,16 @@ export class CbtPlanet {
         this.pendingFullRefresh = true;
     }
 
+    getStats(): Readonly<CbtStats> {
+        return this.stats;
+    }
+
     update(deadline: number): void {
         if (performance.now() >= deadline) return;
 
+        const classifyStart = performance.now();
         const leaves = this.state.getLeafNodes();
-        const leafMetrics = measureLeafProjectedAreas({
-            leaves,
-            cameraWorldDouble: this.camera.doublepos,
-            planetCenterWorldDouble: this.entity.doublepos,
-            renderParentWorldMatrix: this.renderParent.getWorldMatrix(),
-            viewportHeightPx: Math.max(1, this.scene.getEngine().getRenderHeight()),
-            cameraFovRadians: this.camera.fov,
-        });
-
-        const candidates = classifySplitCandidates({
+        const { splitCandidates, mergeParents } = classifyLeaves({
             leaves,
             cameraWorldDouble: this.camera.doublepos,
             planetCenterWorldDouble: this.entity.doublepos,
@@ -101,36 +150,32 @@ export class CbtPlanet {
             cameraFovRadians: this.camera.fov,
             splitThresholdPx2: this.splitThresholdPx2,
             splitHysteresis: this.splitHysteresis,
+            cullBackface: this.cullBackface,
+            cullMinDot: this.cullMinDot,
         });
 
         const splitCount = this.state.splitByPriority(
-            candidates.map((candidate) => candidate.nodeId),
+            splitCandidates.map((candidate) => candidate.nodeId),
             this.maxSplitsPerFrame
         );
 
-        const mergeThresholdPx2 = this.splitThresholdPx2 * this.splitHysteresis;
-        const parentAgg = new Map<number, { children: number; maxAreaPx2: number }>();
-        for (const metric of leafMetrics) {
-            if (metric.parentId === null) continue;
-            const prev = parentAgg.get(metric.parentId) ?? { children: 0, maxAreaPx2: 0 };
-            prev.children++;
-            prev.maxAreaPx2 = Math.max(prev.maxAreaPx2, metric.projectedAreaPx2);
-            parentAgg.set(metric.parentId, prev);
-        }
-
-        const mergeParentIds = Array.from(parentAgg.entries())
-            .filter(([, agg]) => agg.children === 2 && agg.maxAreaPx2 <= mergeThresholdPx2)
-            .sort((a, b) => a[1].maxAreaPx2 - b[1].maxAreaPx2)
-            .map(([parentId]) => parentId);
-
         const mergeCount = this.state.mergeByParentPriority(
-            mergeParentIds,
+            mergeParents,
             this.maxMergesPerFrame
         );
 
+        this.stats.classifyMs = performance.now() - classifyStart;
+        this.stats.splitsThisFrame = splitCount;
+        this.stats.mergesThisFrame = mergeCount;
+        this.stats.leafCount = this.state.leafCount;
+
         if (splitCount > 0 || mergeCount > 0 || this.pendingFullRefresh) {
+            const rebuildStart = performance.now();
             this.rebuildMesh();
+            this.stats.rebuildMs = performance.now() - rebuildStart;
             this.pendingFullRefresh = false;
+        } else {
+            this.stats.rebuildMs = 0;
         }
 
         this.updateSunDirection();
@@ -152,6 +197,7 @@ export class CbtPlanet {
             this.state.getLeafNodes(),
             this.radiusSim
         );
+        this.stats.lastVertexCount = meshData.positions.length / 3;
 
         if (!this.mesh) {
             this.mesh = new Mesh(`cbt_${this.key}`, this.scene);
@@ -271,6 +317,42 @@ export class CbtScheduler {
     setPlanets(planets: CbtPlanet[]): void {
         this.planets = planets;
         this.robin = 0;
+    }
+
+    /** Aggregate CBT telemetry across all planets for HUD / capture. */
+    getStats(): CbtAggregateStats {
+        const agg: CbtAggregateStats = {
+            planetCount: this.planets.length,
+            leafCount: 0,
+            splitsThisFrame: 0,
+            mergesThisFrame: 0,
+            classifyMs: 0,
+            rebuildMs: 0,
+            vertexCount: 0,
+        };
+        for (const planet of this.planets) {
+            const s = planet.getStats();
+            agg.leafCount += s.leafCount;
+            agg.splitsThisFrame += s.splitsThisFrame;
+            agg.mergesThisFrame += s.mergesThisFrame;
+            agg.classifyMs = Math.max(agg.classifyMs, s.classifyMs);
+            agg.rebuildMs = Math.max(agg.rebuildMs, s.rebuildMs);
+            agg.vertexCount += s.lastVertexCount;
+        }
+        return agg;
+    }
+
+    /** Per-planet centers/radii for deterministic headless capture paths. */
+    getPlanetInfo(): CbtPlanetInfo[] {
+        return this.planets.map((planet) => ({
+            key: planet.key,
+            center: [
+                planet.entity.doublepos.x,
+                planet.entity.doublepos.y,
+                planet.entity.doublepos.z,
+            ],
+            radiusSim: planet.radiusSim,
+        }));
     }
 
     start(): void {

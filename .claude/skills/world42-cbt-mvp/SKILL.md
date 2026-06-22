@@ -83,8 +83,12 @@ The current implementation is correct on LOD metric and bisection but is a CPU s
 |---|---|
 | Bisection by longest edge | Heap-array + bitfield structure |
 | Screen-space area LOD metric | Sum-reduction (prefix-sum tree) |
-| Per-planet routing | Neighbor table (no T-junction prevention) |
-| | GPU compute kernels (all 14) |
-| | Indirect draw |
+| Single-pass classify + merge | Neighbor table (no T-junction prevention) |
+| Backside culling (Phase 2) | Incremental mesh (full rebuild each change) |
+| Per-planet routing | GPU compute kernels (all 14) |
+| Measured perf + regression harness | Indirect draw |
 
-See `references/10_large_cbt_gpu_reference.md` § 7 for the priority implementation order.
+See `references/10_large_cbt_gpu_reference.md` § 7 for the priority GPU order, and
+`references/11_cpu_optimization_results.md` for the CPU optimization harness and
+measured results (Phases 0–3), plus the next CPU levers (merge-agg Map, noise
+offload, typed-array heap).

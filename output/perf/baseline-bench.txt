@@ -1,0 +1,94 @@
+[33mBenchmarking is an experimental feature.
+Breaking changes might not follow SemVer, please pin Vitest's version when using it.[39m
+
+[1m[46m RUN [49m[22m [36mv4.0.18 [39m[90mD:/Dev/World42[39m
+
+
+ [32m✓[39m src/systems/lod/cbt/cbt_classify.bench.ts[2m > [22mclassify ~1000 leaves[33m 1839[2mms[22m[39m
+     [1mname                             [22m  [1m       hz[22m  [1m   min[22m  [1m   max[22m  [1m  mean[22m  [1m   p75[22m  [1m   p99[22m  [1m  p995[22m  [1m  p999[22m  [1m   rme[22m  [1msamples[22m
+   [32m·[39m classifySplitCandidates            [34m 5,866.72[39m  [36m0.1594[39m  [36m0.4413[39m  [36m0.1705[39m  [36m0.1729[39m  [36m0.2426[39m  [36m0.2904[39m  [36m0.4081[39m  [2m±0.38%[22m  [2m   2934[22m
+   [32m·[39m measureLeafProjectedAreas          [34m19,778.67[39m  [36m0.0465[39m  [36m0.3379[39m  [36m0.0506[39m  [36m0.0495[39m  [36m0.0760[39m  [36m0.0818[39m  [36m0.2163[39m  [2m±0.35%[22m  [2m   9890[22m
+   [32m·[39m both passes (current update cost)  [34m 4,359.50[39m  [36m0.2073[39m  [36m0.6529[39m  [36m0.2294[39m  [36m0.2290[39m  [36m0.3867[39m  [36m0.4032[39m  [36m0.4915[39m  [2m±0.59%[22m  [2m   2180[22m
+
+ [32m✓[39m src/systems/lod/cbt/cbt_classify.bench.ts[2m > [22mclassify ~5000 leaves[33m 1816[2mms[22m[39m
+     [1mname                             [22m  [1m      hz[22m  [1m   min[22m  [1m   max[22m  [1m  mean[22m  [1m   p75[22m  [1m   p99[22m  [1m  p995[22m  [1m  p999[22m  [1m   rme[22m  [1msamples[22m
+   [32m·[39m classifySplitCandidates            [34m2,193.81[39m  [36m0.4264[39m  [36m0.7874[39m  [36m0.4558[39m  [36m0.4542[39m  [36m0.6880[39m  [36m0.7546[39m  [36m0.7756[39m  [2m±0.54%[22m  [2m   1097[22m
+   [32m·[39m measureLeafProjectedAreas          [34m4,408.12[39m  [36m0.2121[39m  [36m0.6426[39m  [36m0.2269[39m  [36m0.2285[39m  [36m0.3712[39m  [36m0.4547[39m  [36m0.5472[39m  [2m±0.52%[22m  [2m   2205[22m
+   [32m·[39m both passes (current update cost)  [34m1,393.36[39m  [36m0.6344[39m  [36m1.4565[39m  [36m0.7177[39m  [36m0.7173[39m  [36m1.1295[39m  [36m1.2050[39m  [36m1.4565[39m  [2m±1.08%[22m  [2m    697[22m
+
+ [32m✓[39m src/systems/lod/cbt/cbt_classify.bench.ts[2m > [22mclassify ~20000 leaves[33m 1833[2mms[22m[39m
+     [1mname                             [22m  [1m    hz[22m  [1m   min[22m  [1m   max[22m  [1m  mean[22m  [1m   p75[22m  [1m   p99[22m  [1m  p995[22m  [1m  p999[22m  [1m   rme[22m  [1msamples[22m
+   [32m·[39m classifySplitCandidates            [34m925.77[39m  [36m1.0387[39m  [36m1.7162[39m  [36m1.0802[39m  [36m1.0711[39m  [36m1.5555[39m  [36m1.6798[39m  [36m1.7162[39m  [2m±0.68%[22m  [2m    463[22m
+   [32m·[39m measureLeafProjectedAreas          [34m923.60[39m  [36m1.0141[39m  [36m1.9986[39m  [36m1.0827[39m  [36m1.0644[39m  [36m1.8234[39m  [36m1.8531[39m  [36m1.9986[39m  [2m±1.12%[22m  [2m    462[22m
+   [32m·[39m both passes (current update cost)  [34m454.39[39m  [36m2.0445[39m  [36m3.5826[39m  [36m2.2008[39m  [36m2.1885[39m  [36m3.0899[39m  [36m3.3728[39m  [36m3.5826[39m  [2m±1.34%[22m  [2m    228[22m
+
+ [32m✓[39m src/systems/lod/cbt/cbt_noise.bench.ts[2m > [22mfbmNoise (256-point sphere sweep)[33m 1825[2mms[22m[39m
+     [1mname                     [22m  [1m       hz[22m  [1m   min[22m  [1m   max[22m  [1m  mean[22m  [1m   p75[22m  [1m   p99[22m  [1m  p995[22m  [1m  p999[22m  [1m   rme[22m  [1msamples[22m
+   [32m·[39m 8 octaves (DEFAULT_NOISE)  [34m 9,627.64[39m  [36m0.0931[39m  [36m0.9806[39m  [36m0.1039[39m  [36m0.1029[39m  [36m0.1765[39m  [36m0.1887[39m  [36m0.2245[39m  [2m±0.59%[22m  [2m   4814[22m
+   [32m·[39m 4 octaves                  [34m19,209.76[39m  [36m0.0476[39m  [36m0.2341[39m  [36m0.0521[39m  [36m0.0503[39m  [36m0.1036[39m  [36m0.1190[39m  [36m0.1573[39m  [2m±0.37%[22m  [2m   9605[22m
+   [32m·[39m 1 octave                   [34m55,947.81[39m  [36m0.0158[39m  [36m0.1889[39m  [36m0.0179[39m  [36m0.0171[39m  [36m0.0316[39m  [36m0.0433[39m  [36m0.0914[39m  [2m±0.34%[22m  [2m  27974[22m
+
+ [32m✓[39m src/systems/lod/cbt/cbt_state.bench.ts[2m > [22mCbtState ~1000 leaves[33m 1235[2mms[22m[39m
+     [1mname                    [22m  [1m        hz[22m  [1m   min[22m  [1m    max[22m  [1m  mean[22m  [1m   p75[22m  [1m    p99[22m  [1m   p995[22m  [1m   p999[22m  [1m    rme[22m  [1msamples[22m
+   [32m·[39m split-storm (build tree)  [34m  1,761.12[39m  [36m0.2726[39m  [36m14.1911[39m  [36m0.5678[39m  [36m0.3412[39m  [36m10.0125[39m  [36m10.6342[39m  [36m14.1911[39m  [2m±17.16%[22m  [2m    881[22m
+   [32m·[39m getLeafNodes()            [34m104,429.52[39m  [36m0.0084[39m  [36m 0.2233[39m  [36m0.0096[39m  [36m0.0095[39m  [36m 0.0200[39m  [36m 0.0210[39m  [36m 0.0314[39m  [2m ±0.29%[22m  [2m  52215[22m
+
+ [32m✓[39m src/systems/lod/cbt/cbt_state.bench.ts[2m > [22mCbtState ~5000 leaves[33m 1226[2mms[22m[39m
+     [1mname                    [22m  [1m       hz[22m  [1m   min[22m  [1m    max[22m  [1m  mean[22m  [1m   p75[22m  [1m    p99[22m  [1m   p995[22m  [1m   p999[22m  [1m    rme[22m  [1msamples[22m
+   [32m·[39m split-storm (build tree)  [34m   302.28[39m  [36m1.9478[39m  [36m15.2686[39m  [36m3.3081[39m  [36m2.1851[39m  [36m14.6868[39m  [36m15.2686[39m  [36m15.2686[39m  [2m±16.02%[22m  [2m    153[22m
+   [32m·[39m getLeafNodes()            [34m17,265.35[39m  [36m0.0493[39m  [36m 0.4730[39m  [36m0.0579[39m  [36m0.0579[39m  [36m 0.0898[39m  [36m 0.1062[39m  [36m 0.1894[39m  [2m ±0.37%[22m  [2m   8634[22m
+
+ [32m✓[39m src/systems/lod/cbt/cbt_state.bench.ts[2m > [22mCbtState ~20000 leaves[33m 1256[2mms[22m[39m
+     [1mname                    [22m  [1m      hz[22m  [1m   min[22m  [1m    max[22m  [1m   mean[22m  [1m    p75[22m  [1m    p99[22m  [1m   p995[22m  [1m   p999[22m  [1m    rme[22m  [1msamples[22m
+   [32m·[39m split-storm (build tree)  [34m 69.2273[39m  [36m8.7670[39m  [36m25.7995[39m  [36m14.4452[39m  [36m20.1586[39m  [36m25.7995[39m  [36m25.7995[39m  [36m25.7995[39m  [2m±14.03%[22m  [2m     35[22m
+   [32m·[39m getLeafNodes()            [34m2,781.91[39m  [36m0.3114[39m  [36m 2.7597[39m  [36m 0.3595[39m  [36m 0.3436[39m  [36m 0.6030[39m  [36m 2.4050[39m  [36m 2.6704[39m  [2m ±2.53%[22m  [2m   1391[22m
+
+ [32m✓[39m src/systems/lod/cbt/cbt_state.bench.ts[2m > [22mCbtState construction[33m 897[2mms[22m[39m
+     [1mname                  [22m  [1m          hz[22m  [1m   min[22m  [1m   max[22m  [1m  mean[22m  [1m   p75[22m  [1m   p99[22m  [1m  p995[22m  [1m  p999[22m  [1m   rme[22m  [1msamples[22m
+   [32m·[39m new CbtState (8 roots)  [34m1,383,810.89[39m  [36m0.0006[39m  [36m0.2230[39m  [36m0.0007[39m  [36m0.0007[39m  [36m0.0012[39m  [36m0.0014[39m  [36m0.0052[39m  [2m±0.19%[22m  [2m 691906[22m
+
+ [32m✓[39m src/systems/lod/cbt/cbt_emit.bench.ts[2m > [22memitMeshFromLeaves ~1000 leaves[33m 1239[2mms[22m[39m
+     [1mname                      [22m  [1m      hz[22m  [1m   min[22m  [1m   max[22m  [1m  mean[22m  [1m   p75[22m  [1m   p99[22m  [1m  p995[22m  [1m  p999[22m  [1m   rme[22m  [1msamples[22m
+   [32m·[39m with noise (DEFAULT_NOISE)  [34m  157.77[39m  [36m6.1468[39m  [36m7.1194[39m  [36m6.3384[39m  [36m6.4207[39m  [36m7.1194[39m  [36m7.1194[39m  [36m7.1194[39m  [2m±0.57%[22m  [2m     79[22m
+   [32m·[39m no noise (geometry only)    [34m4,103.66[39m  [36m0.1692[39m  [36m1.3101[39m  [36m0.2437[39m  [36m0.2402[39m  [36m0.7342[39m  [36m0.8556[39m  [36m1.2251[39m  [2m±1.40%[22m  [2m   2052[22m
+
+ [32m✓[39m src/systems/lod/cbt/cbt_emit.bench.ts[2m > [22memitMeshFromLeaves ~5000 leaves[33m 1350[2mms[22m[39m
+     [1mname                      [22m  [1m     hz[22m  [1m    min[22m  [1m    max[22m  [1m   mean[22m  [1m    p75[22m  [1m    p99[22m  [1m   p995[22m  [1m   p999[22m  [1m   rme[22m  [1msamples[22m
+   [32m·[39m with noise (DEFAULT_NOISE)  [34m31.5201[39m  [36m31.4517[39m  [36m32.9669[39m  [36m31.7258[39m  [36m31.7653[39m  [36m32.9669[39m  [36m32.9669[39m  [36m32.9669[39m  [2m±0.64%[22m  [2m     16[22m
+   [32m·[39m no noise (geometry only)    [34m 908.88[39m  [36m 0.9143[39m  [36m 2.8135[39m  [36m 1.1002[39m  [36m 1.0521[39m  [36m 2.4802[39m  [36m 2.7523[39m  [36m 2.8135[39m  [2m±2.15%[22m  [2m    455[22m
+
+[1m[46m BENCH [49m[22m [36mSummary
+[39m
+  measureLeafProjectedAreas[2m - src/systems/lod/cbt/cbt_classify.bench.ts[2m > [22m[2mclassify ~1000 leaves[22m
+[32m    3.37x [39m[90mfaster than [39mclassifySplitCandidates
+[32m    4.54x [39m[90mfaster than [39mboth passes (current update cost)
+
+  measureLeafProjectedAreas[2m - src/systems/lod/cbt/cbt_classify.bench.ts[2m > [22m[2mclassify ~5000 leaves[22m
+[32m    2.01x [39m[90mfaster than [39mclassifySplitCandidates
+[32m    3.16x [39m[90mfaster than [39mboth passes (current update cost)
+
+  classifySplitCandidates[2m - src/systems/lod/cbt/cbt_classify.bench.ts[2m > [22m[2mclassify ~20000 leaves[22m
+[32m    1.00x [39m[90mfaster than [39mmeasureLeafProjectedAreas
+[32m    2.04x [39m[90mfaster than [39mboth passes (current update cost)
+
+  no noise (geometry only)[2m - src/systems/lod/cbt/cbt_emit.bench.ts[2m > [22m[2memitMeshFromLeaves ~1000 leaves[22m
+[32m    26.01x [39m[90mfaster than [39mwith noise (DEFAULT_NOISE)
+
+  no noise (geometry only)[2m - src/systems/lod/cbt/cbt_emit.bench.ts[2m > [22m[2memitMeshFromLeaves ~5000 leaves[22m
+[32m    28.84x [39m[90mfaster than [39mwith noise (DEFAULT_NOISE)
+
+  1 octave[2m - src/systems/lod/cbt/cbt_noise.bench.ts[2m > [22m[2mfbmNoise (256-point sphere sweep)[22m
+[32m    2.91x [39m[90mfaster than [39m4 octaves
+[32m    5.81x [39m[90mfaster than [39m8 octaves (DEFAULT_NOISE)
+
+  getLeafNodes()[2m - src/systems/lod/cbt/cbt_state.bench.ts[2m > [22m[2mCbtState ~1000 leaves[22m
+[32m    59.30x [39m[90mfaster than [39msplit-storm (build tree)
+
+  getLeafNodes()[2m - src/systems/lod/cbt/cbt_state.bench.ts[2m > [22m[2mCbtState ~5000 leaves[22m
+[32m    57.12x [39m[90mfaster than [39msplit-storm (build tree)
+
+  getLeafNodes()[2m - src/systems/lod/cbt/cbt_state.bench.ts[2m > [22m[2mCbtState ~20000 leaves[22m
+[32m    40.19x [39m[90mfaster than [39msplit-storm (build tree)
+
+  new CbtState (8 roots)[2m - src/systems/lod/cbt/cbt_state.bench.ts[2m > [22m[2mCbtState construction[22m
+

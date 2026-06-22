@@ -1,0 +1,5 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`CBT golden master > produces a stable tree topology 1`] = `"6f79d270"`;
+
+exports[`CBT golden master > produces stable emitted geometry 1`] = `"590db7a5"`;

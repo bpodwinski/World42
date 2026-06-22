@@ -19,11 +19,19 @@ import {
     type PlanetCDLOD,
 } from '../game_world/stellar_system/stellar_catalog_loader';
 import { TerrainShader, type TerrainShadowContext } from '../game_objects/planets/rocky_planet/terrains_shader';
-import { CbtScheduler } from '../systems/lod/cbt/cbt_scheduler';
+import {
+    CbtScheduler,
+    type CbtAggregateStats,
+    type CbtPlanetInfo,
+} from '../systems/lod/cbt/cbt_scheduler';
 import { LodScheduler } from '../systems/lod/lod_scheduler';
 
 export type LodController = {
     resetNow: () => void;
+    /** Aggregate CBT telemetry for the perf HUD / headless capture. */
+    getCbtStats: () => CbtAggregateStats;
+    /** Per-planet centers/radii for deterministic headless capture. */
+    getCbtPlanetInfo: () => CbtPlanetInfo[];
 };
 
 export type LodSetupResult = {
@@ -96,6 +104,8 @@ export function setupLodAndShadows(
             cdlodScheduler?.resetNow();
             cbtScheduler.resetNow();
         },
+        getCbtStats: () => cbtScheduler.getStats(),
+        getCbtPlanetInfo: () => cbtScheduler.getPlanetInfo(),
     };
 
     const mergedShadowPlanets = new Map<string, PlanetShadowSource>();

@@ -1,10 +1,13 @@
 import {
     CubeTexture,
     Engine,
+    EngineInstrumentation,
     MeshBuilder,
     Scene,
+    SceneInstrumentation,
     StandardMaterial,
     Texture,
+    Vector3,
     WebGPUEngine,
 } from '@babylonjs/core';
 import { OriginCamera } from '../core/camera/camera_manager';
@@ -51,6 +54,76 @@ export function setupRuntime({
         refreshActivePlanetSelection();
     });
 
+    // --- Performance instrumentation (perf HUD + headless capture) ---
+    // Capture is gated: off until the HUD is toggled on, so normal runs are
+    // unaffected by GPU-timestamp / frame-time capture overhead.
+    const sceneInstr = new SceneInstrumentation(scene);
+    const engineInstr = new EngineInstrumentation(engine);
+    disposables.add(() => sceneInstr.dispose());
+    disposables.add(() => engineInstr.dispose());
+
+    const setCaptureEnabled = (on: boolean): void => {
+        sceneInstr.captureFrameTime = on;
+        engineInstr.captureGPUFrameTime = on;
+    };
+
+    const sampleStats = () => {
+        const cbt = lod.getCbtStats();
+        const frameMs = sceneInstr.frameTimeCounter.lastSecAverage;
+        const gpuMs = engineInstr.gpuFrameTimeCounter.lastSecAverage / 1e6; // ns → ms
+        return {
+            fps: engine.getFps(),
+            frameMs,
+            gpuMs,
+            drawCalls: sceneInstr.drawCallsCounter.current,
+            activeIndices: scene.getActiveIndices(),
+            cbt,
+        };
+    };
+
+    const formatPerf = (s: ReturnType<typeof sampleStats>): string => {
+        const f = (n: number, d = 1) => n.toFixed(d);
+        return [
+            `FPS ${Math.round(s.fps)}  frame ${f(s.frameMs)}ms`,
+            `gpu ${f(s.gpuMs)}ms  draws ${s.drawCalls}`,
+            `idx ${(s.activeIndices / 1000).toFixed(0)}k`,
+            `cbt leaves ${s.cbt.leafCount}  verts ${s.cbt.vertexCount}`,
+            `split/f ${s.cbt.splitsThisFrame}  merge/f ${s.cbt.mergesThisFrame}`,
+            `classify ${f(s.cbt.classifyMs, 2)}ms  rebuild ${f(s.cbt.rebuildMs, 2)}ms`,
+        ].join('\n');
+    };
+
+    disposables.addDomListener(window, 'keydown', (event) => {
+        if (event.key.toLowerCase() !== 'p') return;
+        const visible = gui.togglePerf();
+        setCaptureEnabled(visible);
+    });
+
+    // Dev-only hook for deterministic headless capture (scripts/cbt_perf_capture.mjs).
+    const tmpRenderTarget = new Vector3();
+    const perfHook = {
+        enableCapture: (on: boolean) => setCaptureEnabled(on),
+        getStats: () => sampleStats(),
+        getPlanets: () => lod.getCbtPlanetInfo(),
+        setCameraDoublePos: (x: number, y: number, z: number) => {
+            camera.doublepos.set(x, y, z);
+            lod.resetNow();
+        },
+        /** Orient the camera toward a WorldDouble point (render-space target). */
+        lookAtDoublePos: (x: number, y: number, z: number) => {
+            tmpRenderTarget.set(
+                x - camera.doublepos.x,
+                y - camera.doublepos.y,
+                z - camera.doublepos.z
+            );
+            camera.setTarget(tmpRenderTarget);
+        },
+    };
+    (window as unknown as { __world42Perf?: typeof perfHook }).__world42Perf = perfHook;
+    disposables.add(() => {
+        delete (window as unknown as { __world42Perf?: typeof perfHook }).__world42Perf;
+    });
+
     new PostProcess('Pipeline', scene, camera);
 
     const skybox = MeshBuilder.CreateBox('skyBox', { size: 1_000 }, scene);
@@ -89,6 +162,9 @@ export function setupRuntime({
         const nowHud = performance.now();
         if (nowHud - lastHudUpdate >= HUD_RATE_MS) {
             gui.setSpeed(Math.round(emaMS * 10) / 10);
+            if (gui.isPerfVisible()) {
+                gui.setPerfText(formatPerf(sampleStats()));
+            }
             lastHudUpdate = nowHud;
         }
     });
