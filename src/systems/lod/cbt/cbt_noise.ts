@@ -11,7 +11,7 @@ const GRAD3: ReadonlyArray<readonly [number, number, number]> = [
 ];
 
 // Permutation table (seeded)
-function buildPerm(seed: number): Uint8Array {
+export function buildPerm(seed: number): Uint8Array {
     const p = new Uint8Array(512);
     // Initialize with identity
     for (let i = 0; i < 256; i++) p[i] = i;

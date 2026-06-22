@@ -7,6 +7,7 @@ import {
     Observer,
     Plane,
     Scene,
+    ShaderMaterial,
     StandardMaterial,
     TransformNode,
     Vector3,
@@ -18,7 +19,9 @@ import type {
 } from '../../../core/camera/camera_manager';
 import { classifyLeaves } from './cbt_classify';
 import { CbtEmitCache, emitMeshFromLeaves } from './cbt_emit';
+import { DEFAULT_NOISE } from './cbt_noise';
 import { CbtState } from './cbt_state';
+import { createCbtTerrainMaterial } from './cbt_terrain_shader';
 
 export type CbtPlanetOptions = {
     key: string;
@@ -41,6 +44,11 @@ export type CbtPlanetOptions = {
     incrementalMesh?: boolean;
     /** Frustum guard band as a multiple of triangle bound radius (default 1). */
     frustumGuardScale?: number;
+    /**
+     * Use the per-pixel-normal ShaderMaterial (default true). When false, falls
+     * back to the legacy StandardMaterial (Gouraud, vertex normals).
+     */
+    perPixelNormals?: boolean;
 };
 
 /** Per-planet telemetry, refreshed on each {@link CbtPlanet.update}. */
@@ -87,7 +95,7 @@ export class CbtPlanet {
     readonly starPosWorldDouble: Vector3 | null;
 
     private mesh: Mesh | null = null;
-    private material: StandardMaterial | null = null;
+    private material: StandardMaterial | ShaderMaterial | null = null;
     private sunLight: DirectionalLight | null = null;
     private state: CbtState;
     private pendingFullRefresh = true;
@@ -111,6 +119,8 @@ export class CbtPlanet {
     private readonly cullMinDot: number;
     private readonly incrementalMesh: boolean;
     private readonly frustumGuardScale: number;
+    private readonly perPixelNormals: boolean;
+    private readonly starColor: Vector3;
     private readonly emitCache = new CbtEmitCache();
 
     constructor(
@@ -131,6 +141,8 @@ export class CbtPlanet {
         this.cullMinDot = opts.cullMinDot ?? -0.05;
         this.incrementalMesh = opts.incrementalMesh ?? true;
         this.frustumGuardScale = opts.frustumGuardScale ?? 1.0;
+        this.perPixelNormals = opts.perPixelNormals ?? true;
+        this.starColor = opts.starColor;
         this.state = new CbtState(opts.radiusSim, opts.maxDepth);
 
         this.rebuildMesh();
@@ -237,6 +249,19 @@ export class CbtPlanet {
     private ensureMaterial(): void {
         if (this.material) return;
 
+        if (this.perPixelNormals) {
+            // Per-pixel-normal shader: shading is decoupled from tessellation,
+            // so it does not pop when triangles refine. No DirectionalLight
+            // needed — lighting is driven by the uLightDirection uniform.
+            this.material = createCbtTerrainMaterial(this.scene, this.key, {
+                radius: this.radiusSim,
+                noise: DEFAULT_NOISE,
+                lightColor: this.starColor
+            });
+            return;
+        }
+
+        // Legacy fallback: StandardMaterial (Gouraud, vertex normals).
         // DirectionalLight oriented from star → planet
         this.sunLight = new DirectionalLight(
             `cbt_sun_${this.key}`,
@@ -245,11 +270,12 @@ export class CbtPlanet {
         );
         this.sunLight.intensity = 1.5;
 
-        this.material = new StandardMaterial(`cbt_mat_${this.key}`, this.scene);
-        this.material.backFaceCulling = true;
-        this.material.diffuseColor = new Color3(0.6, 0.55, 0.4);
-        this.material.specularColor = new Color3(0.05, 0.05, 0.05);
-        this.material.useLogarithmicDepth = true;
+        const std = new StandardMaterial(`cbt_mat_${this.key}`, this.scene);
+        std.backFaceCulling = true;
+        std.diffuseColor = new Color3(0.6, 0.55, 0.4);
+        std.specularColor = new Color3(0.05, 0.05, 0.05);
+        std.useLogarithmicDepth = true;
+        this.material = std;
     }
 
     setWireframe(on: boolean): void {
@@ -259,14 +285,18 @@ export class CbtPlanet {
     setDebugLod(on: boolean): void {
         this.debugLod = on;
         if (!this.material) return;
-        if (on) {
-            this.material.disableLighting = true;
-            this.material.emissiveColor = new Color3(1, 1, 1);
-            this.material.diffuseColor = new Color3(0, 0, 0);
+        if (this.material instanceof ShaderMaterial) {
+            this.material.setInt('uDebugLod', on ? 1 : 0);
         } else {
-            this.material.disableLighting = false;
-            this.material.emissiveColor = new Color3(0, 0, 0);
-            this.material.diffuseColor = new Color3(0.6, 0.55, 0.4);
+            if (on) {
+                this.material.disableLighting = true;
+                this.material.emissiveColor = new Color3(1, 1, 1);
+                this.material.diffuseColor = new Color3(0, 0, 0);
+            } else {
+                this.material.disableLighting = false;
+                this.material.emissiveColor = new Color3(0, 0, 0);
+                this.material.diffuseColor = new Color3(0.6, 0.55, 0.4);
+            }
         }
         if (this.mesh) {
             this.mesh.useVertexColors = on;
@@ -274,13 +304,18 @@ export class CbtPlanet {
     }
 
     private updateSunDirection(): void {
-        if (!this.sunLight || !this.starPosWorldDouble) return;
+        if (!this.starPosWorldDouble) return;
 
         // Direction = normalize(starPos - planetCenter) → points from star toward planet
         const dir = this.starPosWorldDouble.subtract(this.entity.doublepos);
         if (dir.lengthSquared() < 1e-12) return;
         dir.normalize();
-        this.sunLight.direction.copyFrom(dir);
+
+        if (this.material instanceof ShaderMaterial) {
+            this.material.setVector3('uLightDirection', dir);
+        } else if (this.sunLight) {
+            this.sunLight.direction.copyFrom(dir);
+        }
     }
 
     private ensureShadowCaster(): void {

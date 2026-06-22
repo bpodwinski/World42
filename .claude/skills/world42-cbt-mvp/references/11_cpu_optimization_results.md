@@ -176,6 +176,47 @@ refines the whole visible hemisphere so the first frame has no holes regardless 
 - Tests: `cbt_invariants.test.ts` "frustum culling" — a leaf behind the camera is culled while
   the one in view is kept; both kept when no planes are supplied.
 
+## Per-pixel normals (kills shading pop on refinement)
+
+**Visual bug:** the CBT mesh used a `StandardMaterial` → Gouraud shading (one normal per
+vertex, interpolated across the triangle). The vertex normal (`noiseNormal` in `cbt_emit.ts`)
+is the analytic gradient of the full noise field — purely positional, so a corner keeps the
+same normal at every level. The pop was **not** from the corners but from **interpolation**:
+on a big coarse triangle, Gouraud blends three uncorrelated high-frequency normals over a
+large flat surface; on split, new vertices appear and the shading of the whole region snaps.
+Intrinsic to per-vertex shading of a high-frequency field on low-res geometry.
+
+**Fix (= what the large_cbt demo does):** compute the surface normal **per pixel** in a
+fragment shader, decoupling shading from tessellation. Refinement then only changes the
+silhouette, not the normal → no pop. New `ShaderMaterial`
+([cbt_terrain_shader.ts](../../../../src/systems/lod/cbt/cbt_terrain_shader.ts) + GLSL in
+`src/assets/shaders/cbt/`), default on behind `CbtPlanetOptions.perPixelNormals` with the
+legacy `StandardMaterial` as fallback.
+
+- **Noise port:** `_cbtNoise.glsl` reimplements the Gustavson simplex of `cbt_noise.ts` with
+  an **analytic gradient** (value + ∂/∂xyz in one pass), so the per-pixel normal is one noise
+  evaluation per octave (no finite differences — ~8 evals/pixel vs ~32 for the CPU's central
+  differences) and is the *exact* gradient of the same field.
+- **Field match:** the seeded permutation table (`buildPerm`, now exported) is uploaded as the
+  `uPerm[256]` uniform, and the same params are passed, so the GPU field equals the CPU field
+  used for displacement. Displacement stays **CPU** and radial, so
+  `normalize(planet-local position)` recovers the unit sample direction in the fragment shader
+  → the per-pixel normal lines up with the displaced geometry.
+- **Lighting:** per-pixel diffuse + ambient via the world-space sun direction
+  (`uLightDirection`, fed from `starPos − planetCenter`); the normal is rotated to world space
+  with `mat3(world)`. No shadows (CBT had `receiveShadows=false`); cascaded-shadow integration
+  is deferred. **X** (LOD colours) routes through `uDebugLod → vColor`; **W** (wireframe) via
+  `material.wireframe`.
+- **Geometry untouched:** emission/positions are unchanged → **golden + invariants stay green
+  without re-blessing** (66/66). Only shading changed.
+- **Verified live** (spawn, Mercury): shader compiles (0 console errors), the lit surface shows
+  fine per-pixel relief detail (impossible with Gouraud at ~2850 leaves over a 2439 km radius),
+  and **X** renders the flat LOD palette through the new shader's debug branch — confirming the
+  `ShaderMaterial` is the one drawing the planet.
+- **Perf note:** fbm runs per fragment (~8 octaves with gradient). If GPU cost is too high,
+  reduce octaves used for the normal or set `perPixelNormals:false` to fall back. (The fallback
+  also restores the exact pre-change look for A/B.)
+
 ## Deferred (not in this pass)
 
 - Typed-array heap + bitfield replacing `Map<number, CbtNode>` (paper structure;
