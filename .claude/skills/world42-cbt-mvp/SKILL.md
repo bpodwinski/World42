@@ -1,6 +1,8 @@
 ---
 name: world42-cbt-mvp
 description: Implement an MVP per-planet terrain LOD choice for World42 where each planet uses either CDLOD or CBT (never both at once). Use when requests mention Concurrent Binary Trees, large_cbt, triangle-area LOD, or selecting per-planet terrain algorithm in paths under src/systems/lod/, src/app/setup_lod_and_shadows.ts, src/game_world/stellar_system/, and camera-space contracts.
+paper: "Concurrent Binary Trees for Large-Scale Game Components — HPG 2024 — https://arxiv.org/abs/2407.02215"
+reference_impl: "https://github.com/AnisB/large_cbt (DX12/HLSL reference — see references/10_large_cbt_gpu_reference.md for WebGPU mapping)"
 ---
 
 # World42 CBT MVP
@@ -70,4 +72,19 @@ npm run pw:validate
 - Use `references/mvp-implementation-plan.md` for the end-to-end implementation sequence.
 - Use `references/08_world42_mapping.md` to map CBT concepts to current World42 modules.
 - Use `references/09_checklist.md` as a final review checklist.
+- Use `references/10_large_cbt_gpu_reference.md` for the **authoritative GPU reference** — full kernel pipeline, memory layout, bitfield ops, HLSL→WGSL translation, and priority implementation roadmap from the paper's reference implementation.
 - Use `scripts/check-cbt-mvp-integration.ps1` to inspect routing and coordinate-space touch points.
+
+## Gap Summary (current World42 CBT vs paper)
+
+The current implementation is correct on LOD metric and bisection but is a CPU stub:
+
+| What's correct | What's missing |
+|---|---|
+| Bisection by longest edge | Heap-array + bitfield structure |
+| Screen-space area LOD metric | Sum-reduction (prefix-sum tree) |
+| Per-planet routing | Neighbor table (no T-junction prevention) |
+| | GPU compute kernels (all 14) |
+| | Indirect draw |
+
+See `references/10_large_cbt_gpu_reference.md` § 7 for the priority implementation order.
