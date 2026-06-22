@@ -96,6 +96,9 @@ export function setupLodAndShadows(
     const cbtScheduler = new CbtScheduler(scene, camera, cbtPlanets, {
         budgetMs: 2,
     });
+    // Refine toward the spawn camera before the first render so the spawn planet
+    // is not shown at minimum LOD while the per-frame budget ramps up.
+    cbtScheduler.prewarm();
     cbtScheduler.start();
     disposables.add(() => cbtScheduler.dispose());
 

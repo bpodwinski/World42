@@ -89,6 +89,105 @@ const LEVEL_COLORS: ReadonlyArray<readonly [number, number, number]> = [
     [1.00, 0.00, 1.00], // 15 pink
 ];
 
+type Vec3Like = { x: number; y: number; z: number };
+
+/**
+ * Compute the per-vertex data (3 vertices) for one leaf triangle into the given
+ * output arrays at the supplied element offsets. Shared by the full emitter and
+ * the incremental cache so they cannot diverge.
+ */
+function computeLeafVertexData(
+    v0: Vec3Like,
+    v1: Vec3Like,
+    v2: Vec3Like,
+    level: number,
+    radius: number,
+    noise: NoiseParams | null,
+    pos: Float32Array,
+    po: number,
+    nrm: Float32Array,
+    no: number,
+    uv: Float32Array,
+    uo: number,
+    col: Float32Array,
+    co: number
+): void {
+    const lc = LEVEL_COLORS[level % LEVEL_COLORS.length];
+    const verts: readonly [Vec3Like, Vec3Like, Vec3Like] = [v0, v1, v2];
+    for (let k = 0; k < 3; k++) {
+        const vert = verts[k];
+        const len = Math.sqrt(vert.x * vert.x + vert.y * vert.y + vert.z * vert.z);
+        const invLen = len > 1e-12 ? 1 / len : 0;
+        const nx = vert.x * invLen;
+        const ny = vert.y * invLen;
+        const nz = vert.z * invLen;
+
+        let r = radius;
+        if (noise) {
+            r += fbmNoise(nx, ny, nz, noise);
+        }
+        const p = po + k * 3;
+        pos[p] = nx * r;
+        pos[p + 1] = ny * r;
+        pos[p + 2] = nz * r;
+
+        const n = no + k * 3;
+        if (noise) {
+            const [pnx, pny, pnz] = noiseNormal(nx, ny, nz, radius, noise);
+            nrm[n] = pnx;
+            nrm[n + 1] = pny;
+            nrm[n + 2] = pnz;
+        } else {
+            nrm[n] = nx;
+            nrm[n + 1] = ny;
+            nrm[n + 2] = nz;
+        }
+
+        const [u, v] = sphericalUV(nx, ny, nz);
+        const uoff = uo + k * 2;
+        uv[uoff] = u;
+        uv[uoff + 1] = v;
+
+        const coff = co + k * 4;
+        col[coff] = lc[0];
+        col[coff + 1] = lc[1];
+        col[coff + 2] = lc[2];
+        col[coff + 3] = 1;
+    }
+}
+
+/**
+ * Choose winding for triangle `tri` (3 vertices starting at vertex tri*3) so its
+ * front face points outward, reading positions back from the buffer.
+ */
+function writeTriangleIndices(
+    indices: Uint16Array | Uint32Array,
+    tri: number,
+    positions: Float32Array
+): void {
+    const base = tri * 3;
+    const b0 = base * 3;
+    const b1 = b0 + 3;
+    const b2 = b0 + 6;
+    const ax = positions[b0], ay = positions[b0 + 1], az = positions[b0 + 2];
+    const bx = positions[b1], by = positions[b1 + 1], bz = positions[b1 + 2];
+    const cx = positions[b2], cy = positions[b2 + 1], cz = positions[b2 + 2];
+    const e1x = bx - ax, e1y = by - ay, e1z = bz - az;
+    const e2x = cx - ax, e2y = cy - ay, e2z = cz - az;
+    const nrx = e1y * e2z - e1z * e2y;
+    const nry = e1z * e2x - e1x * e2z;
+    const nrz = e1x * e2y - e1y * e2x;
+    const outward = nrx * (ax + bx + cx) + nry * (ay + by + cy) + nrz * (az + bz + cz) > 0;
+    indices[base] = base;
+    if (outward) {
+        indices[base + 1] = base + 2;
+        indices[base + 2] = base + 1;
+    } else {
+        indices[base + 1] = base + 1;
+        indices[base + 2] = base + 2;
+    }
+}
+
 /**
  * Emit a single mesh from all CBT leaf triangles.
  *
@@ -116,86 +215,16 @@ export function emitMeshFromLeaves(
             ? new Uint32Array(totalIndices)
             : new Uint16Array(totalIndices);
 
-    let vOff = 0;
-    let uvOff = 0;
-    let cOff = 0;
-    let idx = 0;
-
-    for (const leaf of leaves) {
-        const lc = LEVEL_COLORS[leaf.level % LEVEL_COLORS.length];
-        const verts = [leaf.v0, leaf.v1, leaf.v2] as const;
-
-        for (const vert of verts) {
-            // Project onto unit sphere
-            const len = Math.sqrt(vert.x * vert.x + vert.y * vert.y + vert.z * vert.z);
-            const invLen = len > 1e-12 ? 1 / len : 0;
-            const nx = vert.x * invLen;
-            const ny = vert.y * invLen;
-            const nz = vert.z * invLen;
-
-            // Noise displacement along radial
-            let r = radius;
-            if (noise) {
-                r += fbmNoise(nx, ny, nz, noise);
-            }
-
-            positions[vOff] = nx * r;
-            positions[vOff + 1] = ny * r;
-            positions[vOff + 2] = nz * r;
-
-            // Surface gradient normal
-            if (noise) {
-                const [pnx, pny, pnz] = noiseNormal(nx, ny, nz, radius, noise);
-                normals[vOff] = pnx;
-                normals[vOff + 1] = pny;
-                normals[vOff + 2] = pnz;
-            } else {
-                normals[vOff] = nx;
-                normals[vOff + 1] = ny;
-                normals[vOff + 2] = nz;
-            }
-
-            const [u, v] = sphericalUV(nx, ny, nz);
-            uvs[uvOff] = u;
-            uvs[uvOff + 1] = v;
-
-            colors[cOff] = lc[0];
-            colors[cOff + 1] = lc[1];
-            colors[cOff + 2] = lc[2];
-            colors[cOff + 3] = 1;
-
-            vOff += 3;
-            uvOff += 2;
-            cOff += 4;
-            idx++;
-        }
-
-        // Orient each triangle so its front face points outward. Bintree node
-        // vertex order (apex, left, right) is not consistently wound, so choose
-        // the winding per-triangle from the geometric normal vs the radial.
-        const base = idx - 3;
-        const b0 = base * 3;
-        const b1 = b0 + 3;
-        const b2 = b0 + 6;
-        const ax = positions[b0], ay = positions[b0 + 1], az = positions[b0 + 2];
-        const bx = positions[b1], by = positions[b1 + 1], bz = positions[b1 + 2];
-        const cx = positions[b2], cy = positions[b2 + 1], cz = positions[b2 + 2];
-        const e1x = bx - ax, e1y = by - ay, e1z = bz - az;
-        const e2x = cx - ax, e2y = cy - ay, e2z = cz - az;
-        const nrx = e1y * e2z - e1z * e2y;
-        const nry = e1z * e2x - e1x * e2z;
-        const nrz = e1x * e2y - e1y * e2x;
-        // Outward if the natural normal agrees with the centroid direction.
-        const outward = nrx * (ax + bx + cx) + nry * (ay + by + cy) + nrz * (az + bz + cz) > 0;
-        indices[base] = base;
-        if (outward) {
-            // Match the previous convention for outward-wound triangles.
-            indices[base + 1] = base + 2;
-            indices[base + 2] = base + 1;
-        } else {
-            indices[base + 1] = base + 1;
-            indices[base + 2] = base + 2;
-        }
+    for (let i = 0; i < leaves.length; i++) {
+        const leaf = leaves[i];
+        computeLeafVertexData(
+            leaf.v0, leaf.v1, leaf.v2, leaf.level, radius, noise,
+            positions, i * 9,
+            normals, i * 9,
+            uvs, i * 6,
+            colors, i * 12
+        );
+        writeTriangleIndices(indices, i, positions);
     }
 
     return {
@@ -206,4 +235,98 @@ export function emitMeshFromLeaves(
         indices,
         colors,
     };
+}
+
+/**
+ * Incremental mesh emitter (Phase A3). Caches each leaf's computed vertex data
+ * keyed by its stable slot id, so on a topology change only the slots whose
+ * geometry actually changed (the handful created by a split) recompute noise —
+ * the dominant rebuild cost. Output is byte-identical to {@link emitMeshFromLeaves}
+ * (verified by cbt_emit_incremental.test.ts).
+ */
+export class CbtEmitCache {
+    private cap = 0;
+    private pos = new Float32Array(0); // cap*9
+    private nrm = new Float32Array(0); // cap*9
+    private uv = new Float32Array(0); // cap*6
+    private col = new Float32Array(0); // cap*12
+    private geom = new Float64Array(0); // cap*9 — cached (v0,v1,v2) to detect slot reuse
+    private valid = new Uint8Array(0); // cap
+    /** Number of slots recomputed during the last emit (telemetry). */
+    recomputed = 0;
+
+    private ensureCap(n: number): void {
+        if (n <= this.cap) return;
+        let nc = this.cap === 0 ? 256 : this.cap;
+        while (nc < n) nc *= 2;
+        const pos = new Float32Array(nc * 9); pos.set(this.pos);
+        const nrm = new Float32Array(nc * 9); nrm.set(this.nrm);
+        const uv = new Float32Array(nc * 6); uv.set(this.uv);
+        const col = new Float32Array(nc * 12); col.set(this.col);
+        const geom = new Float64Array(nc * 9); geom.set(this.geom);
+        const valid = new Uint8Array(nc); valid.set(this.valid);
+        this.pos = pos;
+        this.nrm = nrm;
+        this.uv = uv;
+        this.col = col;
+        this.geom = geom;
+        this.valid = valid;
+        this.cap = nc;
+    }
+
+    private syncLeaf(leaf: CbtNode, radius: number, noise: NoiseParams | null): void {
+        const slot = leaf.id;
+        const g = slot * 9;
+        const { v0, v1, v2 } = leaf;
+        if (
+            this.valid[slot] === 1 &&
+            this.geom[g] === v0.x && this.geom[g + 1] === v0.y && this.geom[g + 2] === v0.z &&
+            this.geom[g + 3] === v1.x && this.geom[g + 4] === v1.y && this.geom[g + 5] === v1.z &&
+            this.geom[g + 6] === v2.x && this.geom[g + 7] === v2.y && this.geom[g + 8] === v2.z
+        ) {
+            return; // cache hit — geometry unchanged
+        }
+        computeLeafVertexData(
+            v0, v1, v2, leaf.level, radius, noise,
+            this.pos, slot * 9,
+            this.nrm, slot * 9,
+            this.uv, slot * 6,
+            this.col, slot * 12
+        );
+        this.geom[g] = v0.x; this.geom[g + 1] = v0.y; this.geom[g + 2] = v0.z;
+        this.geom[g + 3] = v1.x; this.geom[g + 4] = v1.y; this.geom[g + 5] = v1.z;
+        this.geom[g + 6] = v2.x; this.geom[g + 7] = v2.y; this.geom[g + 8] = v2.z;
+        this.valid[slot] = 1;
+        this.recomputed++;
+    }
+
+    emit(leaves: ReadonlyArray<CbtNode>, radius: number, options: EmitOptions = {}): EmitResult {
+        const noise = options.noise === undefined ? DEFAULT_NOISE : options.noise;
+
+        let maxSlot = 0;
+        for (const leaf of leaves) if (leaf.id > maxSlot) maxSlot = leaf.id;
+        this.ensureCap(maxSlot + 1);
+
+        this.recomputed = 0;
+        for (const leaf of leaves) this.syncLeaf(leaf, radius, noise);
+
+        const tv = leaves.length * 3;
+        const positions = new Float32Array(tv * 3);
+        const normals = new Float32Array(tv * 3);
+        const morphDeltas = new Float32Array(tv * 3);
+        const uvs = new Float32Array(tv * 2);
+        const colors = new Float32Array(tv * 4);
+        const indices = tv > 65535 ? new Uint32Array(tv) : new Uint16Array(tv);
+
+        for (let i = 0; i < leaves.length; i++) {
+            const slot = leaves[i].id;
+            positions.set(this.pos.subarray(slot * 9, slot * 9 + 9), i * 9);
+            normals.set(this.nrm.subarray(slot * 9, slot * 9 + 9), i * 9);
+            uvs.set(this.uv.subarray(slot * 6, slot * 6 + 6), i * 6);
+            colors.set(this.col.subarray(slot * 12, slot * 12 + 12), i * 12);
+            writeTriangleIndices(indices, i, positions);
+        }
+
+        return { positions, normals, morphDeltas, uvs, indices, colors };
+    }
 }

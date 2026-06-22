@@ -82,11 +82,12 @@ The current implementation is correct on LOD metric and bisection but is a CPU s
 | What's correct | What's missing |
 |---|---|
 | Bisection (ROAM binary triangles) | Sum-reduction tree (GPU O(log n) decode) |
-| Screen-space area LOD metric | Incremental mesh (full rebuild each change) |
-| Single-pass classify + merge | GPU compute kernels (all 14) |
-| Backside culling | Indirect draw |
+| Screen-space area LOD metric | GPU compute kernels (all 14) |
+| Single-pass classify + merge | Indirect draw |
+| Backside culling | Sub-range GPU buffer uploads |
 | Typed-array pool + bitfield (A1) | |
 | Neighbor table + conformity — crack-free (A2) | |
+| Incremental mesh — compute cache (A3) | |
 | Per-planet routing + measured harness | |
 
 See `references/10_large_cbt_gpu_reference.md` § 7 for the priority GPU order, and

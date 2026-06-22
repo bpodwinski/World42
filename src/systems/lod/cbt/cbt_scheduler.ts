@@ -14,7 +14,7 @@ import type {
     OriginCamera,
 } from '../../../core/camera/camera_manager';
 import { classifyLeaves } from './cbt_classify';
-import { emitMeshFromLeaves } from './cbt_emit';
+import { CbtEmitCache, emitMeshFromLeaves } from './cbt_emit';
 import { CbtState } from './cbt_state';
 
 export type CbtPlanetOptions = {
@@ -34,6 +34,8 @@ export type CbtPlanetOptions = {
     cullBackface?: boolean;
     /** Guard-band cosine threshold for the backside cull (default -0.05). */
     cullMinDot?: number;
+    /** Use the incremental (per-slot cached) mesh emitter (default true). */
+    incrementalMesh?: boolean;
 };
 
 /** Per-planet telemetry, refreshed on each {@link CbtPlanet.update}. */
@@ -102,6 +104,8 @@ export class CbtPlanet {
     private readonly splitHysteresis: number;
     private readonly cullBackface: boolean;
     private readonly cullMinDot: number;
+    private readonly incrementalMesh: boolean;
+    private readonly emitCache = new CbtEmitCache();
 
     constructor(
         private scene: Scene,
@@ -119,6 +123,7 @@ export class CbtPlanet {
         this.splitHysteresis = opts.splitHysteresis;
         this.cullBackface = opts.cullBackface ?? true;
         this.cullMinDot = opts.cullMinDot ?? -0.05;
+        this.incrementalMesh = opts.incrementalMesh ?? true;
         this.state = new CbtState(opts.radiusSim, opts.maxDepth);
 
         this.rebuildMesh();
@@ -193,10 +198,10 @@ export class CbtPlanet {
     }
 
     private rebuildMesh(): void {
-        const meshData = emitMeshFromLeaves(
-            this.state.getLeafNodes(),
-            this.radiusSim
-        );
+        const leaves = this.state.getLeafNodes();
+        const meshData = this.incrementalMesh
+            ? this.emitCache.emit(leaves, this.radiusSim)
+            : emitMeshFromLeaves(leaves, this.radiusSim);
         this.stats.lastVertexCount = meshData.positions.length / 3;
 
         if (!this.mesh) {
@@ -353,6 +358,32 @@ export class CbtScheduler {
             ],
             radiusSim: planet.radiusSim,
         }));
+    }
+
+    /**
+     * Synchronously refine all planets toward the current camera before the first
+     * render, so spawn planets are not shown at minimum LOD (8 root triangles)
+     * for the first ~1-2s while the per-frame budget ramps up. Bounded by `maxMs`
+     * so it never freezes startup; whatever isn't converged finishes live.
+     *
+     * Requires the camera to be positioned and the engine to have a valid render
+     * size; if the viewport is not ready yet it is a no-op (live ramp as before).
+     */
+    prewarm(maxMs = 120): void {
+        if (!this.planets.length) return;
+        const end = performance.now() + maxMs;
+        const farDeadline = end + 1e9; // never trips the per-update deadline guard
+        let progressing = true;
+        let guard = 0;
+        while (progressing && performance.now() < end && guard < 10000) {
+            progressing = false;
+            for (const planet of this.planets) {
+                planet.update(farDeadline);
+                const s = planet.getStats();
+                if (s.splitsThisFrame > 0 || s.mergesThisFrame > 0) progressing = true;
+            }
+            guard++;
+        }
     }
 
     start(): void {

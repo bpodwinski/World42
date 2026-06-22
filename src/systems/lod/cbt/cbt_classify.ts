@@ -59,6 +59,44 @@ function isBackface(
     return dot < minDot * Math.sqrt(rl2 * tl2);
 }
 
+/**
+ * Is a single vertex behind the camera's horizon? `v` is the leaf vertex in
+ * planet-local space; `matrix` is the planet's render-parent world matrix (its
+ * rotation maps local → world-relative-to-planet-center); `camRel*` is the
+ * camera position relative to the planet center. Writes into `tmp`.
+ */
+function vertexBackface(
+    v: Vector3,
+    matrix: Matrix,
+    camRelX: number, camRelY: number, camRelZ: number,
+    minDot: number,
+    tmp: Vector3
+): boolean {
+    Vector3.TransformNormalToRef(v, matrix, tmp);
+    const rx = tmp.x, ry = tmp.y, rz = tmp.z; // radial = vertexWorld − planetCenter
+    return isBackface(rx, ry, rz, camRelX - rx, camRelY - ry, camRelZ - rz, minDot);
+}
+
+/**
+ * A triangle is back-facing (safe to cull from split candidates) only when ALL
+ * THREE vertices are behind the horizon. Testing the centroid alone wrongly culls
+ * huge coarse triangles that straddle the horizon — which then can never split to
+ * produce front-facing children (the startup "stuck at minimum LOD" bug).
+ */
+function triangleBackface(
+    v0: Vector3, v1: Vector3, v2: Vector3,
+    matrix: Matrix,
+    camRelX: number, camRelY: number, camRelZ: number,
+    minDot: number,
+    tmp: Vector3
+): boolean {
+    return (
+        vertexBackface(v0, matrix, camRelX, camRelY, camRelZ, minDot, tmp) &&
+        vertexBackface(v1, matrix, camRelX, camRelY, camRelZ, minDot, tmp) &&
+        vertexBackface(v2, matrix, camRelX, camRelY, camRelZ, minDot, tmp)
+    );
+}
+
 function triangleArea(v0: Vector3, v1: Vector3, v2: Vector3): number {
     // Inlined cross-product magnitude — no Vector3 allocations on this hot path.
     // Same component order as Vector3.Cross(v1-v0, v2-v0).length() so results are
@@ -157,6 +195,12 @@ export function classifyLeaves({
     const tmpCentroidLocal = new Vector3();
     const tmpCentroidRotated = new Vector3();
     const tmpCentroidWorld = new Vector3();
+    const tmpVertex = new Vector3();
+
+    // Camera position relative to the planet centre (for the horizon cull).
+    const camRelX = cameraWorldDouble.x - planetCenterWorldDouble.x;
+    const camRelY = cameraWorldDouble.y - planetCenterWorldDouble.y;
+    const camRelZ = cameraWorldDouble.z - planetCenterWorldDouble.z;
 
     const splitCandidates: CbtSplitCandidate[] = [];
     const parentAgg = new Map<number, { children: number; maxAreaPx2: number }>();
@@ -175,26 +219,26 @@ export function classifyLeaves({
         const areaWorld = triangleArea(leaf.v0, leaf.v1, leaf.v2);
         const projectedAreaPx2 = areaWorld * (focal * focal) / (distance * distance);
 
-        // Backside cull applies to split candidates only — merges below still
-        // see every leaf so off-screen detail is reclaimed.
-        const culled =
-            cullBackface &&
-            isBackface(
-                tmpCentroidWorld.x - planetCenterWorldDouble.x,
-                tmpCentroidWorld.y - planetCenterWorldDouble.y,
-                tmpCentroidWorld.z - planetCenterWorldDouble.z,
-                cameraWorldDouble.x - tmpCentroidWorld.x,
-                cameraWorldDouble.y - tmpCentroidWorld.y,
-                cameraWorldDouble.z - tmpCentroidWorld.z,
-                cullMinDot
-            );
-
-        if (!culled && projectedAreaPx2 >= splitThreshold) {
-            splitCandidates.push({
-                nodeId: leaf.id,
-                score: projectedAreaPx2,
-                projectedAreaPx2,
-            });
+        if (projectedAreaPx2 >= splitThreshold) {
+            // Backside cull applies to split candidates only — merges below still
+            // see every leaf. Cull only when ALL THREE vertices are behind the
+            // horizon, so big coarse triangles straddling the horizon still split.
+            const culled =
+                cullBackface &&
+                triangleBackface(
+                    leaf.v0, leaf.v1, leaf.v2,
+                    renderParentWorldMatrix,
+                    camRelX, camRelY, camRelZ,
+                    cullMinDot,
+                    tmpVertex
+                );
+            if (!culled) {
+                splitCandidates.push({
+                    nodeId: leaf.id,
+                    score: projectedAreaPx2,
+                    projectedAreaPx2,
+                });
+            }
         }
 
         if (leaf.parentId !== null) {

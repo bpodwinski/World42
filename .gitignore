@@ -29,3 +29,4 @@ terrain/target/
 Cargo.lock
 output/playwright/
 .playwright-cli/
+.playwright-mcp/

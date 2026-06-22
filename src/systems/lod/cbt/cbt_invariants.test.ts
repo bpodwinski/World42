@@ -135,17 +135,23 @@ describe('CBT invariants — single-pass classify (Phase 1)', () => {
 describe('CBT invariants — backside culling (Phase 2)', () => {
     const CULL_MIN_DOT = -0.05;
 
-    function frontFacing(leaf: { v0: Vector3; v1: Vector3; v2: Vector3 }, cameraDistance: number): boolean {
-        const cx = (leaf.v0.x + leaf.v1.x + leaf.v2.x) / 3;
-        const cy = (leaf.v0.y + leaf.v1.y + leaf.v2.y) / 3;
-        const cz = (leaf.v0.z + leaf.v1.z + leaf.v2.z) / 3;
-        // radial (outward normal) vs direction to camera at (0,0,cameraDistance).
-        const rx = cx, ry = cy, rz = cz;
-        const tx = -cx, ty = -cy, tz = cameraDistance - cz;
+    // A vertex is behind the horizon for a camera at (0,0,cameraDistance).
+    function vertexBack(v: Vector3, cameraDistance: number): boolean {
+        const rx = v.x, ry = v.y, rz = v.z;
+        const tx = -v.x, ty = -v.y, tz = cameraDistance - v.z;
         const dot = rx * tx + ry * ty + rz * tz;
         const rl = Math.hypot(rx, ry, rz);
         const tl = Math.hypot(tx, ty, tz);
-        return dot >= CULL_MIN_DOT * rl * tl;
+        return dot < CULL_MIN_DOT * rl * tl;
+    }
+
+    // A triangle is cullable only when all three vertices are behind the horizon.
+    function allVerticesBack(leaf: { v0: Vector3; v1: Vector3; v2: Vector3 }, cameraDistance: number): boolean {
+        return (
+            vertexBack(leaf.v0, cameraDistance) &&
+            vertexBack(leaf.v1, cameraDistance) &&
+            vertexBack(leaf.v2, cameraDistance)
+        );
     }
 
     it('culling only removes split candidates (subset of un-culled)', () => {
@@ -162,7 +168,7 @@ describe('CBT invariants — backside culling (Phase 2)', () => {
         expect(on.length).toBeLessThan(off.size); // the far hemisphere is actually removed
     });
 
-    it('every culled (removed) leaf is genuinely back-facing', () => {
+    it('every culled (removed) leaf has all three vertices behind the horizon', () => {
         const leaves = makeLeafSet(3000, RADIUS, MAX_DEPTH);
         const cameraDistance = RADIUS * 1.2;
         const base = makeClassifyParams(leaves, RADIUS, { cameraDistance });
@@ -177,8 +183,26 @@ describe('CBT invariants — backside culling (Phase 2)', () => {
         const removed = off.filter((id) => !on.has(id));
         expect(removed.length).toBeGreaterThan(0);
         for (const id of removed) {
-            expect(frontFacing(byId.get(id)!, cameraDistance)).toBe(false);
+            expect(allVerticesBack(byId.get(id)!, cameraDistance)).toBe(true);
         }
+    });
+
+    it('does NOT cull a huge coarse triangle that straddles the horizon (startup fix)', () => {
+        // Camera just above the +y pole of the 8 root triangles, very low altitude.
+        const state = new CbtState(RADIUS, MAX_DEPTH);
+        const leaves = state.getLeafNodes(); // 8 coarse roots
+        const params = makeClassifyParams(leaves, RADIUS);
+        const altitude = RADIUS * 1.01;
+        const lowPole = {
+            ...params,
+            cameraWorldDouble: new Vector3(0, altitude, 0),
+            cullBackface: true,
+            cullMinDot: CULL_MIN_DOT,
+            splitThresholdPx2: 1, // ensure area qualifies so the cull is what gates
+        };
+        const candidates = classifyLeaves(lowPole).splitCandidates;
+        // At least the roots touching the +y pole must remain splittable.
+        expect(candidates.length).toBeGreaterThan(0);
     });
 
     it('produces a materially smaller tree at a fixed camera pose (the structural win)', () => {

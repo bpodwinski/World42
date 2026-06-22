@@ -116,6 +116,50 @@ collapses only when all four of its triangles are leaves.
   (wireframe) / **X** (LOD colours); confirm no cracks at level boundaries and silhouettes.
   Tune the merge cadence if pop is visible; geomorph (popping) is intentionally out of scope.
 
+## Phase A3 — incremental mesh (kills rebuild spikes)
+
+`CbtEmitCache` caches each leaf's computed vertex data (positions/normals/uvs/colors) keyed
+by its **stable slot id**, detecting reuse by comparing the cached `(v0,v1,v2)`. On a rebuild
+it recomputes noise only for slots whose geometry actually changed — the handful created by a
+split — and copies cached data for the rest. The full emitter and the cache share one
+`computeLeafVertexData` helper, so output is **byte-identical** (proven by
+`cbt_emit_incremental.test.ts`). Wired into `CbtPlanet.rebuildMesh` behind
+`CbtPlanetOptions.incrementalMesh` (default on) with the full rebuild as fallback.
+
+- **Measured** (mesh rebuild, steady state / geometry unchanged vs the pre-A3 full noisy rebuild):
+  - 1k leaves: 6.2 ms → 0.23 ms (**~27×**)
+  - 5k leaves: 35 ms → 0.99 ms (**~35×**)
+  - i.e. the rebuild collapses to the copy/assemble cost; noise is recomputed only for changed
+    slots. On change frames the cost is `(noise × changed slots) + O(n) copy`, not
+    `noise × all leaves`.
+- Verified: cache hit recomputes 0 slots on an unchanged tree; a single split recomputes only
+  a few (≪ leaf count); byte-identical to the full emitter before and after refinement.
+- Note: this is an incremental **compute** cache (eliminates the dominant noise cost). Sub-range
+  GPU buffer uploads + a fixed slot→vertex layout remain a future refinement; the GPU upload of
+  the assembled buffer is a cheap memcpy next to the noise it removed.
+
+## Startup fix — backside cull + LOD pre-warm
+
+Two startup bugs found via in-app testing (spawn = Mercury, camera at 1.01× radius over the pole):
+
+1. **Stuck at minimum LOD (root cause: over-aggressive backside cull).** The A2 cull tested
+   only the triangle **centroid**. At very low altitude the 8 huge root triangles have
+   centroids far from the sub-camera point, so all 8 tested back-facing and were removed from
+   split candidates — nothing could subdivide, so the planet stayed at ~8 leaves until the
+   camera moved away. Fixed: a triangle is culled only when **all three vertices** are behind
+   the horizon (`triangleBackface` in `cbt_classify.ts`), so a big coarse triangle straddling
+   the horizon still splits and produces front-facing children. The per-vertex test runs only
+   for area-qualifying candidates, so classify cost is unaffected in the common case.
+   Regression test: `cbt_invariants.test.ts` "does NOT cull a huge coarse triangle that
+   straddles the horizon".
+2. **Slow cold ramp.** `CbtScheduler.prewarm()` synchronously refines all planets toward the
+   spawn camera (time-bounded, default 120 ms) before the first render, via
+   `setup_lod_and_shadows.ts`, so the spawn planet is detailed on frame 1 instead of ramping
+   over ~1-2 s.
+
+Verified live: spawn now reaches ~5k leaves within a few seconds and renders detailed terrain
+immediately (was stuck at ~24 leaves before).
+
 ## Deferred (not in this pass)
 
 - Typed-array heap + bitfield replacing `Map<number, CbtNode>` (paper structure;
