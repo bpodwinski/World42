@@ -6,8 +6,8 @@ import { AdvancedDynamicTexture, Control, TextBlock } from "@babylonjs/gui";
 export type PerfHUDOpts = {
     /** Vertical offset from the top edge in pixels */
     topPx?: number;
-    /** Horizontal offset from the right edge in pixels */
-    rightPx?: number;
+    /** Horizontal offset from the left edge in pixels */
+    leftPx?: number;
     /** Font size for the stats text */
     fontSize?: number;
     /** Text color */
@@ -31,9 +31,9 @@ export class PerfHUD {
 
     constructor(ui: AdvancedDynamicTexture, opts: PerfHUDOpts = {}) {
         const {
-            topPx = 30,
-            rightPx = 12,
-            fontSize = 13,
+            topPx = 60,
+            leftPx = 12,
+            fontSize = 18,
             color = "#9effa0",
             outlineColor = "black",
             outlineWidth = 4,
@@ -47,10 +47,10 @@ export class PerfHUD {
         this.text.outlineColor = outlineColor;
         this.text.outlineWidth = outlineWidth;
         this.text.top = `${topPx}px`;
-        this.text.paddingRight = `${rightPx}px`;
-        this.text.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_RIGHT;
+        this.text.paddingLeft = `${leftPx}px`;
+        this.text.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
         this.text.textVerticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
-        this.text.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_RIGHT;
+        this.text.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
         this.text.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
         this.text.resizeToFit = true;
         this.text.isPointerBlocker = false;
