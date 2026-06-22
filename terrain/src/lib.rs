@@ -2,6 +2,8 @@ use js_sys::{Array, Float32Array, Object, Reflect, Uint16Array, Uint32Array};
 use noise::{NoiseFn, OpenSimplex};
 use wasm_bindgen::prelude::*;
 
+pub mod cbt;
+
 const PI: f64 = core::f64::consts::PI;
 
 // fn saturate(x: f64) -> f64 {

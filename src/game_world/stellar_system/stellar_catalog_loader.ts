@@ -133,6 +133,8 @@ export type CBTOptions = {
     splitHysteresis?: number;
     /** Noise field (CPU displacement + per-pixel shader); default DEFAULT_NOISE. */
     noise?: NoiseParams;
+    /** Run CBT classify/split/merge/emit in a Rust/WASM worker (default false). */
+    offThreadCbt?: boolean;
     skip?: (name: string, body: LoadedBody) => boolean;
 };
 
@@ -355,6 +357,7 @@ export function createCBTForSystem(
         splitThresholdPx2 = 900,
         splitHysteresis = 0.7,
         noise,
+        offThreadCbt = false,
         skip = (_name: string, body: LoadedBody) =>
             body.bodyType === "star" || body.lodAlgorithm !== "cbt",
     } = opts;
@@ -393,6 +396,7 @@ export function createCBTForSystem(
             splitThresholdPx2,
             splitHysteresis,
             noise,
+            offThreadCbt,
             starPosWorldDouble,
             starColor,
             starIntensity,

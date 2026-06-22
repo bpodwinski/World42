@@ -17,11 +17,18 @@ import type {
     FloatingEntityInterface,
     OriginCamera,
 } from '../../../core/camera/camera_manager';
-import { classifyLeaves } from './cbt_classify';
-import { CbtEmitCache, emitMeshFromLeaves } from './cbt_emit';
+import type { EmitResult } from './cbt_emit';
+import {
+    LocalCbtSource,
+    type CbtFrameParams,
+    type CbtGeometrySource,
+    type CbtSourceStats,
+    type LocalCbtSourceOptions,
+} from './cbt_geometry_source';
 import { DEFAULT_NOISE, type NoiseParams } from './cbt_noise';
-import { CbtState } from './cbt_state';
 import { createCbtTerrainMaterial } from './cbt_terrain_shader';
+import { getGlobalCbtKernelClient } from './workers/cbt_kernel_client';
+import { WorkerCbtSource } from './workers/cbt_worker_source';
 
 export type CbtPlanetOptions = {
     key: string;
@@ -54,6 +61,12 @@ export type CbtPlanetOptions = {
      * match). Default DEFAULT_NOISE. See cbt_quality.ts for presets.
      */
     noise?: NoiseParams;
+    /**
+     * Run classify/split/merge/emit in a Rust/WASM worker instead of on the main
+     * thread (default false). The synchronous path stays the fallback + golden
+     * reference. The worker path is wired in Phase 3.
+     */
+    offThreadCbt?: boolean;
 };
 
 /** Per-planet telemetry, refreshed on each {@link CbtPlanet.update}. */
@@ -102,8 +115,7 @@ export class CbtPlanet {
     private mesh: Mesh | null = null;
     private material: StandardMaterial | ShaderMaterial | null = null;
     private sunLight: DirectionalLight | null = null;
-    private state: CbtState;
-    private pendingFullRefresh = true;
+    private source: CbtGeometrySource;
     private shadowAttached = false;
     private debugLod = false;
     private readonly stats: CbtStats = {
@@ -116,18 +128,9 @@ export class CbtPlanet {
     };
 
     private readonly renderParent: TransformNode;
-    private readonly maxSplitsPerFrame: number;
-    private readonly maxMergesPerFrame: number;
-    private readonly splitThresholdPx2: number;
-    private readonly splitHysteresis: number;
-    private readonly cullBackface: boolean;
-    private readonly cullMinDot: number;
-    private readonly incrementalMesh: boolean;
-    private readonly frustumGuardScale: number;
     private readonly perPixelNormals: boolean;
     private readonly starColor: Vector3;
     private readonly noise: NoiseParams;
-    private readonly emitCache = new CbtEmitCache();
 
     constructor(
         private scene: Scene,
@@ -139,28 +142,92 @@ export class CbtPlanet {
         this.radiusSim = opts.radiusSim;
         this.renderParent = opts.renderParent;
         this.starPosWorldDouble = opts.starPosWorldDouble;
-        this.maxSplitsPerFrame = opts.maxSplitsPerFrame;
-        this.maxMergesPerFrame = opts.maxMergesPerFrame ?? opts.maxSplitsPerFrame;
-        this.splitThresholdPx2 = opts.splitThresholdPx2;
-        this.splitHysteresis = opts.splitHysteresis;
-        this.cullBackface = opts.cullBackface ?? true;
-        this.cullMinDot = opts.cullMinDot ?? -0.05;
-        this.incrementalMesh = opts.incrementalMesh ?? true;
-        this.frustumGuardScale = opts.frustumGuardScale ?? 1.0;
         this.perPixelNormals = opts.perPixelNormals ?? true;
         this.starColor = opts.starColor;
         this.noise = opts.noise ?? DEFAULT_NOISE;
-        this.state = new CbtState(opts.radiusSim, opts.maxDepth);
+        this.source = this.createSource(opts);
 
-        this.rebuildMesh();
+        // Initial mesh: emit the 8 root triangles (no classify) so the planet
+        // exists before the first refinement pass.
+        this.source.refresh();
     }
+
+    private createSource(opts: CbtPlanetOptions): CbtGeometrySource {
+        const sourceOpts: LocalCbtSourceOptions = {
+            radiusSim: opts.radiusSim,
+            maxDepth: opts.maxDepth,
+            maxSplitsPerFrame: opts.maxSplitsPerFrame,
+            maxMergesPerFrame: opts.maxMergesPerFrame ?? opts.maxSplitsPerFrame,
+            splitThresholdPx2: opts.splitThresholdPx2,
+            splitHysteresis: opts.splitHysteresis,
+            cullBackface: opts.cullBackface ?? true,
+            cullMinDot: opts.cullMinDot ?? -0.05,
+            frustumGuardScale: opts.frustumGuardScale ?? 1.0,
+            incrementalMesh: opts.incrementalMesh ?? true,
+            noise: this.noise,
+        };
+        // Off-thread path: run the identical pipeline in the Rust/WASM worker. The
+        // worker owns the tree; only camera params go out and geometry comes back.
+        if (opts.offThreadCbt) {
+            // Spawn frame the worker refines toward before the first geometry, so
+            // the planet is not shown at minimum LOD (no-frustum, like the sync
+            // prewarm). renderParent matrix is computed on demand here.
+            const prewarmFrame: CbtFrameParams = {
+                cameraWorldDouble: this.camera.doublepos,
+                planetCenterWorldDouble: this.entity.doublepos,
+                renderParentWorldMatrix: this.renderParent.getWorldMatrix(),
+                viewportHeightPx: Math.max(1, this.scene.getEngine().getRenderHeight()),
+                cameraFovRadians: this.camera.fov,
+                frustumPlanes: null,
+            };
+            return new WorkerCbtSource(
+                getGlobalCbtKernelClient(),
+                {
+                    key: opts.key,
+                    radiusSim: sourceOpts.radiusSim,
+                    maxDepth: sourceOpts.maxDepth,
+                    maxSplitsPerFrame: sourceOpts.maxSplitsPerFrame,
+                    maxMergesPerFrame: sourceOpts.maxMergesPerFrame,
+                    splitThresholdPx2: sourceOpts.splitThresholdPx2,
+                    splitHysteresis: sourceOpts.splitHysteresis,
+                    cullBackface: sourceOpts.cullBackface,
+                    cullMinDot: sourceOpts.cullMinDot,
+                    frustumGuardScale: sourceOpts.frustumGuardScale,
+                    incrementalMesh: sourceOpts.incrementalMesh,
+                    noise: sourceOpts.noise,
+                    prewarmFrame,
+                },
+                this.onSourceUpdate
+            );
+        }
+        return new LocalCbtSource(sourceOpts, this.onSourceUpdate);
+    }
+
+    private onSourceUpdate = (
+        geometry: EmitResult | null,
+        stats: CbtSourceStats
+    ): void => {
+        this.stats.classifyMs = stats.classifyMs;
+        this.stats.splitsThisFrame = stats.splitsThisFrame;
+        this.stats.mergesThisFrame = stats.mergesThisFrame;
+        this.stats.leafCount = stats.leafCount;
+
+        if (geometry) {
+            const applyStart = performance.now();
+            this.applyGeometry(geometry);
+            // rebuildMs preserves the prior meaning: emit + GPU upload.
+            this.stats.rebuildMs = stats.emitMs + (performance.now() - applyStart);
+        } else {
+            this.stats.rebuildMs = 0;
+        }
+    };
 
     estimatePriority(camera: OriginCamera): number {
         return Vector3.Distance(camera.doublepos, this.entity.doublepos);
     }
 
     resetNow(): void {
-        this.pendingFullRefresh = true;
+        this.source.reset();
     }
 
     getStats(): Readonly<CbtStats> {
@@ -170,52 +237,25 @@ export class CbtPlanet {
     update(deadline: number, frustumPlanes: ReadonlyArray<Plane> | null = null): void {
         if (performance.now() >= deadline) return;
 
-        const classifyStart = performance.now();
-        const leaves = this.state.getLeafNodes();
-        const { splitCandidates, mergeParents } = classifyLeaves({
-            leaves,
+        // Dispatch one classify/split/merge/emit cycle to the geometry source.
+        // For the local source this runs synchronously and invokes
+        // onSourceUpdate before returning; the worker source (Phase 3) replies
+        // asynchronously.
+        this.source.requestUpdate({
             cameraWorldDouble: this.camera.doublepos,
             planetCenterWorldDouble: this.entity.doublepos,
             renderParentWorldMatrix: this.renderParent.getWorldMatrix(),
             viewportHeightPx: Math.max(1, this.scene.getEngine().getRenderHeight()),
             cameraFovRadians: this.camera.fov,
-            splitThresholdPx2: this.splitThresholdPx2,
-            splitHysteresis: this.splitHysteresis,
-            cullBackface: this.cullBackface,
-            cullMinDot: this.cullMinDot,
             frustumPlanes,
-            frustumGuardScale: this.frustumGuardScale,
         });
-
-        const splitCount = this.state.splitByPriority(
-            splitCandidates.map((candidate) => candidate.nodeId),
-            this.maxSplitsPerFrame
-        );
-
-        const mergeCount = this.state.mergeByParentPriority(
-            mergeParents,
-            this.maxMergesPerFrame
-        );
-
-        this.stats.classifyMs = performance.now() - classifyStart;
-        this.stats.splitsThisFrame = splitCount;
-        this.stats.mergesThisFrame = mergeCount;
-        this.stats.leafCount = this.state.leafCount;
-
-        if (splitCount > 0 || mergeCount > 0 || this.pendingFullRefresh) {
-            const rebuildStart = performance.now();
-            this.rebuildMesh();
-            this.stats.rebuildMs = performance.now() - rebuildStart;
-            this.pendingFullRefresh = false;
-        } else {
-            this.stats.rebuildMs = 0;
-        }
 
         this.updateSunDirection();
         this.ensureShadowCaster();
     }
 
     dispose(): void {
+        this.source.dispose();
         this.sunLight?.dispose();
         this.sunLight = null;
         this.material?.dispose();
@@ -225,11 +265,7 @@ export class CbtPlanet {
         this.shadowAttached = false;
     }
 
-    private rebuildMesh(): void {
-        const leaves = this.state.getLeafNodes();
-        const meshData = this.incrementalMesh
-            ? this.emitCache.emit(leaves, this.radiusSim, { noise: this.noise })
-            : emitMeshFromLeaves(leaves, this.radiusSim, { noise: this.noise });
+    private applyGeometry(meshData: EmitResult): void {
         this.stats.lastVertexCount = meshData.positions.length / 3;
 
         if (!this.mesh) {

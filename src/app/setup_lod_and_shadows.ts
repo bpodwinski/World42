@@ -37,6 +37,13 @@ import { LodScheduler } from '../systems/lod/lod_scheduler';
  */
 const CBT_QUALITY: CbtQualityLevel = 'high';
 
+/**
+ * Run CBT classify/split/merge/emit in a Rust/WASM worker (off the main thread)
+ * via the bit-exact Rust port. Default true; set false to use the synchronous TS
+ * path (the fallback + golden-test reference). See cbt skill ref 12.
+ */
+const OFF_THREAD_CBT = true;
+
 export type LodController = {
     resetNow: () => void;
     /** Aggregate CBT telemetry for the perf HUD / headless capture. */
@@ -84,6 +91,7 @@ export function setupLodAndShadows(
             splitThresholdPx2: quality.splitThresholdPx2,
             splitHysteresis: 0.75,
             noise: noiseForQuality(quality),
+            offThreadCbt: OFF_THREAD_CBT,
         });
 
         for (const [name, planet] of cbt.entries()) {
