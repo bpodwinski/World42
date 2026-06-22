@@ -24,7 +24,18 @@ import {
     type CbtAggregateStats,
     type CbtPlanetInfo,
 } from '../systems/lod/cbt/cbt_scheduler';
+import {
+    CBT_QUALITY_PRESETS,
+    noiseForQuality,
+    type CbtQualityLevel,
+} from '../systems/lod/cbt/cbt_quality';
 import { LodScheduler } from '../systems/lod/lod_scheduler';
+
+/**
+ * CBT quality preset. Change this to tune mesh density, max depth and terrain
+ * detail in one place: 'low' | 'medium' | 'high' | 'ultra' (see cbt_quality.ts).
+ */
+const CBT_QUALITY: CbtQualityLevel = 'high';
 
 export type LodController = {
     resetNow: () => void;
@@ -65,12 +76,14 @@ export function setupLodAndShadows(
             mergedCDLOD.set(`${system.systemId}:${name}`, planet);
         }
 
+        const quality = CBT_QUALITY_PRESETS[CBT_QUALITY];
         const cbt = createCBTForSystem(scene, camera, system, {
-            maxDepth: 24,
+            maxDepth: quality.maxDepth,
             maxSplitsPerFrame: 8,
             maxMergesPerFrame: 8,
-            splitThresholdPx2: 900,
+            splitThresholdPx2: quality.splitThresholdPx2,
             splitHysteresis: 0.75,
+            noise: noiseForQuality(quality),
         });
 
         for (const [name, planet] of cbt.entries()) {

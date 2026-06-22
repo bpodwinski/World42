@@ -19,7 +19,7 @@ import type {
 } from '../../../core/camera/camera_manager';
 import { classifyLeaves } from './cbt_classify';
 import { CbtEmitCache, emitMeshFromLeaves } from './cbt_emit';
-import { DEFAULT_NOISE } from './cbt_noise';
+import { DEFAULT_NOISE, type NoiseParams } from './cbt_noise';
 import { CbtState } from './cbt_state';
 import { createCbtTerrainMaterial } from './cbt_terrain_shader';
 
@@ -49,6 +49,11 @@ export type CbtPlanetOptions = {
      * back to the legacy StandardMaterial (Gouraud, vertex normals).
      */
     perPixelNormals?: boolean;
+    /**
+     * Noise field for CPU displacement AND the per-pixel-normal shader (they must
+     * match). Default DEFAULT_NOISE. See cbt_quality.ts for presets.
+     */
+    noise?: NoiseParams;
 };
 
 /** Per-planet telemetry, refreshed on each {@link CbtPlanet.update}. */
@@ -121,6 +126,7 @@ export class CbtPlanet {
     private readonly frustumGuardScale: number;
     private readonly perPixelNormals: boolean;
     private readonly starColor: Vector3;
+    private readonly noise: NoiseParams;
     private readonly emitCache = new CbtEmitCache();
 
     constructor(
@@ -143,6 +149,7 @@ export class CbtPlanet {
         this.frustumGuardScale = opts.frustumGuardScale ?? 1.0;
         this.perPixelNormals = opts.perPixelNormals ?? true;
         this.starColor = opts.starColor;
+        this.noise = opts.noise ?? DEFAULT_NOISE;
         this.state = new CbtState(opts.radiusSim, opts.maxDepth);
 
         this.rebuildMesh();
@@ -221,8 +228,8 @@ export class CbtPlanet {
     private rebuildMesh(): void {
         const leaves = this.state.getLeafNodes();
         const meshData = this.incrementalMesh
-            ? this.emitCache.emit(leaves, this.radiusSim)
-            : emitMeshFromLeaves(leaves, this.radiusSim);
+            ? this.emitCache.emit(leaves, this.radiusSim, { noise: this.noise })
+            : emitMeshFromLeaves(leaves, this.radiusSim, { noise: this.noise });
         this.stats.lastVertexCount = meshData.positions.length / 3;
 
         if (!this.mesh) {
@@ -255,7 +262,7 @@ export class CbtPlanet {
             // needed — lighting is driven by the uLightDirection uniform.
             this.material = createCbtTerrainMaterial(this.scene, this.key, {
                 radius: this.radiusSim,
-                noise: DEFAULT_NOISE,
+                noise: this.noise,
                 lightColor: this.starColor
             });
             return;

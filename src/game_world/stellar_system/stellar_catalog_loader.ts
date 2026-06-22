@@ -12,6 +12,7 @@ import { ScaleManager } from "../../core/scale/scale_manager";
 import { TextureManager } from "../../core/io/texture_manager";
 import { ChunkTree } from "../../systems/lod/chunks/chunk_tree";
 import { CbtPlanet } from "../../systems/lod/cbt/cbt_scheduler";
+import type { NoiseParams } from "../../systems/lod/cbt/cbt_noise";
 import type { Face } from "../../systems/lod/types";
 import {
     normalizeCatalogJSON as normalizeCatalogJSONFromSource,
@@ -130,6 +131,8 @@ export type CBTOptions = {
     maxMergesPerFrame?: number;
     splitThresholdPx2?: number;
     splitHysteresis?: number;
+    /** Noise field (CPU displacement + per-pixel shader); default DEFAULT_NOISE. */
+    noise?: NoiseParams;
     skip?: (name: string, body: LoadedBody) => boolean;
 };
 
@@ -351,6 +354,7 @@ export function createCBTForSystem(
         maxMergesPerFrame = 8,
         splitThresholdPx2 = 900,
         splitHysteresis = 0.7,
+        noise,
         skip = (_name: string, body: LoadedBody) =>
             body.bodyType === "star" || body.lodAlgorithm !== "cbt",
     } = opts;
@@ -388,6 +392,7 @@ export function createCBTForSystem(
             maxMergesPerFrame,
             splitThresholdPx2,
             splitHysteresis,
+            noise,
             starPosWorldDouble,
             starColor,
             starIntensity,
