@@ -160,6 +160,22 @@ Two startup bugs found via in-app testing (spawn = Mercury, camera at 1.01× rad
 Verified live: spawn now reaches ~5k leaves within a few seconds and renders detailed terrain
 immediately (was stuck at ~24 leaves before).
 
+## Frustum culling (off-screen split candidates)
+
+In addition to the backside (horizon) cull, `classifyLeaves` now drops split candidates whose
+bounding sphere is fully outside the camera frustum, so off-screen geometry stops refining
+(and merges/collapses). The `CbtScheduler` computes the render-space frustum planes once per
+frame (`Frustum.GetPlanesToRef(view·proj)`) and passes them to each planet's `update`. A guard
+band (`frustumGuardScale`, default 1 ⇒ margin = boundRadius × 2) keeps a margin around the view
+refining as a prefetch, so turning the camera doesn't expose coarse geometry. Toggle via
+`CbtSchedulerOptions.frustumCull` (default on). Pre-warm runs **without** frustum cull (it
+refines the whole visible hemisphere so the first frame has no holes regardless of view).
+
+- **Measured live** (spawn, Mercury): ~5 464 leaves → **~2 760** with frustum cull (≈half) —
+  only the visible field refines; the visible surface stays fully detailed (no holes).
+- Tests: `cbt_invariants.test.ts` "frustum culling" — a leaf behind the camera is culled while
+  the one in view is kept; both kept when no planes are supplied.
+
 ## Deferred (not in this pass)
 
 - Typed-array heap + bitfield replacing `Map<number, CbtNode>` (paper structure;

@@ -1,8 +1,11 @@
 import {
     Color3,
     DirectionalLight,
+    Frustum,
+    Matrix,
     Mesh,
     Observer,
+    Plane,
     Scene,
     StandardMaterial,
     TransformNode,
@@ -36,6 +39,8 @@ export type CbtPlanetOptions = {
     cullMinDot?: number;
     /** Use the incremental (per-slot cached) mesh emitter (default true). */
     incrementalMesh?: boolean;
+    /** Frustum guard band as a multiple of triangle bound radius (default 1). */
+    frustumGuardScale?: number;
 };
 
 /** Per-planet telemetry, refreshed on each {@link CbtPlanet.update}. */
@@ -105,6 +110,7 @@ export class CbtPlanet {
     private readonly cullBackface: boolean;
     private readonly cullMinDot: number;
     private readonly incrementalMesh: boolean;
+    private readonly frustumGuardScale: number;
     private readonly emitCache = new CbtEmitCache();
 
     constructor(
@@ -124,6 +130,7 @@ export class CbtPlanet {
         this.cullBackface = opts.cullBackface ?? true;
         this.cullMinDot = opts.cullMinDot ?? -0.05;
         this.incrementalMesh = opts.incrementalMesh ?? true;
+        this.frustumGuardScale = opts.frustumGuardScale ?? 1.0;
         this.state = new CbtState(opts.radiusSim, opts.maxDepth);
 
         this.rebuildMesh();
@@ -141,7 +148,7 @@ export class CbtPlanet {
         return this.stats;
     }
 
-    update(deadline: number): void {
+    update(deadline: number, frustumPlanes: ReadonlyArray<Plane> | null = null): void {
         if (performance.now() >= deadline) return;
 
         const classifyStart = performance.now();
@@ -157,6 +164,8 @@ export class CbtPlanet {
             splitHysteresis: this.splitHysteresis,
             cullBackface: this.cullBackface,
             cullMinDot: this.cullMinDot,
+            frustumPlanes,
+            frustumGuardScale: this.frustumGuardScale,
         });
 
         const splitCount = this.state.splitByPriority(
@@ -282,6 +291,8 @@ export class CbtPlanet {
 
 export type CbtSchedulerOptions = {
     budgetMs?: number;
+    /** Exclude off-screen (out-of-frustum) leaves from split candidates (default true). */
+    frustumCull?: boolean;
 };
 
 export class CbtScheduler {
@@ -291,6 +302,9 @@ export class CbtScheduler {
     private robin = 0;
     private wireframe = false;
     private debugLodMode = false;
+    private readonly frustumCull: boolean;
+    private readonly tmpViewProj = new Matrix();
+    private readonly frustumPlanes: Plane[] = Frustum.GetPlanes(Matrix.Identity());
     private readonly onKeyDown: (e: KeyboardEvent) => void;
 
     constructor(
@@ -301,6 +315,7 @@ export class CbtScheduler {
     ) {
         this.planets = planets;
         this.budgetMs = options.budgetMs ?? 2;
+        this.frustumCull = options.frustumCull ?? true;
 
         this.onKeyDown = (e: KeyboardEvent) => {
             if (e.key === 'w' || e.key === 'W') {
@@ -416,11 +431,21 @@ export class CbtScheduler {
         const count = this.planets.length;
         if (!count) return;
 
+        let planes: ReadonlyArray<Plane> | null = null;
+        if (this.frustumCull) {
+            // Render-space frustum planes for this frame (camera is at the render origin).
+            this.camera
+                .getViewMatrix()
+                .multiplyToRef(this.camera.getProjectionMatrix(), this.tmpViewProj);
+            Frustum.GetPlanesToRef(this.tmpViewProj, this.frustumPlanes);
+            planes = this.frustumPlanes;
+        }
+
         const deadline = performance.now() + this.budgetMs;
         for (let i = 0; i < count; i++) {
             if (performance.now() >= deadline) break;
             const planet = this.planets[(this.robin + i) % count];
-            planet.update(deadline);
+            planet.update(deadline, planes);
         }
         this.robin = (this.robin + 1) % Math.max(1, count);
     };

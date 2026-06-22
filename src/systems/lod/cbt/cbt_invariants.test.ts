@@ -1,4 +1,4 @@
-import { Vector3 } from '@babylonjs/core';
+import { Frustum, Matrix, Vector3 } from '@babylonjs/core';
 import { describe, expect, it } from 'vitest';
 import {
     classifyLeaves,
@@ -6,7 +6,7 @@ import {
     measureLeafProjectedAreas,
 } from './cbt_classify';
 import { emitMeshFromLeaves } from './cbt_emit';
-import { CbtState } from './cbt_state';
+import { CbtState, type CbtNode } from './cbt_state';
 import { makeClassifyParams, makeLeafSet } from './__fixtures__/cbt_fixtures';
 
 const RADIUS = 1000;
@@ -236,6 +236,55 @@ describe('CBT invariants — backside culling (Phase 2)', () => {
         const on = classifyLeaves({ ...base, cullBackface: true }).mergeParents;
 
         expect(on).toEqual(off);
+    });
+});
+
+describe('CBT invariants — frustum culling', () => {
+    function leaf(id: number, cx: number, cy: number, cz: number, size: number): CbtNode {
+        return {
+            id,
+            level: 0,
+            parentId: null,
+            leftId: null,
+            rightId: null,
+            v0: new Vector3(cx, cy, cz),
+            v1: new Vector3(cx + size, cy, cz),
+            v2: new Vector3(cx, cy + size, cz),
+            isLeaf: true,
+        };
+    }
+
+    // Camera at the render origin looking down +z.
+    function frustum(): ReturnType<typeof Frustum.GetPlanes> {
+        const view = Matrix.LookAtLH(new Vector3(0, 0, 0), new Vector3(0, 0, 1), new Vector3(0, 1, 0));
+        const proj = Matrix.PerspectiveFovLH(1.0, 1.0, 0.5, 1e6);
+        return Frustum.GetPlanes(view.multiply(proj));
+    }
+
+    const baseParams = (planes: ReturnType<typeof Frustum.GetPlanes> | null) => ({
+        leaves: [leaf(1, 0, 0, 100, 5), leaf(2, 0, 0, -100, 5)], // #1 in front, #2 behind
+        cameraWorldDouble: new Vector3(0, 0, 0),
+        planetCenterWorldDouble: new Vector3(0, 0, 0),
+        renderParentWorldMatrix: Matrix.Identity(),
+        viewportHeightPx: 1080,
+        cameraFovRadians: 1.0,
+        splitThresholdPx2: 1,
+        splitHysteresis: 1,
+        cullBackface: false,
+        frustumPlanes: planes,
+        frustumGuardScale: 1,
+    });
+
+    it('keeps both leaves when no frustum planes are supplied', () => {
+        const ids = classifyLeaves(baseParams(null)).splitCandidates.map((c) => c.nodeId);
+        expect(ids).toContain(1);
+        expect(ids).toContain(2);
+    });
+
+    it('culls the leaf behind the camera, keeps the one in view', () => {
+        const ids = classifyLeaves(baseParams(frustum())).splitCandidates.map((c) => c.nodeId);
+        expect(ids).toContain(1);
+        expect(ids).not.toContain(2);
     });
 });
 
