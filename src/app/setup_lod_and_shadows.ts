@@ -44,6 +44,15 @@ const CBT_QUALITY: CbtQualityLevel = 'high';
  */
 const OFF_THREAD_CBT = true;
 
+/**
+ * Run the full CBT on the GPU (Dupuy 2021 — bitfield + sum-reduction + compute
+ * split/merge + implicit-mesh draw), WebGPU only. Off by default during dev;
+ * only takes effect when the engine is WebGPU (otherwise the worker/sync path
+ * is used). When on and WebGPU is available, it supersedes OFF_THREAD_CBT.
+ * See cbt skill ref 13.
+ */
+const GPU_CBT = true;
+
 export type LodController = {
     resetNow: () => void;
     /** Aggregate CBT telemetry for the perf HUD / headless capture. */
@@ -84,6 +93,8 @@ export function setupLodAndShadows(
         }
 
         const quality = CBT_QUALITY_PRESETS[CBT_QUALITY];
+        // GPU CBT is WebGPU-only; on WebGL2 it silently falls back to the worker.
+        const gpuCbt = GPU_CBT && engine.isWebGPU;
         const cbt = createCBTForSystem(scene, camera, system, {
             maxDepth: quality.maxDepth,
             maxSplitsPerFrame: 8,
@@ -92,6 +103,7 @@ export function setupLodAndShadows(
             splitHysteresis: 0.75,
             noise: noiseForQuality(quality),
             offThreadCbt: OFF_THREAD_CBT,
+            gpuCbt,
         });
 
         for (const [name, planet] of cbt.entries()) {

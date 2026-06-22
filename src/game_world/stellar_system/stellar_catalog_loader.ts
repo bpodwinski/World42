@@ -135,6 +135,8 @@ export type CBTOptions = {
     noise?: NoiseParams;
     /** Run CBT classify/split/merge/emit in a Rust/WASM worker (default false). */
     offThreadCbt?: boolean;
+    /** Run the full CBT on the GPU (WebGPU only, Dupuy 2021); default false. */
+    gpuCbt?: boolean;
     skip?: (name: string, body: LoadedBody) => boolean;
 };
 
@@ -358,6 +360,7 @@ export function createCBTForSystem(
         splitHysteresis = 0.7,
         noise,
         offThreadCbt = false,
+        gpuCbt = false,
         skip = (_name: string, body: LoadedBody) =>
             body.bodyType === "star" || body.lodAlgorithm !== "cbt",
     } = opts;
@@ -397,6 +400,7 @@ export function createCBTForSystem(
             splitHysteresis,
             noise,
             offThreadCbt,
+            gpuCbt,
             starPosWorldDouble,
             starColor,
             starIntensity,

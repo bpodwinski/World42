@@ -67,8 +67,24 @@ export async function bootstrapScene(
     gui.setMouseCrosshairVisible(true);
     disposables.add(() => gui.dispose());
 
+    // Spawn on the star-facing side, backed off, so the lit hemisphere faces the
+    // camera and the whole planet is framed. Offsetting toward the star (plus a
+    // little "up") also keeps the look-at-centre direction away from the up vector,
+    // avoiding the setTarget gimbal singularity (straight-down look) that silently
+    // left the camera pointing at the horizon (planet at the bottom/top of screen).
+    const spawnSystem = loadedSystems.get('Sol') ?? Array.from(loadedSystems.values())[0];
+    const spawnStar = spawnSystem
+        ? Array.from(spawnSystem.bodies.values()).find((b) => b.bodyType === 'star')
+        : undefined;
+    const spawnR = spawnBody.radiusSim;
+    const toStar = spawnStar
+        ? spawnStar.positionWorldDouble.subtract(spawnBody.positionWorldDouble).normalize()
+        : new Vector3(-1, 0, 0);
+    // Offset AWAY from the star: the terrain shader lights the hemisphere facing
+    // (planet - star), so the anti-star side is the lit one to spawn looking at.
     const spawnPosWorldDouble = spawnBody.positionWorldDouble.clone();
-    spawnPosWorldDouble.y += spawnBody.radiusSim * 1.01;
+    spawnPosWorldDouble.addInPlace(toStar.scale(-spawnR * 2.5));
+    spawnPosWorldDouble.y += spawnR * 0.9;
 
     const camera = new OriginCamera('camera_player', spawnPosWorldDouble, scene);
     camera.debugMode = true;

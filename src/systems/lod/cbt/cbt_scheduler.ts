@@ -29,6 +29,8 @@ import { DEFAULT_NOISE, type NoiseParams } from './cbt_noise';
 import { createCbtTerrainMaterial } from './cbt_terrain_shader';
 import { getGlobalCbtKernelClient } from './workers/cbt_kernel_client';
 import { WorkerCbtSource } from './workers/cbt_worker_source';
+import { GpuCbtSource } from './gpu/gpu_cbt_source';
+import type { WebGPUEngine } from '@babylonjs/core';
 
 export type CbtPlanetOptions = {
     key: string;
@@ -67,6 +69,13 @@ export type CbtPlanetOptions = {
      * reference. The worker path is wired in Phase 3.
      */
     offThreadCbt?: boolean;
+    /**
+     * Run the full CBT on the GPU (Dupuy 2021: bitfield + sum-reduction +
+     * split/merge compute passes + implicit-mesh draw), WebGPU only. Default
+     * false. Takes precedence over {@link offThreadCbt} when both are set and the
+     * engine is WebGPU; otherwise the worker/sync path is used. Wired in Phase 5.
+     */
+    gpuCbt?: boolean;
 };
 
 /** Per-planet telemetry, refreshed on each {@link CbtPlanet.update}. */
@@ -153,6 +162,26 @@ export class CbtPlanet {
     }
 
     private createSource(opts: CbtPlanetOptions): CbtGeometrySource {
+        // GPU CBT path (WebGPU only): a fully GPU-resident concurrent binary tree
+        // rendered as an implicit mesh. Owns its own mesh/material; the listener is
+        // called for telemetry only. Supersedes the worker/sync path when enabled.
+        const engine = this.scene.getEngine();
+        if (opts.gpuCbt && (engine as WebGPUEngine).isWebGPU) {
+            return new GpuCbtSource(
+                engine as WebGPUEngine,
+                this.scene,
+                {
+                    key: opts.key,
+                    renderParent: this.renderParent,
+                    radiusSim: opts.radiusSim,
+                    noise: this.noise,
+                    starColor: this.starColor,
+                    starPosWorldDouble: this.starPosWorldDouble,
+                },
+                this.onSourceUpdate
+            );
+        }
+
         const sourceOpts: LocalCbtSourceOptions = {
             radiusSim: opts.radiusSim,
             maxDepth: opts.maxDepth,
