@@ -13,6 +13,8 @@ import { OriginCamera } from '../core/camera/camera_manager';
 import { MouseSteerControlManager } from '../core/control/mouse_steer_control_manager';
 import { GuiManager } from '../core/gui/gui_manager';
 import { DisposableRegistry } from '../core/lifecycle/disposable_registry';
+import { ScaleManager } from '../core/scale/scale_manager';
+import { DEFAULT_NOISE, fbmNoise } from '../systems/lod/cbt/cbt_noise';
 import planetsJson from '../game_world/stellar_system/data.json';
 import {
     listStellarSystems,
@@ -69,11 +71,10 @@ export async function bootstrapScene(
     gui.setMouseCrosshairVisible(true);
     disposables.add(() => gui.dispose());
 
-    // Spawn on the star-facing side, backed off, so the lit hemisphere faces the
-    // camera and the whole planet is framed. Offsetting toward the star (plus a
-    // little "up") also keeps the look-at-centre direction away from the up vector,
-    // avoiding the setTarget gimbal singularity (straight-down look) that silently
-    // left the camera pointing at the horizon (planet at the bottom/top of screen).
+    // Spawn just above the surface at the planet's NORTH POLE (planet-local +Y =
+    // the octahedron's +Y vertex; the pivot only spins about Y, so local +Y maps to
+    // world +Y), looking out toward the lit limb tilted slightly below the horizon
+    // so foreground terrain and the horizon are both framed.
     const spawnSystem = loadedSystems.get('Sol') ?? Array.from(loadedSystems.values())[0];
     const spawnStar = spawnSystem
         ? Array.from(spawnSystem.bodies.values()).find((b) => b.bodyType === 'star')
@@ -82,11 +83,24 @@ export async function bootstrapScene(
     const toStar = spawnStar
         ? spawnStar.positionWorldDouble.subtract(spawnBody.positionWorldDouble).normalize()
         : new Vector3(-1, 0, 0);
-    // Offset AWAY from the star: the terrain shader lights the hemisphere facing
-    // (planet - star), so the anti-star side is the lit one to spawn looking at.
-    const spawnPosWorldDouble = spawnBody.positionWorldDouble.clone();
-    spawnPosWorldDouble.addInPlace(toStar.scale(-spawnR * 1.7));
-    spawnPosWorldDouble.y += spawnR * 0.5;
+
+    // Radial up at the north pole, and the real ground radius there: mean radius +
+    // fbm height sampled at the pole direction (same field the terrain shader uses).
+    // DEFAULT_NOISE matches the planet's noise except for octaves (quality preset);
+    // the clearance dwarfs that sub-metre difference, so the camera sits a fixed low
+    // altitude above the actual surface whatever the local relief.
+    //
+    // Clearance is ~7 km: the GPU CBT is depth-capped (GPU_MAX_DEPTH=18 → ~24 km
+    // finest triangles, see references/13_gpu_cbt_webgpu.md), so very close to the
+    // surface the coarse facets straddle the camera and the mesh breaks up (cracks
+    // show the skybox). Empirically the floor is ~4 km above the pole surface; 7 km
+    // gives a clean, watertight near-surface view with margin. To hug the ground
+    // tighter, the depth cap must be raised (decouple draw count from D).
+    const radialUp = new Vector3(0, 1, 0);
+    const poleTerrainSim = fbmNoise(radialUp.x, radialUp.y, radialUp.z, DEFAULT_NOISE);
+    const clearanceSim = ScaleManager.toSimulationUnits(7); // ~7 km above the ground
+    const camAltitudeSim = spawnR + poleTerrainSim + clearanceSim;
+    const spawnPosWorldDouble = spawnBody.positionWorldDouble.add(radialUp.scale(camAltitudeSim));
 
     const camera = new OriginCamera('camera_player', spawnPosWorldDouble, scene);
     camera.debugMode = true;
@@ -98,22 +112,19 @@ export async function bootstrapScene(
     camera.inputs.clear();
     camera.checkCollisions = false;
 
-    // Spawn orientation: already level relative to the planet (zero roll) and
-    // looking down at the surface ahead in oblique (not straight at the centre,
-    // which would start on the radial pole = gimbal). Built directly as a basis so
-    // the horizon-stabilized controller starts in a clean state.
-    const radialUp = spawnPosWorldDouble.subtract(spawnBody.positionWorldDouble);
-    radialUp.normalize();
-    // Stable horizontal tangent from a world reference (not toStar, which is ~radial
-    // here). Steep elevation keeps the planet roughly centred while staying off the
-    // radial pole (where the camera basis / yaw would be singular).
-    const ref = Math.abs(radialUp.y) < 0.95 ? new Vector3(0, 1, 0) : new Vector3(1, 0, 0);
-    const east = Vector3.Cross(ref, radialUp);
-    east.normalize();
-    const north = Vector3.Cross(radialUp, east);
-    north.normalize();
-    const spawnElev = -1.48; // ~5° off nadir: planet centred + filling the view, basis still defined
-    const spawnFwd = north.scale(Math.cos(spawnElev)).add(radialUp.scale(Math.sin(spawnElev)));
+    // Orientation: look toward the lit limb (toStar projected onto the local tangent
+    // plane), tilted ~14° below the horizon, with zero roll relative to the planet.
+    // At the pole toStar is already tangent to the surface, so the forward tangent is
+    // well-defined (no gimbal). Built as an explicit basis so the steering controller
+    // starts in a clean, level state.
+    let tangentFwd = toStar.subtract(radialUp.scale(Vector3.Dot(toStar, radialUp)));
+    if (tangentFwd.lengthSquared() < 1e-6) {
+        // Degenerate (pole faces the star): fall back to a world-X tangent.
+        tangentFwd = new Vector3(1, 0, 0).subtract(radialUp.scale(radialUp.x));
+    }
+    tangentFwd.normalize();
+    const spawnElev = -0.25; // ~14° below the horizon: foreground terrain + horizon
+    const spawnFwd = tangentFwd.scale(Math.cos(spawnElev)).add(radialUp.scale(Math.sin(spawnElev)));
     spawnFwd.normalize();
     const spawnRight = Vector3.Cross(radialUp, spawnFwd);
     spawnRight.normalize();
