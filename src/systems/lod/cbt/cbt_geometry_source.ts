@@ -55,6 +55,8 @@ export interface CbtGeometrySource {
     reset(): void;
     /** Optional: toggle wireframe on a source that owns its own material (GPU path). */
     setWireframe?(on: boolean): void;
+    /** Optional: toggle per-LOD-level debug colors on a source that owns its material (GPU path). */
+    setDebugLod?(on: boolean): void;
     dispose(): void;
 }
 

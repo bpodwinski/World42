@@ -69,6 +69,7 @@ function vertexSource(opts: GpuCbtRenderOptions): string {
         'uniform logarithmicDepthConstant : f32;',
         'varying vLocalPos : vec3<f32>;',
         'varying vFragmentDepth : f32;',
+        'varying vLevel : f32;',
         'attribute position : vec3<f32>;',
         '@vertex',
         'fn main(input : VertexInputs) -> FragmentInputs {',
@@ -79,6 +80,7 @@ function vertexSource(opts: GpuCbtRenderOptions): string {
         '        vertexOutputs.position = vec4<f32>(0.0, 0.0, 2.0, 1.0);',
         '        vertexOutputs.vLocalPos = vec3<f32>(0.0, 0.0, 0.0);',
         '        vertexOutputs.vFragmentDepth = 1.0;',
+        '        vertexOutputs.vLevel = 0.0;',
         '        return vertexOutputs;',
         '    }',
         '    let node = cbt_decode(handle);',
@@ -94,6 +96,8 @@ function vertexSource(opts: GpuCbtRenderOptions): string {
         '    // match the worker/GLSL terrain (otherwise the planet renders upside-down).',
         '    vertexOutputs.position.y = -vertexOutputs.position.y;',
         '    vertexOutputs.vLocalPos = localPos;',
+        '    // CBT depth; faces are at depth 3, so depth-3 == the worker LOD level (X key).',
+        '    vertexOutputs.vLevel = f32(node.y) - 3.0;',
         '    // Logarithmic depth (matches the other terrain materials) so the planet',
         '    // writes correct depth in front of the skybox at any distance.',
         '    vertexOutputs.vFragmentDepth = 1.0 + vertexOutputs.position.w;',
@@ -111,10 +115,40 @@ function fragmentSource(opts: GpuCbtRenderOptions): string {
         'uniform world : mat4x4<f32>;',
         'uniform uLightDirection : vec3<f32>;',
         'uniform logarithmicDepthConstant : f32;',
+        'uniform uDebugLod : i32;',
         'varying vLocalPos : vec3<f32>;',
         'varying vFragmentDepth : f32;',
+        'varying vLevel : f32;',
+        // Per-LOD-level palette — mirrors LEVEL_COLORS in cbt_emit.ts so the X-key
+        // debug view matches the worker path.
+        'fn cbtLodColor(level : u32) -> vec3<f32> {',
+        '    switch (level % 16u) {',
+        '        case 0u: { return vec3<f32>(0.15, 0.15, 0.80); }',
+        '        case 1u: { return vec3<f32>(0.10, 0.50, 0.90); }',
+        '        case 2u: { return vec3<f32>(0.10, 0.75, 0.75); }',
+        '        case 3u: { return vec3<f32>(0.10, 0.80, 0.30); }',
+        '        case 4u: { return vec3<f32>(0.50, 0.85, 0.10); }',
+        '        case 5u: { return vec3<f32>(0.90, 0.90, 0.10); }',
+        '        case 6u: { return vec3<f32>(1.00, 0.65, 0.05); }',
+        '        case 7u: { return vec3<f32>(1.00, 0.35, 0.05); }',
+        '        case 8u: { return vec3<f32>(0.90, 0.10, 0.10); }',
+        '        case 9u: { return vec3<f32>(0.80, 0.10, 0.50); }',
+        '        case 10u: { return vec3<f32>(0.60, 0.10, 0.70); }',
+        '        case 11u: { return vec3<f32>(0.40, 0.10, 0.80); }',
+        '        case 12u: { return vec3<f32>(1.00, 1.00, 1.00); }',
+        '        case 13u: { return vec3<f32>(0.70, 0.70, 0.70); }',
+        '        case 14u: { return vec3<f32>(0.40, 0.40, 0.40); }',
+        '        default: { return vec3<f32>(1.00, 0.00, 1.00); }',
+        '    }',
+        '}',
         '@fragment',
         'fn main(input : FragmentInputs) -> FragmentOutputs {',
+        '    if (uniforms.uDebugLod != 0) {',
+        '        let lc = cbtLodColor(u32(max(fragmentInputs.vLevel, 0.0)));',
+        '        fragmentOutputs.color = vec4<f32>(lc, 1.0);',
+        '        fragmentOutputs.fragDepth = log2(fragmentInputs.vFragmentDepth) * uniforms.logarithmicDepthConstant * 0.5;',
+        '        return fragmentOutputs;',
+        '    }',
         '    let dir = normalize(fragmentInputs.vLocalPos);',
         '    let nLocal = cbtNoiseNormal(dir, CBT_RADIUS);',
         '    let nWorld = normalize((uniforms.world * vec4<f32>(nLocal, 0.0)).xyz);',
@@ -132,6 +166,7 @@ export type GpuCbtRenderMaterial = {
     material: ShaderMaterial;
     permBuffer: StorageBufferType;
     setLightDirection(dir: Vector3): void;
+    setDebugLod(on: boolean): void;
     dispose(): void;
 };
 
@@ -151,7 +186,7 @@ export function buildGpuCbtRenderMaterial(
         {
             shaderLanguage: ShaderLanguage.WGSL,
             attributes: ['position'],
-            uniforms: ['worldViewProjection', 'world', 'uLightDirection', 'logarithmicDepthConstant'],
+            uniforms: ['worldViewProjection', 'world', 'uLightDirection', 'logarithmicDepthConstant', 'uDebugLod'],
             storageBuffers: ['cbt_heap', 'cbtPerm'],
         }
     );
@@ -181,12 +216,16 @@ export function buildGpuCbtRenderMaterial(
     material.setStorageBuffer('cbt_heap', heapBuffer);
     material.setStorageBuffer('cbtPerm', permBuffer);
     material.setVector3('uLightDirection', new Vector3(0, -1, 0));
+    material.setInt('uDebugLod', 0);
 
     return {
         material,
         permBuffer,
         setLightDirection(dir: Vector3): void {
             material.setVector3('uLightDirection', dir);
+        },
+        setDebugLod(on: boolean): void {
+            material.setInt('uDebugLod', on ? 1 : 0);
         },
         dispose(): void {
             material.dispose();

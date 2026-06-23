@@ -190,6 +190,10 @@ export class GpuCbtSource implements CbtGeometrySource {
         this.render.material.wireframe = on;
     }
 
+    setDebugLod(on: boolean): void {
+        this.render.setDebugLod(on);
+    }
+
     dispose(): void {
         this.disposed = true;
         this.mesh.dispose();

@@ -366,6 +366,8 @@ export class CbtPlanet {
 
     setDebugLod(on: boolean): void {
         this.debugLod = on;
+        // GPU path: the material is owned by the source, not CbtPlanet.
+        this.source.setDebugLod?.(on);
         if (!this.material) return;
         if (this.material instanceof ShaderMaterial) {
             this.material.setInt('uDebugLod', on ? 1 : 0);
