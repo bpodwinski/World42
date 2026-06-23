@@ -142,17 +142,10 @@ describe('OcbtTopology — deep local refinement (fly-in)', () => {
     });
 });
 
-describe('OcbtTopology — multi-region refinement (structural invariants)', () => {
-    // Several simultaneous hot-spots. The base-only forced-diamond split keeps the
-    // pool STRUCTURALLY sound here — neighbor pointers stay symmetric and every
-    // heapID stays consistent with its geometry — but it does NOT guarantee 0
-    // T-junctions where independently-refined regions meet: a split creates new
-    // longest edges on neighbours that must also propagate, which base-only forcing
-    // skips. Closing those needs the longest-edge propagation chain (the reference's
-    // PropagateBisect / cbt_conform.wgsl splitConforming) = Phase 1c. This test pins
-    // the invariants that already hold; the watertight guarantee is asserted for
-    // single-region coherent refinement by the fly-in test above.
-    it('refines multiple regions; documents the base-only T-junction gap (Phase 1c)', () => {
+describe('OcbtTopology — multi-region refinement (LEPP, watertight)', () => {
+    // Several simultaneous hot-spots meeting at coarse boundaries — the case base-only
+    // forcing cracked. With the LEPP conforming split this must be fully watertight.
+    it('refining toward several targets at once stays watertight + symmetric', () => {
         const SOFT_TARGET = 16;
         const topo = new OcbtTopology(30);
         const targets: V3[] = [
@@ -181,20 +174,90 @@ describe('OcbtTopology — multi-region refinement (structural invariants)', () 
             if (best < 0) break;
             topo.requestSplit(best);
         }
-        const leaves = topo.leaves();
+        checkAll(topo);
         expect(topo.leafCount).toBeGreaterThan(200); // genuinely refined in multiple regions
-        // Documents the base-only-forcing gap: where independently-refined regions
-        // meet, splits leave T-junctions because new longest edges on neighbours are
-        // not propagated. The proven cbt_state produces the SAME counts under this
-        // sequence — a property of base-only forcing, not a mirror bug. The
-        // longest-edge propagation chain (Phase 1c) drives these to 0; this is the
-        // live signal for it. (Single-region coherent refinement IS watertight — see
-        // the fly-in test above.)
-        const wt = watertightViolations(leaves);
-        const sym = symmetryViolations(leaves);
-        // eslint-disable-next-line no-console
-        console.log(`[Phase 1c TODO] multi-region base-only forcing: watertight=${wt} symmetry=${sym}`);
-        expect(wt).toBeGreaterThan(0);
+    });
+});
+
+describe('OcbtTopology — refinement driven INTO the depth cap', () => {
+    // The old base-only forcing cracked when refinement piled at maxDepth (the forced
+    // partner could not split past the cap). LEPP only propagates toward COARSER nodes,
+    // so driving to the cap should stay watertight (splits at the cap are simply refused
+    // by the entry guard; their same-level cap neighbours share full edges).
+    it('greedy refine with target depth == maxDepth stays watertight', () => {
+        const MAXD = 12;
+        const topo = new OcbtTopology(MAXD);
+        const target: V3 = (() => {
+            const i = 1 / Math.hypot(0.3, 0.7, 0.5);
+            return [0.3 * i, 0.7 * i, 0.5 * i];
+        })();
+        for (let iter = 0; iter < 1200; iter++) {
+            const leaves = topo.leaves();
+            let best = -1;
+            let bestDot = -Infinity;
+            for (const t of leaves) {
+                if (t.depth - 3 >= MAXD) continue; // only the entry-guard cap, no soft headroom
+                const c = centroid(t);
+                const d = c[0] * target[0] + c[1] * target[1] + c[2] * target[2];
+                if (d > bestDot) {
+                    bestDot = d;
+                    best = t.slot;
+                }
+            }
+            if (best < 0) break;
+            topo.requestSplit(best);
+        }
+        checkAll(topo);
+        // genuinely reached the cap
+        expect(Math.max(...topo.leaves().map((l) => l.depth - 3))).toBe(MAXD);
+    });
+
+    it('random refine with target depth == maxDepth stays watertight', () => {
+        const MAXD = 11;
+        const topo = new OcbtTopology(MAXD);
+        let s = 0x0d15ea5e >>> 0;
+        const rnd = () => ((s = (s * 1664525 + 1013904223) >>> 0), s / 2 ** 32);
+        for (let iter = 0; iter < 4000; iter++) {
+            const leaves = topo.leaves();
+            const pick = leaves[Math.floor(rnd() * leaves.length)];
+            if (pick && pick.depth - 3 < MAXD) topo.requestSplit(pick.slot);
+        }
+        checkAll(topo);
+    });
+});
+
+describe('OcbtTopology — arbitrary random refinement (LEPP, watertight)', () => {
+    // The adversarial case: split random leaves with no coherence. LEPP must keep the
+    // mesh watertight + symmetric regardless (base-only forcing produced T-junctions
+    // here — see git history of this test).
+    it('many random splits stay watertight + symmetric', () => {
+        const SOFT_TARGET = 14;
+        const topo = new OcbtTopology(30);
+        let s = 0x51ed_2701 >>> 0;
+        const rnd = () => ((s = (s * 1664525 + 1013904223) >>> 0), s / 2 ** 32);
+        for (let iter = 0; iter < 800; iter++) {
+            const leaves = topo.leaves();
+            const pick = leaves[Math.floor(rnd() * leaves.length)];
+            if (pick && pick.depth - 3 < SOFT_TARGET) topo.requestSplit(pick.slot);
+        }
+        checkAll(topo);
+        expect(topo.leafCount).toBeGreaterThan(200);
+    });
+
+    it('multiple independent seeds all stay watertight', () => {
+        for (const seed of [1, 7, 42, 1337, 0xbeef]) {
+            const topo = new OcbtTopology(28);
+            let s = seed >>> 0;
+            const rnd = () => ((s = (s * 1664525 + 1013904223) >>> 0), s / 2 ** 32);
+            for (let iter = 0; iter < 400; iter++) {
+                const leaves = topo.leaves();
+                const pick = leaves[Math.floor(rnd() * leaves.length)];
+                if (pick && pick.depth - 3 < 13) topo.requestSplit(pick.slot);
+            }
+            const leaves = topo.leaves();
+            expect(watertightViolations(leaves)).toBe(0);
+            expect(symmetryViolations(leaves)).toBe(0);
+        }
     });
 });
 
@@ -214,5 +277,41 @@ describe('OcbtTopology — conservative merge', () => {
         expect(topo.leaves().map((l) => l.heapID).sort((a, b) => a - b)).toEqual([
             8, 9, 10, 11, 12, 13, 14, 15
         ]);
+    });
+
+    // Deep multi-level refinement then a full greedy collapse. This exercises the
+    // conservative-merge guards (same-level reciprocal diamond + no finer neighbour) on
+    // diamonds whose legs are refined — the path a weak "merge low slots" test missed
+    // and where merge() previously corrupted the mesh (audit-confirmed). It must stay
+    // watertight at every pass and round-trip EXACTLY to the 8-face seed.
+    it('greedy full merge of a deeply refined mesh round-trips to the seed, watertight throughout', () => {
+        for (const seed of [1, 7, 99, 2718]) {
+            const topo = new OcbtTopology(30);
+            let s = seed >>> 0;
+            const rnd = () => ((s = (s * 1664525 + 1013904223) >>> 0), s / 2 ** 32);
+            // Build a watertight, multi-level mesh.
+            for (let iter = 0; iter < 600; iter++) {
+                const leaves = topo.leaves();
+                const pick = leaves[Math.floor(rnd() * leaves.length)];
+                if (pick && pick.depth - 3 < 13) topo.requestSplit(pick.slot);
+            }
+            checkAll(topo);
+            expect(topo.leafCount).toBeGreaterThan(100);
+
+            // Greedily merge every collapsible diamond, pass after pass, until stable.
+            let guard = 0;
+            for (;;) {
+                const all = Array.from({ length: topo.slotCount }, (_, i) => i);
+                const merged = topo.mergeSlots(all);
+                checkAll(topo); // watertight + symmetric after every pass
+                if (merged === 0) break;
+                if (++guard > 200) throw new Error('merge did not converge');
+            }
+            // A conforming mesh fully collapses back to the octahedron seed.
+            expect(topo.leafCount).toBe(8);
+            expect(topo.leaves().map((l) => l.heapID).sort((a, b) => a - b)).toEqual([
+                8, 9, 10, 11, 12, 13, 14, 15
+            ]);
+        }
     });
 });

@@ -395,11 +395,18 @@ export class CbtState {
         const t0 = this.allocSlot();
         const t1 = this.allocSlot();
 
+        // Re-fetch verts AFTER allocation: allocSlot() can grow() and REPLACE this.verts,
+        // so the `v` captured above is the orphaned old array. Parent verts were already
+        // read into ax..rz (values) before the alloc, so only the child WRITES below must
+        // target the live array. (Without this, slots past the grow boundary get written
+        // to the dead array -> 0/NaN verts -> cracks.)
+        const vw = this.verts;
+
         // t0 = (apex=VC, left=A, right=L); hypotenuse (A,L) == parent's LEFT edge.
         let p = t0 * 9;
-        v[p] = mx; v[p + 1] = my; v[p + 2] = mz;
-        v[p + 3] = ax; v[p + 4] = ay; v[p + 5] = az;
-        v[p + 6] = lx; v[p + 7] = ly; v[p + 8] = lz;
+        vw[p] = mx; vw[p + 1] = my; vw[p + 2] = mz;
+        vw[p + 3] = ax; vw[p + 4] = ay; vw[p + 5] = az;
+        vw[p + 6] = lx; vw[p + 7] = ly; vw[p + 8] = lz;
         this.level[t0] = lvl;
         this.parent[t0] = t;
         this.child0[t0] = -1;
@@ -408,9 +415,9 @@ export class CbtState {
 
         // t1 = (apex=VC, left=R, right=A); hypotenuse (R,A) == parent's RIGHT edge.
         p = t1 * 9;
-        v[p] = mx; v[p + 1] = my; v[p + 2] = mz;
-        v[p + 3] = rx; v[p + 4] = ry; v[p + 5] = rz;
-        v[p + 6] = ax; v[p + 7] = ay; v[p + 8] = az;
+        vw[p] = mx; vw[p + 1] = my; vw[p + 2] = mz;
+        vw[p + 3] = rx; vw[p + 4] = ry; vw[p + 5] = rz;
+        vw[p + 6] = ax; vw[p + 7] = ay; vw[p + 8] = az;
         this.level[t1] = lvl;
         this.parent[t1] = t;
         this.child0[t1] = -1;

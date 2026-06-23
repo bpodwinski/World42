@@ -39,4 +39,30 @@ describe('CbtState', () => {
         const leafIds = new Set(state.getLeafNodes().map((leaf) => leaf.id));
         expect(leafIds.has(firstLeaf.id)).toBe(true);
     });
+
+    it('keeps finite vertices when refinement grows the pool past its initial capacity', () => {
+        // Regression: subdivide() must write child verts into the LIVE verts array. The
+        // pool starts at 4096 slots and doubles on demand; a stale array reference cached
+        // before allocSlot() would send writes to the orphaned old array, leaving slots
+        // past the grow boundary with 0/NaN verts. Refine deeply enough to force a grow.
+        const state = new CbtState(100, 15);
+        // Uniform refinement: split every current leaf each pass (~doubles the leaf
+        // count), so after ~10 passes we have >4096 slots and have crossed >=1 grow.
+        for (let pass = 0; pass < 10; pass++) {
+            const ids = state.getLeafNodes().map((leaf) => leaf.id);
+            state.splitByPriority(ids, ids.length);
+        }
+        const leaves = state.getLeafNodes();
+        // >2048 leaves => >4096 slots => the pool grew at least once.
+        expect(leaves.length).toBeGreaterThan(2048);
+        let nonFinite = 0;
+        for (const t of leaves) {
+            for (const v of [t.v0, t.v1, t.v2]) {
+                if (!Number.isFinite(v.x) || !Number.isFinite(v.y) || !Number.isFinite(v.z)) {
+                    nonFinite++;
+                }
+            }
+        }
+        expect(nonFinite).toBe(0);
+    });
 });

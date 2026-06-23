@@ -117,6 +117,11 @@ export class OcbtTopology {
         return this._leafCount;
     }
 
+    /** Highest slot index ever allocated (exclusive upper bound for slot scans/tests). */
+    get slotCount(): number {
+        return this.nextFresh;
+    }
+
     /** Snapshot of every live leaf bisector (for tests/consumers). */
     leaves(): BisectorView[] {
         const out: BisectorView[] = [];
@@ -320,25 +325,56 @@ export class OcbtTopology {
     // --- refinement (ROAM forced-diamond split) -----------------------------
 
     /**
-     * Forced-diamond split (Rivara base-only forcing, ported verbatim from
-     * cbt_state.ts). Watertight + symmetric for SINGLE-region coherent (metric-driven)
-     * refinement — the realistic LOD case (verified by the fly-in test). It is NOT
-     * sufficient for multi-region / arbitrary refinement: a split creates new longest
-     * edges on the children's leg neighbours that must also propagate, which base-only
-     * forcing skips, stranding T-junctions where independently-refined regions meet.
-     * Phase 1c adds the longest-edge propagation chain (the reference's PropagateBisect
-     * / cbt_conform.wgsl splitConforming) to close that for any refinement.
+     * Conforming split via Rivara's Longest-Edge Propagation Path (LEPP). Watertight +
+     * symmetric for ANY refinement (single-region, multi-region, arbitrary, across the
+     * 12 octahedron seams) — the general fix over cbt_state.ts's base-only forcing,
+     * which only worked for single coherent regions (it forced the base ONE level with
+     * no level check, stranding T-junctions where ≥2-level differences met).
+     *
+     * Algorithm: to bisect `target`, repeatedly walk from it along the longest-edge
+     * (BASE) neighbour to the LEPP terminal — a pair of same-level triangles that
+     * share their mutual longest edge (a diamond), or a boundary — and bisect that
+     * terminal diamond. Each terminal bisection shortens the path; iterate until the
+     * target itself becomes the terminal and is bisected. Rivara proves this
+     * terminates and yields a conforming (crack-free) mesh. Hitting maxDepth at a
+     * terminal refuses the whole split (no partial diamond → no T-junction), which is
+     * the correct depth-cap behaviour.
      */
     private forceSplit(t: number): void {
         if (!this.testBit(this.leafBits, t)) return;
         if (this.level[t] >= this.maxDepth) return;
 
+        // Longest-edge propagation as a DEPTH fixpoint: while the split-edge (BASE)
+        // neighbour is strictly COARSER, recursively split it first (which forces ITS
+        // own base chain, transitively up the longest-edge path to the equatorial base
+        // diamond — across the octahedron seams too, since BASE stores the seam twin).
+        // Refetch each pass: subdivide() repoints t's BASE to the correct child. The
+        // DEPTH test (not the old topology test nb(tb,BASE)!=t) is what fixes the
+        // multi-region / >=2-level / cross-face T-junctions base-only forcing stranded.
         let tb = this.nb(t, BASE);
-        if (tb !== -1 && this.nb(tb, BASE) !== t) {
-            // Base neighbour is coarser / not a diamond partner — split it first.
+        let guard = 0;
+        while (tb !== -1 && this.level[tb] < this.level[t]) {
             this.forceSplit(tb);
+            // Forcing a coarser twin can bisect the diamond it shares with t, splitting
+            // t itself (as the partner). If so, t is already done — re-splitting it would
+            // duplicate children (non-manifold). Bail out.
+            if (!this.testBit(this.leafBits, t)) return;
             tb = this.nb(t, BASE);
+            if (++guard > 8 * this.maxDepth) break; // safety (cannot happen)
         }
+        // tb is now -1 (boundary) or a same-depth leaf diamond partner — bisect together.
+        this.bisectDiamond(t);
+    }
+
+    /**
+     * Bisect a LEPP-terminal diamond: `t` and its BASE neighbour (a same-level
+     * reciprocal leaf, or -1 at a boundary). Both halves split together and their
+     * children are cross-linked across the shared hypotenuse so the mesh stays
+     * watertight. (This is the old base-only forceSplit body, minus the pre-forcing —
+     * the LEPP walk in {@link forceSplit} guarantees `t`'s base is a valid terminal.)
+     */
+    private bisectDiamond(t: number): void {
+        const tb = this.nb(t, BASE);
 
         // t's left base vertex BEFORE subdividing (used to orient the shared hypotenuse).
         const tL = t * 9 + 3;
@@ -376,17 +412,21 @@ export class OcbtTopology {
      * child0, keeps L), t1 -> 2h+1 (LEB child1, keeps R) — matched to ocbt_leb.
      */
     private subdivide(t: number): [number, number] {
+        // Read the parent's verts (as values) from the CURRENT array before allocating —
+        // allocSlot() can grow() and REPLACE this.verts, so any cached array reference
+        // taken before the alloc would be stale (writes would land in the orphaned old
+        // array, leaving the new slots zero/NaN). We re-fetch this.verts after the alloc.
         const o = t * 9;
-        const v = this.verts;
-        const ax = v[o];
-        const ay = v[o + 1];
-        const az = v[o + 2];
-        const lx = v[o + 3];
-        const ly = v[o + 4];
-        const lz = v[o + 5];
-        const rx = v[o + 6];
-        const ry = v[o + 7];
-        const rz = v[o + 8];
+        const pv = this.verts;
+        const ax = pv[o];
+        const ay = pv[o + 1];
+        const az = pv[o + 2];
+        const lx = pv[o + 3];
+        const ly = pv[o + 4];
+        const lz = pv[o + 5];
+        const rx = pv[o + 6];
+        const ry = pv[o + 7];
+        const rz = pv[o + 8];
         let mx = (lx + rx) * 0.5;
         let my = (ly + ry) * 0.5;
         let mz = (lz + rz) * 0.5;
@@ -409,6 +449,9 @@ export class OcbtTopology {
 
         const t0 = this.allocSlot();
         const t1 = this.allocSlot();
+
+        // Re-fetch the verts array AFTER allocation (it may have been replaced by grow()).
+        const v = this.verts;
 
         // t0 = (apex=VC, left=A, right=L).
         let p = t0 * 9;
@@ -479,21 +522,55 @@ export class OcbtTopology {
 
         const tb1 = this.nb(t0, RIGHT);
         if (tb1 === -1) {
+            // Boundary collapse: still refuse if a child has a finer neighbour to strand.
+            if (this.hasFinerNeighbor(t0) || this.hasFinerNeighbor(t1)) return false;
             this.collapseOne(parentSlot, t0, t1);
             return true;
         }
         const tb = this.parent[tb1];
         if (tb < 0 || this.testBit(this.leafBits, tb)) return false;
+        // Collapse ONLY a genuine same-level reciprocal diamond. LEPP forces conformity
+        // along the BASE chain only, so a child's leg (RIGHT/LEFT) neighbour may legally
+        // be FINER — then t0.RIGHT points at a finer DESCENDANT of the true partner and
+        // tb = parent[tb1] is the wrong (level-mismatched) node. Collapsing it corrupts
+        // the mesh (T-junctions + dangling refs into freed slots). Require same level and
+        // reciprocity via the other hypotenuse half (t1.LEFT must also descend from tb).
+        if (this.level[tb] !== this.level[parentSlot]) return false;
+        const t1L = this.nb(t1, LEFT);
+        if (t1L < 0 || this.parent[t1L] !== tb) return false;
         const tb0 = this.child0[tb];
         const tb1c = this.child1[tb];
         if (tb0 === -1 || tb1c === -1) return false;
         if (!this.testBit(this.leafBits, tb0) || !this.testBit(this.leafBits, tb1c)) return false;
+        // Conservative decimation: refuse if ANY of the four collapse-children has a
+        // strictly finer neighbour. Restoring the coarse parent edge over a refined
+        // neighbour would crack the mesh (and the finer neighbour would dangle into the
+        // freed child slot). This is the dual of forceSplit's conformity guard.
+        if (
+            this.hasFinerNeighbor(t0) ||
+            this.hasFinerNeighbor(t1) ||
+            this.hasFinerNeighbor(tb0) ||
+            this.hasFinerNeighbor(tb1c)
+        ) {
+            return false;
+        }
 
         this.collapseOne(parentSlot, t0, t1);
         this.collapseOne(tb, tb0, tb1c);
         this.setNb(parentSlot, BASE, tb);
         this.setNb(tb, BASE, parentSlot);
         return true;
+    }
+
+    /** True if any of slot `c`'s three neighbours is strictly finer (deeper) than `c`. */
+    private hasFinerNeighbor(c: number): boolean {
+        const lc = this.level[c];
+        const o = c * 3;
+        for (let e = 0; e < 3; e++) {
+            const n = this.neighbors[o + e];
+            if (n >= 0 && this.level[n] > lc) return true;
+        }
+        return false;
     }
 
     private collapseOne(t: number, t0: number, t1: number): void {
