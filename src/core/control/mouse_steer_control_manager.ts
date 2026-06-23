@@ -33,9 +33,6 @@ export type SpaceFlightOpts = {
     /** Invert vertical mouse steering (airplane-style) */
     invertY?: boolean;
 
-    /** Mouse-look sensitivity in radians of rotation per pixel of mouse movement */
-    mouseSensitivity?: number;
-
     /** Base forward/backward acceleration in m/s^2 */
     acceleration?: number;
 
@@ -105,9 +102,13 @@ export class MouseSteerControlManager {
 
     public gui?: GuiManager;
 
-    // --- Mouse movement accumulated since the last frame (pixels), for mouse-look ---
-    private _mouseDX = 0;
-    private _mouseDY = 0;
+    // --- Angular state (integrated velocities) ---
+    private _yawVel = 0;   // rad/s
+    private _pitchVel = 0; // rad/s
+
+    // --- Filtered steer deflection (for release tail) ---
+    private _steerX = 0;   // -1..1 (yaw)
+    private _steerY = 0;   // -1..1 (pitch)
 
     private collider?: AbstractMesh;
     private _delta = new Vector3();
@@ -124,7 +125,6 @@ export class MouseSteerControlManager {
             maxYawRate: opts.maxYawRate ?? 0.75,
             maxPitchRate: opts.maxPitchRate ?? 0.75,
             invertY: opts.invertY ?? false,
-            mouseSensitivity: opts.mouseSensitivity ?? 0.0022,
             acceleration: opts.acceleration ?? 2,
             strafeAcceleration: opts.strafeAcceleration ?? 2,
             maxSpeed: opts.maxSpeed ?? 5000,
@@ -138,12 +138,8 @@ export class MouseSteerControlManager {
             releaseDamping: opts.releaseDamping ?? 0.08,
         };
 
-        // Ensure we rotate with quaternions. Preserve any orientation already set
-        // via Euler `rotation` (e.g. a spawn setTarget) instead of clobbering it
-        // with identity — otherwise the camera always snaps to facing +Z.
-        if (!this.camera.rotationQuaternion) {
-            this.camera.rotationQuaternion = Quaternion.FromEulerVector(this.camera.rotation);
-        }
+        // Ensure we rotate with quaternions (never use setTarget for 6DOF)
+        if (!this.camera.rotationQuaternion) this.camera.rotationQuaternion = Quaternion.Identity();
 
         // Disable native pointer inputs for this camera
         this.camera.inputs.clear();
@@ -213,9 +209,6 @@ export class MouseSteerControlManager {
             e.preventDefault();
 
             this.lmbDown = true;
-            // Reset the look accumulator so the first frame doesn't jump.
-            this._mouseDX = 0;
-            this._mouseDY = 0;
 
             if (this.gui) this.gui.setMouseCrosshairActive(true);
 
@@ -241,12 +234,6 @@ export class MouseSteerControlManager {
             const r = this.rect!;
             this.mouseX = e.clientX - r.left;
             this.mouseY = e.clientY - r.top;
-
-            // Accumulate raw movement for mouse-look (only while steering).
-            if (this.lmbDown) {
-                this._mouseDX += e.movementX;
-                this._mouseDY += e.movementY;
-            }
         };
 
         const onContextMenu = (e: MouseEvent) => e.preventDefault();
@@ -324,8 +311,18 @@ export class MouseSteerControlManager {
     }
 
     /**
-     * Per-frame update: applies mouse-look rotation from accumulated mouse movement,
-     * roll/translation from keyboard, and floating-origin movement.
+     * Helper: accelerate `current` toward `target` with max acceleration `acc` (units/s^2)
+     */
+    private _approach(current: number, target: number, acc: number, dt: number): number {
+        const delta = target - current;
+        const maxStep = acc * dt;
+        if (Math.abs(delta) <= maxStep) return target;
+        return current + Math.sign(delta) * maxStep;
+    }
+
+    /**
+     * Per-frame update: computes yaw/pitch from mouse offset with angular acceleration,
+     * roll/translation from keyboard, integrates velocities, and applies floating-origin movement.
      */
     private update = (): void => {
         const dt = this.scene.getEngine().getDeltaTime() * 0.001;
@@ -334,28 +331,62 @@ export class MouseSteerControlManager {
         // Steering only when window active + LMB held
         const steerEnabled = this.mouseActiveInWindow && this.lmbDown;
 
-        // Direct mouse-look: the mouse MOVEMENT (delta accumulated since last frame)
-        // rotates the view 1:1 about the camera's own right/up axes (in place — no
-        // orbit, no rate/inertia). Crisp and predictable.
-        if (steerEnabled && (this._mouseDX !== 0 || this._mouseDY !== 0)) {
-            const sens = this.opts.mouseSensitivity; // radians per pixel
-            const yawAngle = this._mouseDX * sens;
-            // Mouse up (negative movementY) must look up → scene moves DOWN. The
-            // base sign is negated for that standard (non-inverted) feel.
-            let pitchAngle = -this._mouseDY * sens;
-            if (this.opts.invertY) pitchAngle = -pitchAngle;
+        // 1) Mouse offset -> raw normalized deflection (ax, ay)
+        let ax = 0, ay = 0;
+        if (steerEnabled) {
+            const cx = this.rect.width * 0.5;
+            const cy = this.rect.height * 0.5;
+            let dx = this.mouseX - cx;
+            let dy = this.mouseY - cy;
+            if (this.opts.invertY) dy = -dy;
 
+            const mag = Math.hypot(dx, dy);
+            const dz = this.opts.deadzonePx;
+            const R = this.opts.maxRadiusPx;
+
+            if (mag > dz) {
+                const clipped = Math.min(mag, R);
+                const radiusNorm = (clipped - dz) / (R - dz); // 0..1
+                const k = Math.pow(radiusNorm, this.opts.responseCurve);
+                const nx = dx / mag, ny = dy / mag;
+                ax = nx * k; // -1..1
+                ay = ny * k; // -1..1
+            }
+        }
+
+        // --- Filtered deflection with release tail ---
+        const follow = this.opts.steerFollow;          // 0..1
+        const relD = this.opts.releaseDamping;       // ~0.08..0.2 at 60fps
+        const relExp = Math.exp(-relD * dt * 60);      // fps-independent
+
+        if (steerEnabled) {
+            this._steerX = this._steerX + (ax - this._steerX) * follow;
+            this._steerY = this._steerY + (ay - this._steerY) * follow;
+        } else {
+            this._steerX *= relExp;
+            this._steerY *= relExp;
+        }
+
+        // 2) Target angular rates from filtered deflection
+        const targetYawRate = this.opts.maxYawRate * this._steerX; // rad/s
+        const targetPitchRate = this.opts.maxPitchRate * this._steerY; // rad/s
+
+        // 3) Integrate angular velocities with acceleration limits + angular damping
+        const angDamp = Math.exp(-this.opts.angularDamping * dt * 60);
+        this._yawVel = this._approach(this._yawVel * angDamp, targetYawRate, this.opts.yawAcceleration, dt);
+        this._pitchVel = this._approach(this._pitchVel * angDamp, targetPitchRate, this.opts.pitchAcceleration, dt);
+
+        // 4) Apply yaw & pitch rotations from integrated angular velocities
+        if (this._yawVel || this._pitchVel) {
             const right = this.camera.getDirection(Vector3.Right());
             const up = this.camera.getDirection(Vector3.Up());
-            const qYaw = Quaternion.RotationAxis(up, yawAngle);
-            const qPitch = Quaternion.RotationAxis(right, pitchAngle);
+
+            const qYaw = Quaternion.RotationAxis(up, this._yawVel * dt);
+            const qPitch = Quaternion.RotationAxis(right, this._pitchVel * dt);
 
             this.camera.rotationQuaternion = qPitch.multiply(qYaw).multiply(this.camera.rotationQuaternion!);
             this.camera.rotationQuaternion!.normalize();
         }
-        // Consume the accumulated delta every frame (also discards motion while not steering).
-        this._mouseDX = 0;
-        this._mouseDY = 0;
 
         // Optional roll via keyboard
         const rollInput = (this.inputs.rollRight - this.inputs.rollLeft);

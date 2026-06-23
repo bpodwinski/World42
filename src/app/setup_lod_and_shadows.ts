@@ -45,11 +45,13 @@ const CBT_QUALITY: CbtQualityLevel = 'high';
 const OFF_THREAD_CBT = true;
 
 /**
- * Run the full CBT on the GPU (Dupuy 2021 — bitfield + sum-reduction + compute
- * split/merge + implicit-mesh draw), WebGPU only. Off by default during dev;
- * only takes effect when the engine is WebGPU (otherwise the worker/sync path
- * is used). When on and WebGPU is available, it supersedes OFF_THREAD_CBT.
- * See cbt skill ref 13.
+ * Run the full CBT on the GPU (Dupuy 2021 — bit-packed heap + sum-reduction +
+ * compute forced-diamond split/merge + implicit-mesh instanced draw), WebGPU only.
+ * Watertight (intra-face + octahedron seams) and validated; main-thread cost ~0.
+ * Only takes effect when the engine is WebGPU — on WebGL2 it falls back to the
+ * worker/sync path. When active it supersedes OFF_THREAD_CBT. Set false to force
+ * the worker path everywhere. Known v1 limits: depth capped at 18, and no
+ * self-shadow or collisions on GPU planets (see references/13_gpu_cbt_webgpu.md).
  */
 const GPU_CBT = true;
 

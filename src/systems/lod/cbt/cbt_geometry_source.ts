@@ -53,6 +53,8 @@ export interface CbtGeometrySource {
     requestUpdate(frame: CbtFrameParams): void;
     /** Defer a full re-emit to the next update (mirrors CbtPlanet.resetNow). */
     reset(): void;
+    /** Optional: toggle wireframe on a source that owns its own material (GPU path). */
+    setWireframe?(on: boolean): void;
     dispose(): void;
 }
 

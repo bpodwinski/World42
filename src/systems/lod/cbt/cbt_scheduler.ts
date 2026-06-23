@@ -167,6 +167,10 @@ export class CbtPlanet {
         // called for telemetry only. Supersedes the worker/sync path when enabled.
         const engine = this.scene.getEngine();
         if (opts.gpuCbt && (engine as WebGPUEngine).isWebGPU) {
+            // The simple GPU path dispatches/draws 2^maxDepth instances, so cap the
+            // depth (the quality preset's depth ~28 would be 2^28 instances). Deeper
+            // trees via a render leaf-cap are Phase 3b/5.
+            const GPU_MAX_DEPTH = 20;
             return new GpuCbtSource(
                 engine as WebGPUEngine,
                 this.scene,
@@ -177,6 +181,11 @@ export class CbtPlanet {
                     noise: this.noise,
                     starColor: this.starColor,
                     starPosWorldDouble: this.starPosWorldDouble,
+                    maxDepth: Math.min(opts.maxDepth, GPU_MAX_DEPTH),
+                    splitThresholdPx2: opts.splitThresholdPx2,
+                    splitHysteresis: opts.splitHysteresis,
+                    cullBackface: opts.cullBackface ?? true,
+                    cullMinDot: opts.cullMinDot ?? -0.05,
                 },
                 this.onSourceUpdate
             );
@@ -352,6 +361,7 @@ export class CbtPlanet {
 
     setWireframe(on: boolean): void {
         if (this.material) this.material.wireframe = on;
+        this.source.setWireframe?.(on);
     }
 
     setDebugLod(on: boolean): void {

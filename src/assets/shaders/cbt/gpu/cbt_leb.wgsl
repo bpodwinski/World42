@@ -30,19 +30,29 @@ fn leb_faceCorners(face : u32) -> LebTri {
 
 fn leb_decode(id : u32, depth : u32) -> LebTri {
     let face = (id >> (depth - 3u)) - 8u;
-    var tri = leb_faceCorners(face);
+    let fc = leb_faceCorners(face);
+    // Dupuy longest-edge-bisection convention (leb__SplittingMatrix): the split
+    // edge is (v0, v2) and the apex is the MIDDLE vertex v1; child0 = (v0, M, v1),
+    // child1 = (v1, M, v2), M = mid(v0, v2). This is the convention the same-depth
+    // neighbor decode (cbt_conform.wgsl) is built for, so decode + neighbor agree
+    // and the mesh is watertight within a face. Feed the face as (v0=L, v1=apex,
+    // v2=R) so the first bisection splits the equatorial hypotenuse (L,R).
+    var v0 = fc.l;
+    var v1 = fc.a;
+    var v2 = fc.r;
     let steps = depth - 3u;
     for (var s : u32 = 0u; s < steps; s = s + 1u) {
         let bitpos = steps - 1u - s;
         let bit = (id >> bitpos) & 1u;
-        let vc = normalize(tri.l + tri.r);
+        let m = normalize(v0 + v2);
+        let ov1 = v1;
         if (bit == 0u) {
-            // child0 = (VC, A, L)
-            tri = LebTri(vc, tri.a, tri.l);
+            v1 = m;
+            v2 = ov1;
         } else {
-            // child1 = (VC, R, A)
-            tri = LebTri(vc, tri.r, tri.a);
+            v0 = ov1;
+            v1 = m;
         }
     }
-    return tri;
+    return LebTri(v0, v1, v2);
 }

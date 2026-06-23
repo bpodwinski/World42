@@ -1,9 +1,9 @@
 /**
- * GPU CBT kernel (Dupuy 2021) — owns the per-planet storage buffer and the
- * compute passes that maintain the concurrent binary tree on the GPU. Phase 1
- * scope: the heap StorageBuffer + the sum-reduction pass + upload/readback. LEB
- * decode, the split/merge update pass and the implicit-mesh render are layered on
- * in later phases.
+ * GPU CBT kernel (Dupuy 2021) — owns the per-planet storage buffer and the compute
+ * passes that maintain the concurrent binary tree entirely on the GPU: the
+ * bit-packed heap StorageBuffer, the adaptive update pass (metric-driven
+ * forced-diamond split/merge, watertight) and the sum-reduction. Plus the initial
+ * CPU seed upload and a cheap live leaf-count readback for HUD telemetry.
  *
  * WebGPU only. The heap is bound as `array<atomic<u32>>` (read_write) by the
  * compute shaders and re-bound as `array<u32>` (read) by the render shader; the
@@ -18,11 +18,29 @@ import {
 } from '@babylonjs/core';
 import cbtHeapRwWgsl from '../../../../assets/shaders/cbt/gpu/cbt_heap_rw.wgsl';
 import cbtLebWgsl from '../../../../assets/shaders/cbt/gpu/cbt_leb.wgsl';
+import cbtConformWgsl from '../../../../assets/shaders/cbt/gpu/cbt_conform.wgsl';
 import cbtSumReductionWgsl from '../../../../assets/shaders/cbt/gpu/cbt_sum_reduction.compute.wgsl';
-import cbtDecodeDumpWgsl from '../../../../assets/shaders/cbt/gpu/cbt_decode_dump.compute.wgsl';
+import cbtUpdateWgsl from '../../../../assets/shaders/cbt/gpu/cbt_update.compute.wgsl';
 import { cbtHeapByteSize } from './gpu_cbt_buffers';
 
 const WORKGROUP_SIZE = 256;
+
+/** Per-frame inputs to the GPU adaptive update pass. */
+export type CbtUpdateFrameParams = {
+    /** Camera position in the planet's local (unit-sphere) space. */
+    camLocal: [number, number, number];
+    radius: number;
+    /** viewportHeight / (2·tan(fov/2)), computed on the main thread. */
+    focal: number;
+    splitThreshold: number;
+    mergeThreshold: number;
+    /** 0 = split pass, 1 = merge pass (alternate per frame to avoid races). */
+    parity: number;
+    /** Backside-cull split candidates on the far hemisphere (default false). */
+    cullBackface?: boolean;
+    /** Horizon guard-band cosine for the backside cull (default -0.05). */
+    cullMinDot?: number;
+};
 
 /** Compose a compute source: depth constant + given includes + entry point. */
 function composeCompute(maxDepth: number, ...parts: string[]): string {
@@ -31,20 +49,23 @@ function composeCompute(maxDepth: number, ...parts: string[]): string {
 
 export class GpuCbtKernel {
     readonly maxDepth: number;
+    /** Max possible leaves (2^maxDepth) — the dispatch/instance upper bound. */
+    readonly maxLeaves: number;
     readonly heapBuffer: StorageBuffer;
 
     private readonly engine: WebGPUEngine;
     private readonly key: string;
     private readonly reduction: ComputeShader;
+    private readonly updateShader: ComputeShader;
+    private readonly updateParams: UniformBuffer;
     /** One uniform buffer per reduced level, each holding its constant passDepth. */
     private readonly levelParams: UniformBuffer[] = [];
-    /** Lazily-built decode-dump shader (validation only). */
-    private dumpShader: ComputeShader | null = null;
 
     constructor(engine: WebGPUEngine, key: string, maxDepth: number) {
         this.engine = engine;
         this.key = key;
         this.maxDepth = maxDepth;
+        this.maxLeaves = Math.pow(2, maxDepth);
 
         this.heapBuffer = new StorageBuffer(
             engine,
@@ -75,6 +96,37 @@ export class GpuCbtKernel {
         };
         this.reduction.setStorageBuffer('cbt_heap', this.heapBuffer);
 
+        // Adaptive update pass (metric-driven split/merge).
+        this.updateShader = new ComputeShader(
+            `cbt_update_${key}`,
+            engine,
+            {
+                computeSource: composeCompute(
+                    maxDepth,
+                    cbtHeapRwWgsl,
+                    cbtLebWgsl,
+                    cbtConformWgsl,
+                    cbtUpdateWgsl
+                ),
+            },
+            {
+                bindingsMapping: {
+                    cbt_heap: { group: 0, binding: 0 },
+                    up: { group: 0, binding: 1 },
+                },
+            }
+        );
+        this.updateShader.onError = (_e, errors) => {
+            // eslint-disable-next-line no-console
+            console.error(`[GpuCbtKernel] update compile error:\n${errors}`);
+        };
+        this.updateShader.setStorageBuffer('cbt_heap', this.heapBuffer);
+        this.updateParams = new UniformBuffer(engine, undefined, undefined, `cbt_update_params_${key}`);
+        this.updateParams.addUniform('camLocalRadius', 4);
+        this.updateParams.addUniform('thresholds', 4);
+        this.updateParams.addUniform('ints', 4);
+        this.updateShader.setUniformBuffer('up', this.updateParams);
+
         // Pre-build a uniform buffer per level (depth D-1 .. 0). Updating a single
         // UBO between same-frame dispatches would make every dispatch see only the
         // last value (writeBuffer coalesces before submit), so each level needs its
@@ -91,12 +143,24 @@ export class GpuCbtKernel {
     /** Resolve once the compute shaders have finished compiling (dispatch no-ops before). */
     async whenReady(timeoutMs = 8000): Promise<void> {
         const end = performance.now() + timeoutMs;
-        while (!this.reduction.isReady()) {
+        while (!this.reduction.isReady() || !this.updateShader.isReady()) {
             if (performance.now() > end) {
                 throw new Error('GpuCbtKernel compute shaders not ready (timeout)');
             }
             await new Promise((r) => setTimeout(r, 10));
         }
+    }
+
+    /** One adaptive update pass (split or merge by parity). Dispatch over the cap. */
+    runUpdate(p: CbtUpdateFrameParams): void {
+        const cullMinDot = p.cullMinDot ?? -0.05;
+        const cullBackface = p.cullBackface ? 1 : 0;
+        this.updateParams.updateFloat4('camLocalRadius', p.camLocal[0], p.camLocal[1], p.camLocal[2], p.radius);
+        this.updateParams.updateFloat4('thresholds', p.focal, p.splitThreshold, p.mergeThreshold, cullMinDot);
+        this.updateParams.updateInt4('ints', this.maxDepth, p.parity, cullBackface, 0);
+        this.updateParams.update();
+        const groups = Math.max(1, Math.ceil(this.maxLeaves / WORKGROUP_SIZE));
+        this.updateShader.dispatch(groups, 1, 1);
     }
 
     /** Replace the whole heap (bit-packed) — used to seed the initial tree. */
@@ -118,86 +182,32 @@ export class GpuCbtKernel {
     }
 
     /**
-     * Decode every leaf's 3 unit corners on the GPU and read them back (9 floats
-     * per leaf), for validating the LEB decode against the CPU reference. `leafCount`
-     * must be the current tree's leaf count (the caller knows it in tests).
+     * Read just the live leaf count (the heap root value) back to the CPU. The root
+     * value lives in the first few bytes of the heap, so this reads a tiny prefix
+     * rather than the whole buffer — cheap enough to poll for HUD telemetry. Uses a
+     * non-forced read (resolves over the normal render loop, no pipeline stall).
      */
-    async dumpLeafCorners(leafCount: number): Promise<Float32Array> {
-        if (!this.dumpShader) {
-            this.dumpShader = new ComputeShader(
-                `cbt_dump_${this.key}`,
-                this.engine,
-                {
-                    computeSource: composeCompute(
-                        this.maxDepth,
-                        cbtHeapRwWgsl,
-                        cbtLebWgsl,
-                        cbtDecodeDumpWgsl
-                    ),
-                },
-                {
-                    bindingsMapping: {
-                        cbt_heap: { group: 0, binding: 0 },
-                        outCorners: { group: 0, binding: 1 },
-                        dumpParams: { group: 0, binding: 2 },
-                    },
-                }
-            );
-            this.dumpShader.onError = (_e, errors) => {
-                // eslint-disable-next-line no-console
-                console.error(`[GpuCbtKernel] dump compile error:\n${errors}`);
-            };
-            this.dumpShader.setStorageBuffer('cbt_heap', this.heapBuffer);
+    async readNodeCount(): Promise<number> {
+        const bytes = (await this.heapBuffer.read(0, 16)) as Uint8Array;
+        const u32 = new Uint32Array(bytes.buffer, bytes.byteOffset, bytes.byteLength >> 2);
+        // cbt_heapRead(1, 0): bitOffset = cbt_bitID(1,0) = 2 + (D+1) = D+3, bitCount = D+1.
+        const bitOffset = this.maxDepth + 3;
+        const bitCount = this.maxDepth + 1;
+        const w = bitOffset >>> 5;
+        const b = bitOffset & 31;
+        const mask = (n: number) => (n >= 32 ? 0xffffffff : ((1 << n) - 1) >>> 0);
+        const first = Math.min(bitCount, 32 - b);
+        let r = (u32[w] >>> b) & mask(first);
+        if (first < bitCount) {
+            r = (r | ((u32[w + 1] & mask(bitCount - first)) << first)) >>> 0;
         }
-
-        const out = new StorageBuffer(
-            this.engine,
-            Math.max(1, leafCount) * 9 * 4,
-            Constants.BUFFER_CREATIONFLAG_STORAGE |
-                Constants.BUFFER_CREATIONFLAG_WRITE |
-                Constants.BUFFER_CREATIONFLAG_READ,
-            `cbt_dump_out_${this.key}`
-        );
-        const params = new UniformBuffer(this.engine, undefined, undefined, `cbt_dump_params_${this.key}`);
-        params.addUniform('data', 4);
-        params.updateInt4('data', leafCount, 0, 0, 0);
-        params.update();
-
-        this.dumpShader.setStorageBuffer('outCorners', out);
-        this.dumpShader.setUniformBuffer('dumpParams', params);
-
-        const ready = performance.now() + 8000;
-        while (!this.dumpShader.isReady()) {
-            if (performance.now() > ready) throw new Error('dump shader not ready (timeout)');
-            await new Promise((r) => setTimeout(r, 10));
-        }
-
-        this.engine.beginFrame();
-        this.dumpShader.dispatch(Math.max(1, Math.ceil(leafCount / WORKGROUP_SIZE)), 1, 1);
-        this.engine.endFrame();
-
-        const bytes = (await out.read(undefined, undefined, undefined, true)) as Uint8Array;
-        const result = new Float32Array(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + leafCount * 9 * 4));
-        out.dispose();
-        params.dispose();
-        return result;
-    }
-
-    /** Read the whole heap back to the CPU (async; for tests / telemetry only). */
-    async readHeap(): Promise<Uint32Array> {
-        // noDelay=true flushes immediately so this resolves without a render loop.
-        const bytes = (await this.heapBuffer.read(
-            undefined,
-            undefined,
-            undefined,
-            true
-        )) as Uint8Array;
-        return new Uint32Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 4);
+        return r >>> 0;
     }
 
     dispose(): void {
         for (const ubo of this.levelParams) ubo.dispose();
         this.levelParams.length = 0;
+        this.updateParams.dispose();
         this.heapBuffer.dispose();
     }
 }
