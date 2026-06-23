@@ -152,4 +152,14 @@ export class OcbtPool {
         for (let i = 0; i < n; i++) out.push(this.decodeBit(i));
         return out;
     }
+
+    /** Copy of the sum-tree (debug/cross-check helper; same layout as `pool_tree`). */
+    treeSnapshot(): Uint32Array {
+        return this.tree.slice();
+    }
+
+    /** Copy of the allocation bitfield (debug/cross-check helper; same layout as `pool_bitfield`). */
+    bitfieldSnapshot(): Uint32Array {
+        return this.bits.slice();
+    }
 }
