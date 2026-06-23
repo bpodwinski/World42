@@ -61,8 +61,10 @@ fn cbt_triangleBackface(tri : LebTri, radius : f32, camLocal : vec3<f32>, minDot
 }
 
 @compute @workgroup_size(256)
-fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
-    let handle = gid.x;
+fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups) nwg : vec3<u32>) {
+    // 2D grid linear index: indirect dispatch caps X at 65535 workgroups (WebGPU
+    // limit) and spills the overflow into Y. For 1D dispatches (Y=1) this is gid.x.
+    let handle = gid.x + gid.y * nwg.x * 256u;
     let count = cbt_nodeCount();
     if (handle >= count) {
         return;

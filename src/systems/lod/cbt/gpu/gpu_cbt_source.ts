@@ -66,6 +66,12 @@ export class GpuCbtSource implements CbtGeometrySource {
     private frame = 0;
     private disposed = false;
 
+    /** Draw `forcedInstanceCount = min(maxLeaves, leafCount*SAFETY + FLOOR)`. The
+     *  draw count can only be CPU-driven (no GPU indirect-draw-count in Babylon),
+     *  so it must over-estimate the (1-2 frame stale) readback to avoid holes. */
+    private static readonly INSTANCE_SAFETY = 2;
+    private static readonly INSTANCE_FLOOR = 4096;
+
     constructor(
         engine: WebGPUEngine,
         scene: Scene,
@@ -90,6 +96,9 @@ export class GpuCbtSource implements CbtGeometrySource {
         cpu.seedLevel(seedDepth);
         cpu.sumReduce();
         this.kernel.uploadHeap(cpu.heap);
+        // Seed the indirect dispatch args so frame 0 covers the seed's leaves even
+        // before the dispatcher compute pipeline is ready.
+        this.kernel.initDispatchArgs(this.liveLeafCount);
 
         this.render = buildGpuCbtRenderMaterial(
             scene,
@@ -136,6 +145,12 @@ export class GpuCbtSource implements CbtGeometrySource {
         const parity = this.frame & 1;
         this.frame++;
 
+        // Indirect: dispatcher reads the (previous frame's reduced) live leaf count
+        // and sets the update's workgroup count, so update cost scales with live
+        // leaves instead of 2^maxDepth. Nothing mutates the heap between the
+        // dispatcher and the update, so the group count and the in-shader
+        // `handle >= cbt_nodeCount()` guard agree — no leaf is skipped.
+        this.kernel.runDispatchArgs();
         this.kernel.runUpdate({
             camLocal: [this.tmpCamLocal.x, this.tmpCamLocal.y, this.tmpCamLocal.z],
             radius: this.radius,
@@ -160,7 +175,11 @@ export class GpuCbtSource implements CbtGeometrySource {
         // HUD telemetry: read the live leaf count back at low frequency (non-blocking
         // — resolves over the render loop, no pipeline stall). Main-thread cost stays
         // ~0; only this occasional small readback touches the CPU.
-        if (this.frame % 30 === 0 && !this.statsReadPending) {
+        // Read the live leaf count back every available frame (self-throttled by
+        // statsReadPending: only one non-blocking read in flight at a time, so this
+        // settles to a fresh value every ~1-2 frames). Drives both the HUD and the
+        // dynamic draw instance count below.
+        if (!this.statsReadPending) {
             this.statsReadPending = true;
             this.kernel
                 .readNodeCount()
@@ -168,6 +187,22 @@ export class GpuCbtSource implements CbtGeometrySource {
                     this.statsReadPending = false;
                     if (this.disposed) return;
                     this.liveLeafCount = count;
+
+                    // Bound the draw to the live leaf count (over-estimated to absorb
+                    // readback latency + growth between reads). The vertex shader
+                    // degenerates instances >= cbt_nodeCount(), so over-estimating is
+                    // safe; under-estimating drops the finest leaves -> holes. So bias
+                    // high, jump UP instantly, ramp DOWN slowly (a single stale-small
+                    // read must not collapse the cap and pop holes).
+                    const want = Math.min(
+                        this.kernel.maxLeaves,
+                        Math.ceil(count * GpuCbtSource.INSTANCE_SAFETY) +
+                            GpuCbtSource.INSTANCE_FLOOR
+                    );
+                    const cur = this.mesh.forcedInstanceCount || this.kernel.maxLeaves;
+                    this.mesh.forcedInstanceCount =
+                        want >= cur ? want : Math.max(want, Math.ceil(cur * 0.9));
+
                     this.listener(null, {
                         leafCount: count,
                         splitsThisFrame: 0,

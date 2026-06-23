@@ -167,12 +167,13 @@ export class CbtPlanet {
         // called for telemetry only. Supersedes the worker/sync path when enabled.
         const engine = this.scene.getEngine();
         if (opts.gpuCbt && (engine as WebGPUEngine).isWebGPU) {
-            // The simple GPU path dispatches/draws 2^maxDepth instances every frame,
-            // so each extra depth level DOUBLES the draw/dispatch cost (the quality
-            // preset's depth ~28 would be 2^28 instances). 22 → 2^22 ≈ 4M instances,
-            // most early-out as degenerate. Deeper trees via a render leaf-cap are
-            // Phase 3b/5.
-            const GPU_MAX_DEPTH = 22;
+            // The update is now dispatched INDIRECTLY (workgroups = ceil(liveLeaves/256))
+            // and the draw is bounded via forcedInstanceCount, so per-frame cost scales
+            // with the LIVE leaf count, not 2^maxDepth. The residual O(2^maxDepth) term
+            // is the sum-reduction (breadth-first over the full tree), which becomes the
+            // ceiling — hence ~24-25 is the practical max, not the worker's 28. Heap mem
+            // ≈ 8.4 MB/planet at 24 (16.8 MB at 25). 25 is opt-in after a perf check.
+            const GPU_MAX_DEPTH = 25;
             // GPU-specific split threshold (px²): lower than the worker preset so the
             // implicit mesh subdivides finer everywhere. Cost scales ~linearly with the
             // resulting live leaf count (not exponential like GPU_MAX_DEPTH).

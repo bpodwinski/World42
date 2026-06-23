@@ -11,10 +11,12 @@ struct CbtReduceParams {
 @group(0) @binding(1) var<uniform> reduceParams : CbtReduceParams;
 
 @compute @workgroup_size(256)
-fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
+fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups) nwg : vec3<u32>) {
     let depth = reduceParams.data.x;
     let count = 1u << depth;          // number of nodes at this level
-    let t = gid.x;
+    // 2D grid linear index: dispatch X is capped at 65535 workgroups (WebGPU limit)
+    // and the overflow spills into Y. For 1D dispatches (Y=1) this is just gid.x.
+    let t = gid.x + gid.y * nwg.x * 256u;
     if (t >= count) {
         return;
     }

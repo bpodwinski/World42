@@ -17,10 +17,12 @@ import {
     type WebGPUEngine,
 } from '@babylonjs/core';
 import cbtHeapRwWgsl from '../../../../assets/shaders/cbt/gpu/cbt_heap_rw.wgsl';
+import cbtHeapRoWgsl from '../../../../assets/shaders/cbt/gpu/cbt_heap_ro.wgsl';
 import cbtLebWgsl from '../../../../assets/shaders/cbt/gpu/cbt_leb.wgsl';
 import cbtConformWgsl from '../../../../assets/shaders/cbt/gpu/cbt_conform.wgsl';
 import cbtSumReductionWgsl from '../../../../assets/shaders/cbt/gpu/cbt_sum_reduction.compute.wgsl';
 import cbtUpdateWgsl from '../../../../assets/shaders/cbt/gpu/cbt_update.compute.wgsl';
+import cbtDispatchArgsWgsl from '../../../../assets/shaders/cbt/gpu/cbt_dispatch_args.compute.wgsl';
 import { cbtHeapByteSize } from './gpu_cbt_buffers';
 
 const WORKGROUP_SIZE = 256;
@@ -57,6 +59,10 @@ export class GpuCbtKernel {
     private readonly key: string;
     private readonly reduction: ComputeShader;
     private readonly updateShader: ComputeShader;
+    /** One-thread pass: live leaf count (heap root) -> indirect workgroup args. */
+    private readonly dispatcher: ComputeShader;
+    /** Indirect args for the update dispatch: [workgroupCountX, 1, 1, pad]. */
+    private readonly dispatchArgs: StorageBuffer;
     private readonly updateParams: UniformBuffer;
     /** One uniform buffer per reduced level, each holding its constant passDepth. */
     private readonly levelParams: UniformBuffer[] = [];
@@ -127,6 +133,49 @@ export class GpuCbtKernel {
         this.updateParams.addUniform('ints', 4);
         this.updateShader.setUniformBuffer('up', this.updateParams);
 
+        // Indirect-args buffer (16 bytes = 4 u32; dispatchIndirect reads [0..2] =
+        // workgroupCount X/Y/Z, [3] is padding). STORAGE so the dispatcher can write
+        // it, INDIRECT so the update can source its dispatch from it, WRITE (CopyDst)
+        // so the CPU can seed it via initDispatchArgs().
+        this.dispatchArgs = new StorageBuffer(
+            engine,
+            16,
+            Constants.BUFFER_CREATIONFLAG_STORAGE |
+                Constants.BUFFER_CREATIONFLAG_INDIRECT |
+                Constants.BUFFER_CREATIONFLAG_WRITE,
+            `cbt_dispatch_args_${key}`
+        );
+
+        // One-thread "dispatcher": reads the live leaf count (heap root, read-only)
+        // and writes ceil(count/256) into the indirect args. A ComputeShader needs
+        // explicit @group/@binding in the WGSL (unlike a ShaderMaterial), and
+        // cbt_heap_ro.wgsl expects the includer to declare the heap var — so the
+        // read-only heap decl is passed as a compose part.
+        this.dispatcher = new ComputeShader(
+            `cbt_dispatch_${key}`,
+            engine,
+            {
+                computeSource: composeCompute(
+                    maxDepth,
+                    '@group(0) @binding(0) var<storage, read> cbt_heap : array<u32>;',
+                    cbtHeapRoWgsl,
+                    cbtDispatchArgsWgsl
+                ),
+            },
+            {
+                bindingsMapping: {
+                    cbt_heap: { group: 0, binding: 0 },
+                    cbtDispatchArgs: { group: 0, binding: 1 },
+                },
+            }
+        );
+        this.dispatcher.onError = (_e, errors) => {
+            // eslint-disable-next-line no-console
+            console.error(`[GpuCbtKernel] dispatcher compile error:\n${errors}`);
+        };
+        this.dispatcher.setStorageBuffer('cbt_heap', this.heapBuffer);
+        this.dispatcher.setStorageBuffer('cbtDispatchArgs', this.dispatchArgs);
+
         // Pre-build a uniform buffer per level (depth D-1 .. 0). Updating a single
         // UBO between same-frame dispatches would make every dispatch see only the
         // last value (writeBuffer coalesces before submit), so each level needs its
@@ -143,7 +192,7 @@ export class GpuCbtKernel {
     /** Resolve once the compute shaders have finished compiling (dispatch no-ops before). */
     async whenReady(timeoutMs = 8000): Promise<void> {
         const end = performance.now() + timeoutMs;
-        while (!this.reduction.isReady() || !this.updateShader.isReady()) {
+        while (!this.reduction.isReady() || !this.updateShader.isReady() || !this.dispatcher.isReady()) {
             if (performance.now() > end) {
                 throw new Error('GpuCbtKernel compute shaders not ready (timeout)');
             }
@@ -151,7 +200,30 @@ export class GpuCbtKernel {
         }
     }
 
-    /** One adaptive update pass (split or merge by parity). Dispatch over the cap. */
+    /**
+     * Build the update pass's indirect dispatch args from the live leaf count.
+     * Must run before {@link runUpdate} each frame; reads the heap root left by the
+     * previous frame's reduction (or the CPU seed on frame 0).
+     */
+    runDispatchArgs(): void {
+        this.dispatcher.dispatch(1, 1, 1);
+    }
+
+    /**
+     * CPU-seed the indirect args from a known live-leaf count (call once after the
+     * initial {@link uploadHeap}), so frame 0 dispatches a correct, non-zero group
+     * count even before the dispatcher compute pipeline is ready.
+     */
+    initDispatchArgs(liveLeafCount: number): void {
+        const groups = Math.max(1, Math.ceil(liveLeafCount / WORKGROUP_SIZE));
+        this.dispatchArgs.update(new Uint32Array([groups, 1, 1, 0]));
+    }
+
+    /**
+     * One adaptive update pass (split or merge by parity). Dispatched INDIRECTLY:
+     * the workgroup count comes from {@link runDispatchArgs} (= ceil(liveLeaves/256)),
+     * so cost scales with the live leaf count, not 2^maxDepth.
+     */
     runUpdate(p: CbtUpdateFrameParams): void {
         const cullMinDot = p.cullMinDot ?? -0.05;
         const cullBackface = p.cullBackface ? 1 : 0;
@@ -159,8 +231,7 @@ export class GpuCbtKernel {
         this.updateParams.updateFloat4('thresholds', p.focal, p.splitThreshold, p.mergeThreshold, cullMinDot);
         this.updateParams.updateInt4('ints', this.maxDepth, p.parity, cullBackface, 0);
         this.updateParams.update();
-        const groups = Math.max(1, Math.ceil(this.maxLeaves / WORKGROUP_SIZE));
-        this.updateShader.dispatch(groups, 1, 1);
+        this.updateShader.dispatchIndirect(this.dispatchArgs);
     }
 
     /** Replace the whole heap (bit-packed) — used to seed the initial tree. */
@@ -171,13 +242,26 @@ export class GpuCbtKernel {
     /**
      * Run the full sum-reduction: levels D-1 .. 0, in order (each depends on the
      * level below). WebGPU synchronizes the read-after-write between dispatches.
+     *
+     * NOT made indirect: level d touches exactly 2^d internal nodes (a property of
+     * the perfect tree, independent of the live leaf count — the reduction is
+     * breadth-first per level, not over a compacted active-node list). So an
+     * indirect dispatch here would still need 2^d threads = no win. This is the
+     * residual O(2^D) term and the practical ceiling (~D=24-25); bounding it would
+     * require a sparse CBT representation (separate effort).
      */
     runReduction(): void {
         for (let depth = this.maxDepth - 1; depth >= 0; depth--) {
             const count = Math.pow(2, depth);
             const groups = Math.max(1, Math.ceil(count / WORKGROUP_SIZE));
+            // Cap X at the WebGPU per-dimension workgroup limit (65535); spill the
+            // overflow into Y (the shader reconstructs the linear index). Needed at
+            // depth >= 24 (groups > 65535). For smaller levels gy = 1 (unchanged).
+            const MAX_DIM = 65535;
+            const gy = Math.ceil(groups / MAX_DIM);
+            const gx = Math.ceil(groups / gy);
             this.reduction.setUniformBuffer('reduceParams', this.levelParams[depth]);
-            this.reduction.dispatch(groups, 1, 1);
+            this.reduction.dispatch(gx, gy, 1);
         }
     }
 
@@ -208,6 +292,7 @@ export class GpuCbtKernel {
         for (const ubo of this.levelParams) ubo.dispose();
         this.levelParams.length = 0;
         this.updateParams.dispose();
+        this.dispatchArgs.dispose();
         this.heapBuffer.dispose();
     }
 }
