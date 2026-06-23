@@ -167,10 +167,16 @@ export class CbtPlanet {
         // called for telemetry only. Supersedes the worker/sync path when enabled.
         const engine = this.scene.getEngine();
         if (opts.gpuCbt && (engine as WebGPUEngine).isWebGPU) {
-            // The simple GPU path dispatches/draws 2^maxDepth instances, so cap the
-            // depth (the quality preset's depth ~28 would be 2^28 instances). Deeper
-            // trees via a render leaf-cap are Phase 3b/5.
-            const GPU_MAX_DEPTH = 20;
+            // The simple GPU path dispatches/draws 2^maxDepth instances every frame,
+            // so each extra depth level DOUBLES the draw/dispatch cost (the quality
+            // preset's depth ~28 would be 2^28 instances). 22 → 2^22 ≈ 4M instances,
+            // most early-out as degenerate. Deeper trees via a render leaf-cap are
+            // Phase 3b/5.
+            const GPU_MAX_DEPTH = 22;
+            // GPU-specific split threshold (px²): lower than the worker preset so the
+            // implicit mesh subdivides finer everywhere. Cost scales ~linearly with the
+            // resulting live leaf count (not exponential like GPU_MAX_DEPTH).
+            const GPU_SPLIT_THRESHOLD_PX2 = 40;
             return new GpuCbtSource(
                 engine as WebGPUEngine,
                 this.scene,
@@ -182,7 +188,7 @@ export class CbtPlanet {
                     starColor: this.starColor,
                     starPosWorldDouble: this.starPosWorldDouble,
                     maxDepth: Math.min(opts.maxDepth, GPU_MAX_DEPTH),
-                    splitThresholdPx2: opts.splitThresholdPx2,
+                    splitThresholdPx2: Math.min(opts.splitThresholdPx2, GPU_SPLIT_THRESHOLD_PX2),
                     splitHysteresis: opts.splitHysteresis,
                     cullBackface: opts.cullBackface ?? true,
                     cullMinDot: opts.cullMinDot ?? -0.05,
