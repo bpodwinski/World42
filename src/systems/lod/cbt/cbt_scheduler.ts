@@ -365,6 +365,26 @@ export class CbtPlanet {
         this.source.reset();
     }
 
+    /**
+     * Camera distance to this planet's center, and the TERRAIN ground radius directly under
+     * the camera — the SAME analytic fbm field the shader renders and the collision clamps to
+     * (planet-local rotating frame). Altitude-above-terrain = distSim - groundRSim; the
+     * sea-level approximation would instead use radiusSim.
+     */
+    cameraGroundInfo(): { distSim: number; groundRSim: number } {
+        const center = this.entity.doublepos;
+        this.tmpCollOffset.copyFrom(this.camera.doublepos).subtractInPlace(center);
+        const dist = this.tmpCollOffset.length();
+        if (dist < 1e-6) return { distSim: dist, groundRSim: this.radiusSim };
+        this.renderParent.getWorldMatrix().invertToRef(this.tmpCollInv);
+        Vector3.TransformNormalToRef(this.tmpCollOffset, this.tmpCollInv, this.tmpCollDir);
+        this.tmpCollDir.normalize();
+        const groundR =
+            this.radiusSim +
+            fbmNoise(this.tmpCollDir.x, this.tmpCollDir.y, this.tmpCollDir.z, this.noise);
+        return { distSim: dist, groundRSim: groundR };
+    }
+
     getStats(): Readonly<CbtStats> {
         return this.stats;
     }
@@ -587,6 +607,30 @@ export class CbtScheduler {
         for (const planet of this.planets) {
             if (planet.resolveGroundCollision(clearanceSim)) break;
         }
+    }
+
+    /**
+     * Nearest CBT/OCBT planet to the camera with its terrain-aware ground info, for the HUD
+     * altitude read-out (so altitude is measured above the actual terrain, not sea level).
+     */
+    getNearestGroundInfo(): {
+        key: string;
+        distSim: number;
+        groundRSim: number;
+        radiusSim: number;
+    } | null {
+        let best: CbtPlanet | null = null;
+        let bestDist = Infinity;
+        for (const planet of this.planets) {
+            const d = Vector3.Distance(this.camera.doublepos, planet.entity.doublepos);
+            if (d < bestDist) {
+                bestDist = d;
+                best = planet;
+            }
+        }
+        if (!best) return null;
+        const g = best.cameraGroundInfo();
+        return { key: best.key, distSim: g.distSim, groundRSim: g.groundRSim, radiusSim: best.radiusSim };
     }
 
     /** Per-planet centers/radii for deterministic headless capture paths. */

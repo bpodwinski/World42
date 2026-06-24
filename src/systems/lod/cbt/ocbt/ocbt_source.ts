@@ -50,8 +50,9 @@ export class OcbtSource implements CbtGeometrySource {
     private readonly mergeThresholdPx: number;
     private readonly cullMinDot: number;
     private readonly maxLevel: number;
-    /** Max radial vertex displacement (noise globalAmplitude) — widens the frustum cull so
-     *  tall relief near the camera is not wrongly culled (the cull tests smooth-sphere corners). */
+    /** Max radial relief (noise globalAmplitude). Used by the relief-aware horizon cull. The
+     *  frustum no longer needs it: the df64 eval now decodes TERRAIN-displaced positions, so
+     *  the frustum test is exact (no smooth-sphere vs displaced mismatch). */
     private readonly heightMargin: number;
     private frame = 0;
     private readonly tmpDir = new Vector3();
@@ -89,8 +90,9 @@ export class OcbtSource implements CbtGeometrySource {
         this.heightMargin = Math.max(0, opts.noise.globalAmplitude);
 
         // useIndirect: the 7 work-list passes dispatch over their candidate counts
-        // (not the full pool) via PrepareIndirect + dispatchIndirect.
-        this.kernel = new OcbtTopologyKernel(engine, opts.capacity, 'metric', true);
+        // (not the full pool) via PrepareIndirect + dispatchIndirect. noise: the df64 eval
+        // bakes it so the decoded positions are TERRAIN-displaced (terrain-aware topology).
+        this.kernel = new OcbtTopologyKernel(engine, opts.capacity, 'metric', true, opts.noise);
 
         this.render = buildOcbtRenderMaterial(
             scene,
@@ -195,9 +197,10 @@ export class OcbtSource implements CbtGeometrySource {
                 this.frustumF32[i * 4 + 2] = this.tmpNormal.z;
                 this.frustumF32[i * 4 + 3] = pl.d;
             }
-            this.kernel.setFrustum(this.frustumF32, OcbtSource.FRUSTUM_GUARD, true, this.heightMargin);
+            // heightMargin = 0: positions are terrain-displaced now, so the frustum is exact.
+            this.kernel.setFrustum(this.frustumF32, OcbtSource.FRUSTUM_GUARD, true, 0);
         } else {
-            this.kernel.setFrustum(this.frustumF32, OcbtSource.FRUSTUM_GUARD, false, this.heightMargin);
+            this.kernel.setFrustum(this.frustumF32, OcbtSource.FRUSTUM_GUARD, false, 0);
         }
 
         // Alternate split (even) / merge (odd) frames so the two halves never race on

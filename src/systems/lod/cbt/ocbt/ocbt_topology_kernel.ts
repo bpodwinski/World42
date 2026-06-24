@@ -39,6 +39,8 @@ import ocbtTopoPrepareSimplifyWgsl from '../../../../assets/shaders/cbt/ocbt/ocb
 import ocbtTopoSimplifyWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_simplify.compute.wgsl';
 import ocbtTopoPropagateSimplifyWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_propagate_simplify.compute.wgsl';
 import ocbtPoolReduceWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_pool_reduce.compute.wgsl';
+import cbtNoiseWgsl from '../../../../assets/shaders/cbt/gpu/cbt_noise.wgsl';
+import { buildPerm, type NoiseParams } from '../cbt_noise';
 import ocbtEvalLebWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_eval_leb.wgsl';
 import ocbtF64Wgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_f64.wgsl';
 import ocbtTopoEvalLebWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_eval_leb.compute.wgsl';
@@ -134,6 +136,8 @@ export class OcbtTopologyKernel {
     private readonly positions: StorageBuffer;
     /** f32 words per slot in the positions buffer (9 predicate / 18 metric). */
     readonly positionsWords: number;
+    /** Permutation table for the terrain-aware df64 eval (metric mode; null otherwise). */
+    private readonly evalPerm: StorageBuffer | null = null;
     /** Compacted live-slot list + cursor (metric mode only; null in predicate). */
     private readonly bisectorIndices: StorageBuffer | null = null;
     private readonly drawCount: StorageBuffer | null = null;
@@ -178,7 +182,8 @@ export class OcbtTopologyKernel {
         engine: WebGPUEngine,
         capacity: number,
         classifyMode: OcbtClassifyMode = 'predicate',
-        useIndirect = false
+        useIndirect = false,
+        noise: NoiseParams | null = null
     ) {
         this.engine = engine;
         this.capacity = capacity;
@@ -479,11 +484,49 @@ export class OcbtTopologyKernel {
         // --- eval-leb: predicate = f32 unit-dir corners (9/slot, for the cross-check's
         // check D); metric = df64 camera-relative [relative,dir] (18/slot, for render). ---
         if (classifyMode === 'metric') {
+            // Terrain-aware decode: the df64 eval bakes the SAME noise the render uses and
+            // displaces each corner radially by cbtFbmHeight(dir). So `positions` holds the
+            // real terrain surface (not the smooth sphere) and the whole classify — screenPx,
+            // frustum, horizon — is terrain-aware. cbt_noise.wgsl needs the baked CBT_* fbm
+            // constants + the cbtPerm storage buffer declared BEFORE it.
+            const n = noise;
+            const f = (x: number) => (Number.isInteger(x) ? `${x}.0` : `${x}`);
+            const noiseHeader = n
+                ? [
+                      `const CBT_OCTAVES : i32 = ${Math.max(0, Math.floor(n.octaves))};`,
+                      `const CBT_BASE_FREQ : f32 = ${f(n.baseFrequency)};`,
+                      `const CBT_BASE_AMP : f32 = ${f(n.baseAmplitude)};`,
+                      `const CBT_LACUNARITY : f32 = ${f(n.lacunarity)};`,
+                      `const CBT_PERSISTENCE : f32 = ${f(n.persistence)};`,
+                      `const CBT_GLOBAL_AMP : f32 = ${f(n.globalAmplitude)};`,
+                      '@group(0) @binding(21) var<storage, read> cbtPerm : array<u32>;'
+                  ].join('\n')
+                : [
+                      // No noise configured -> zero relief (smooth sphere), still valid WGSL.
+                      'const CBT_OCTAVES : i32 = 0;',
+                      'const CBT_BASE_FREQ : f32 = 1.0;',
+                      'const CBT_BASE_AMP : f32 = 1.0;',
+                      'const CBT_LACUNARITY : f32 = 2.0;',
+                      'const CBT_PERSISTENCE : f32 = 0.5;',
+                      'const CBT_GLOBAL_AMP : f32 = 0.0;',
+                      '@group(0) @binding(21) var<storage, read> cbtPerm : array<u32>;'
+                  ].join('\n');
+
+            this.evalPerm = mk(256 * 4, STORAGE | WRITE, 'ocbt_topo_evalperm');
+            const permU32 = new Uint32Array(256);
+            if (n) {
+                const perm = buildPerm(n.seed);
+                for (let i = 0; i < 256; i++) permU32[i] = perm[i];
+            }
+            this.evalPerm.update(permU32);
+
             this.evalLeb = new ComputeShader(
                 'ocbt_topo_eval_leb_f64',
                 engine,
                 {
                     computeSource: compose(
+                        noiseHeader,
+                        cbtNoiseWgsl,
                         ocbtU64Wgsl,
                         ocbtF64Wgsl,
                         ocbtTopoCommonWgsl,
@@ -494,13 +537,15 @@ export class OcbtTopologyKernel {
                     bindingsMapping: {
                         heapID: { group: 0, binding: 2 },
                         ep: { group: 0, binding: 17 },
-                        positions: { group: 0, binding: 19 }
+                        positions: { group: 0, binding: 19 },
+                        cbtPerm: { group: 0, binding: 21 }
                     }
                 }
             );
             this.evalLeb.onError = onErr('evalLeb(f64)');
             this.evalLeb.setStorageBuffer('heapID', this.heapID);
             this.evalLeb.setStorageBuffer('positions', this.positions);
+            this.evalLeb.setStorageBuffer('cbtPerm', this.evalPerm);
             // Reuse the metric classify camera UBO (camRadius.xyz=camLocal, .w=radius).
             this.evalLeb.setUniformBuffer('ep', this.classifyParams!);
         } else {
@@ -834,6 +879,7 @@ export class OcbtTopologyKernel {
         this.levelParams.length = 0;
         this.classifyParams?.dispose();
         this.frustumParams?.dispose();
+        this.evalPerm?.dispose();
         this.bisectorIndices?.dispose();
         this.drawCount?.dispose();
         this.indirectArgs?.dispose();

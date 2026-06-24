@@ -47,6 +47,13 @@ export type LodController = {
     getCdlodPlanetInfo: () => CbtPlanetInfo[];
     /** Analytic hard-floor camera-vs-ground collision for CBT/OCBT planets. */
     resolveGroundCollision: (clearanceSim: number) => void;
+    /** Nearest CBT/OCBT planet + terrain-aware ground radius under the camera (HUD altitude). */
+    getCbtGroundInfo: () => {
+        key: string;
+        distSim: number;
+        groundRSim: number;
+        radiusSim: number;
+    } | null;
 };
 
 export type LodSetupResult = {
@@ -139,6 +146,7 @@ export function setupLodAndShadows(
             })),
         resolveGroundCollision: (clearanceSim: number) =>
             cbtScheduler.resolveGroundCollision(clearanceSim),
+        getCbtGroundInfo: () => cbtScheduler.getNearestGroundInfo(),
     };
 
     const mergedShadowPlanets = new Map<string, PlanetShadowSource>();

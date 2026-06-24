@@ -172,7 +172,13 @@ export function setupRuntime({
             }
         }
         if (!bestKey) return '';
-        const altKm = ScaleManager.toRealUnits(bestDist - bestRadius);
+        // Altitude above the ACTUAL terrain, not sea level: for a CBT/OCBT planet the nearest
+        // ground info gives the analytic fbm height under the camera (same field the shader
+        // renders). CDLOD planets fall back to sea level (their height field is worker-side).
+        let groundRadius = bestRadius;
+        const cbtGround = lod.getCbtGroundInfo();
+        if (cbtGround && cbtGround.key === bestKey) groundRadius = cbtGround.groundRSim;
+        const altKm = ScaleManager.toRealUnits(bestDist - groundRadius);
         const ratio = bestDist / bestRadius;
         const name = bestKey.split(':').pop() ?? bestKey;
         return `alt ${altKm.toFixed(0)}km  ${ratio.toFixed(2)}xR  ${name}`;

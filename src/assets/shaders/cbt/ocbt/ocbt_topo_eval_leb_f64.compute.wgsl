@@ -117,13 +117,20 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>,
     let camZ = df64_from_f32(ep.camRadius.z);
     let cam = DVec3(camX, camY, camZ);
 
-    // relative_c = dir_c * radius - camLocal (df64 cancel), narrowed; plus the f32 dir.
-    let rel0 = narrow(dv_sub(dv_scale_f32(v0, radius), cam));
-    let rel1 = narrow(dv_sub(dv_scale_f32(v1, radius), cam));
-    let rel2 = narrow(dv_sub(dv_scale_f32(v2, radius), cam));
+    // Unit surface directions (f32) first — needed for both the noise height and the render.
     let d0 = narrow(v0);
     let d1 = narrow(v1);
     let d2 = narrow(v2);
+
+    // Terrain-aware decode: displace each corner radially by the SAME fbm height the render
+    // bakes (cbtFbmHeight + CBT_* constants + cbtPerm are composed in by the kernel). So the
+    // positions buffer holds the real terrain surface, making screenPx / frustum / horizon
+    // terrain-aware. The big radius cancellation is done in df64; the small height add is f32
+    // (post-narrow), exactly as the render vertex shader did it.
+    // relative_c = dir_c * (radius + height(dir_c)) - camLocal.
+    let rel0 = narrow(dv_sub(dv_scale_f32(v0, radius), cam)) + d0 * cbtFbmHeight(d0);
+    let rel1 = narrow(dv_sub(dv_scale_f32(v1, radius), cam)) + d1 * cbtFbmHeight(d1);
+    let rel2 = narrow(dv_sub(dv_scale_f32(v2, radius), cam)) + d2 * cbtFbmHeight(d2);
 
     let b = id * 18u;
     positions[b + 0u] = rel0.x; positions[b + 1u] = rel0.y; positions[b + 2u] = rel0.z;
