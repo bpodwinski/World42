@@ -183,7 +183,7 @@ export class CbtPlanet {
             // Phase 2 bring-up constants: a fixed pool plus a screen-space-area metric.
             // f32 vertex decode caps usable depth (~16); Phase 3 lifts it via f64.
             const OCBT_CAPACITY = 1 << 20; // 1 048 576 slots
-            const OCBT_MAX_LEVEL = 60; // u64 hard cap (depth 63); df64 cracks well before
+            const OCBT_MAX_LEVEL = 40; // u64 hard cap (depth 63); df64 cracks well before
             const OCBT_SPLIT_PX = 8; // split when longest edge > 8 px
             const OCBT_MERGE_PX = 4; // merge < 4 px (hysteresis)
             return new OcbtSource(
