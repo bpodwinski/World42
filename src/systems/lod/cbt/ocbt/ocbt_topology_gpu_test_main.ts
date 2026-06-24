@@ -131,8 +131,8 @@ async function fixpoint(
 }
 
 /** Drive the GPU kernel: refine to faceDepths, then (optionally) coarsen to `coarse`. */
-async function runGpu(engine: WebGPUEngine, scenario: Scenario): Promise<GpuRun> {
-    const kernel = new OcbtTopologyKernel(engine, scenario.capacity);
+async function runGpu(engine: WebGPUEngine, scenario: Scenario, useIndirect: boolean): Promise<GpuRun> {
+    const kernel = new OcbtTopologyKernel(engine, scenario.capacity, 'predicate', useIndirect);
     try {
         await kernel.whenReady();
         kernel.uploadSeed(); // self-primes the sum-tree (runReduce) for frame 0
@@ -266,25 +266,27 @@ function checkEvalLeb(gpu: OcbtGpuState, positions: Float32Array): string | null
     return null;
 }
 
-async function runScenario(engine: WebGPUEngine, scenario: Scenario): Promise<CaseResult> {
+async function runScenario(engine: WebGPUEngine, scenario: Scenario, useIndirect: boolean): Promise<CaseResult> {
     const oracle = runOracle(scenario);
-    const run = await runGpu(engine, scenario);
+    const run = await runGpu(engine, scenario, useIndirect);
     const gpu = run.state;
     const gpuC = gpuCentroids(gpu);
+    const tag = useIndirect ? ' [indirect]' : ' [direct]';
+    const name = scenario.name + tag;
 
     const a = checkGeometry(gpuC, oracle.centroids);
     const b = checkReciprocity(gpu);
     const c = checkWatertight(gpu);
     const d = checkEvalLeb(gpu, run.positions);
     if (!a && !b && !c && !d) {
-        return { name: scenario.name, pass: true, detail: `leaves=${oracle.count} frames=${run.frames} A+B+C+D OK` };
+        return { name, pass: true, detail: `leaves=${oracle.count} frames=${run.frames} A+B+C+D OK` };
     }
     const parts: string[] = [`frames=${run.frames}${run.grewAtCap ? ' GREW@CAP' : ''}`, `gpu=${gpuC.length} oracle=${oracle.count}`];
     if (a) parts.push(`A:${a}`);
     if (b) parts.push(`B:${b}`);
     if (c) parts.push(`C:${c}`);
     if (d) parts.push(`D:${d}`);
-    return { name: scenario.name, pass: false, detail: parts.join(' | ') };
+    return { name, pass: false, detail: parts.join(' | ') };
 }
 
 function scenarios(): Scenario[] {
@@ -347,9 +349,13 @@ async function main(): Promise<void> {
     }
 
     try {
-        for (const scenario of scenarios()) {
-            cases.push(await runScenario(engine, scenario));
-            render(out, cases, cases.every((c) => c.pass));
+        // Run every scenario on BOTH the direct and the indirect-dispatch path so the
+        // indirect conversion is proven to produce the oracle's exact conforming mesh.
+        for (const useIndirect of [false, true]) {
+            for (const scenario of scenarios()) {
+                cases.push(await runScenario(engine, scenario, useIndirect));
+                render(out, cases, cases.every((c) => c.pass));
+            }
         }
         const pass = cases.every((c) => c.pass);
         window.__OCBT_TOPO_RESULT__ = { pass, cases };

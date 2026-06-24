@@ -44,6 +44,7 @@ import ocbtF64Wgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_f64.wgsl';
 import ocbtTopoEvalLebWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_eval_leb.compute.wgsl';
 import ocbtTopoEvalLebF64Wgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_eval_leb_f64.compute.wgsl';
 import ocbtTopoCompactWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_compact.compute.wgsl';
+import ocbtTopoPrepareIndirectWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_prepare_indirect.compute.wgsl';
 import {
     engineLayout,
     engineWgslPreamble,
@@ -97,6 +98,19 @@ function grid2D(groups: number): [number, number] {
 const STORAGE = Constants.BUFFER_CREATIONFLAG_STORAGE;
 const WRITE = Constants.BUFFER_CREATIONFLAG_WRITE;
 const READ = Constants.BUFFER_CREATIONFLAG_READ;
+const INDIRECT = Constants.BUFFER_CREATIONFLAG_INDIRECT;
+
+/** Byte offset of each work-list pass's record in the indirect-args buffer (16 B/record). */
+const ARG = {
+    SPLIT: 0,
+    ALLOCATE: 16,
+    BISECT: 32,
+    PROPAGATE_BISECT: 48,
+    PREPARE_SIMPLIFY: 64,
+    SIMPLIFY: 80,
+    PROPAGATE_SIMPLIFY: 96
+} as const;
+const ARG_RECORDS = 7;
 
 export class OcbtTopologyKernel {
     readonly capacity: number;
@@ -124,6 +138,10 @@ export class OcbtTopologyKernel {
     private readonly bisectorIndices: StorageBuffer | null = null;
     private readonly drawCount: StorageBuffer | null = null;
     private readonly drawCountZero = new Uint32Array(1);
+    /** Indirect-dispatch args (7 records x 4 u32) + its builder pass (useIndirect only). */
+    private readonly indirectArgs: StorageBuffer | null = null;
+    private readonly prepareIndirect: ComputeShader | null = null;
+    private readonly useIndirect: boolean;
 
     // Passes.
     private readonly reduce: ComputeShader;
@@ -156,10 +174,16 @@ export class OcbtTopologyKernel {
     /** The neighbor buffer currently holding the live topology (read back here). */
     private liveNeighbors: StorageBuffer;
 
-    constructor(engine: WebGPUEngine, capacity: number, classifyMode: OcbtClassifyMode = 'predicate') {
+    constructor(
+        engine: WebGPUEngine,
+        capacity: number,
+        classifyMode: OcbtClassifyMode = 'predicate',
+        useIndirect = false
+    ) {
         this.engine = engine;
         this.capacity = capacity;
         this.classifyMode = classifyMode;
+        this.useIndirect = useIndirect;
         this.depth = log2PowerOfTwo(capacity);
         const layout = engineLayout(capacity);
         const preamble = engineWgslPreamble(capacity);
@@ -519,6 +543,37 @@ export class OcbtTopologyKernel {
             this.compact.setStorageBuffer('drawCount', this.drawCount);
         }
 
+        // --- indirect dispatch (optional): scale the 7 work-list passes' workgroup
+        // count with their candidate counts instead of the full pool capacity. ---
+        if (useIndirect) {
+            this.indirectArgs = mk(ARG_RECORDS * 16, STORAGE | INDIRECT | WRITE, 'ocbt_topo_indirect_args');
+            // Seed valid (1,1,1) records so any dispatchIndirect before the first
+            // PrepareIndirect is harmless (consumer guards on the in-shader count).
+            const seed = new Uint32Array(ARG_RECORDS * 4);
+            for (let r = 0; r < ARG_RECORDS; r++) seed[r * 4] = 1;
+            this.indirectArgs.update(seed);
+            this.prepareIndirect = new ComputeShader(
+                'ocbt_topo_prepare_indirect',
+                engine,
+                { computeSource: compose(ocbtTopoPrepareIndirectWgsl) },
+                {
+                    bindingsMapping: {
+                        classification: { group: 0, binding: 6 },
+                        simplification: { group: 0, binding: 7 },
+                        allocate: { group: 0, binding: 8 },
+                        propagate: { group: 0, binding: 9 },
+                        args: { group: 0, binding: 11 }
+                    }
+                }
+            );
+            this.prepareIndirect.onError = onErr('prepareIndirect');
+            this.prepareIndirect.setStorageBuffer('classification', this.classification);
+            this.prepareIndirect.setStorageBuffer('simplification', this.simplification);
+            this.prepareIndirect.setStorageBuffer('allocate', this.allocateBuf);
+            this.prepareIndirect.setStorageBuffer('propagate', this.propagate);
+            this.prepareIndirect.setStorageBuffer('args', this.indirectArgs);
+        }
+
         // One UBO per reduce level (0..depth). Reusing one UBO across same-submit
         // dispatches coalesces to the last value, so each level needs its own.
         for (let level = 0; level <= this.depth; level++) {
@@ -544,7 +599,8 @@ export class OcbtTopologyKernel {
             this.simplify,
             this.propagateSimplify,
             this.evalLeb,
-            ...(this.compact ? [this.compact] : [])
+            ...(this.compact ? [this.compact] : []),
+            ...(this.prepareIndirect ? [this.prepareIndirect] : [])
         ];
         const end = performance.now() + timeoutMs;
         while (!shaders.every((s) => s.isReady())) {
@@ -648,12 +704,25 @@ export class OcbtTopologyKernel {
         const nbWords = grid2D(Math.ceil((this.capacity * NEIGHBORS_WORDS) / WORKGROUP_SIZE));
 
         this.reset.dispatch(1, 1, 1);
-        this.classify.dispatch(full[0], full[1], 1);
-        this.split.dispatch(full[0], full[1], 1);
-        this.allocate.dispatch(full[0], full[1], 1);
-        this.copy.dispatch(nbWords[0], nbWords[1], 1);
-        this.bisect.dispatch(full[0], full[1], 1);
-        this.propagateBisect.dispatch(full[0], full[1], 1);
+        this.classify.dispatch(full[0], full[1], 1); // builder: stays O(capacity)
+        if (this.useIndirect && this.prepareIndirect && this.indirectArgs) {
+            // Work-list passes dispatch over their candidate counts (PrepareIndirect
+            // rebuilds the args after each producer finalizes its count).
+            this.prepareIndirect.dispatch(1, 1, 1); // split rec <- classification[SPLIT_COUNTER]
+            this.split.dispatchIndirect(this.indirectArgs, ARG.SPLIT);
+            this.prepareIndirect.dispatch(1, 1, 1); // allocate+bisect recs <- allocate[0]
+            this.allocate.dispatchIndirect(this.indirectArgs, ARG.ALLOCATE);
+            this.copy.dispatch(nbWords[0], nbWords[1], 1); // whole-buffer ping-pong: O(capacity)
+            this.bisect.dispatchIndirect(this.indirectArgs, ARG.BISECT);
+            this.prepareIndirect.dispatch(1, 1, 1); // propagate rec <- propagate[0]
+            this.propagateBisect.dispatchIndirect(this.indirectArgs, ARG.PROPAGATE_BISECT);
+        } else {
+            this.split.dispatch(full[0], full[1], 1);
+            this.allocate.dispatch(full[0], full[1], 1);
+            this.copy.dispatch(nbWords[0], nbWords[1], 1);
+            this.bisect.dispatch(full[0], full[1], 1);
+            this.propagateBisect.dispatch(full[0], full[1], 1);
+        }
 
         // Rebuild the tree from the bits Bisect set, ready for next frame's Allocate.
         this.runReduce();
@@ -677,10 +746,19 @@ export class OcbtTopologyKernel {
 
         const full = grid2D(Math.ceil(this.capacity / WORKGROUP_SIZE));
         this.reset.dispatch(1, 1, 1);
-        this.classify.dispatch(full[0], full[1], 1);
-        this.prepareSimplify.dispatch(full[0], full[1], 1);
-        this.simplify.dispatch(full[0], full[1], 1);
-        this.propagateSimplify.dispatch(full[0], full[1], 1);
+        this.classify.dispatch(full[0], full[1], 1); // builder: stays O(capacity)
+        if (this.useIndirect && this.prepareIndirect && this.indirectArgs) {
+            this.prepareIndirect.dispatch(1, 1, 1); // prepareSimplify rec <- classification[SIMPLIFY_COUNTER]
+            this.prepareSimplify.dispatchIndirect(this.indirectArgs, ARG.PREPARE_SIMPLIFY);
+            this.prepareIndirect.dispatch(1, 1, 1); // simplify rec <- simplification[0]
+            this.simplify.dispatchIndirect(this.indirectArgs, ARG.SIMPLIFY);
+            this.prepareIndirect.dispatch(1, 1, 1); // propagateSimplify rec <- propagate[1]
+            this.propagateSimplify.dispatchIndirect(this.indirectArgs, ARG.PROPAGATE_SIMPLIFY);
+        } else {
+            this.prepareSimplify.dispatch(full[0], full[1], 1);
+            this.simplify.dispatch(full[0], full[1], 1);
+            this.propagateSimplify.dispatch(full[0], full[1], 1);
+        }
         this.runReduce();
     }
 
@@ -756,6 +834,7 @@ export class OcbtTopologyKernel {
         this.frustumParams?.dispose();
         this.bisectorIndices?.dispose();
         this.drawCount?.dispose();
+        this.indirectArgs?.dispose();
         this.poolBitfield.dispose();
         this.poolTree.dispose();
         this.heapID.dispose();

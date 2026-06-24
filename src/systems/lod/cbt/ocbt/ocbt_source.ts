@@ -84,7 +84,9 @@ export class OcbtSource implements CbtGeometrySource {
         this.cullMinDot = opts.cullMinDot ?? -0.1;
         this.maxLevel = opts.maxLevel;
 
-        this.kernel = new OcbtTopologyKernel(engine, opts.capacity, 'metric');
+        // useIndirect: the 7 work-list passes dispatch over their candidate counts
+        // (not the full pool) via PrepareIndirect + dispatchIndirect.
+        this.kernel = new OcbtTopologyKernel(engine, opts.capacity, 'metric', true);
 
         this.render = buildOcbtRenderMaterial(
             scene,
