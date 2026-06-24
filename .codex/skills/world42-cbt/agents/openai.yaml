@@ -1,4 +1,4 @@
 interface:
-  display_name: "World42 CBT MVP"
-  short_description: "Per-planet CDLOD or CBT routing"
-  default_prompt: "Use $world42-cbt-mvp to implement MVP per-planet LOD selection in World42 where each planet uses either CDLOD or CBT, with no hybrid blending."
+  display_name: "World42 CBT / OCBT"
+  short_description: "Per-planet CDLOD or CBT routing + the GPU pool-CBT (OCBT) terrain engine"
+  default_prompt: "Use $world42-cbt for World42's CBT/OCBT terrain LOD: per-planet CDLOD-or-CBT routing and the integrated, validated GPU pool-CBT (OCBT) engine (topology, df64 decode, culling, compaction, indirect dispatch). See references 14 (as-built design) and 15 (improvement roadmap)."

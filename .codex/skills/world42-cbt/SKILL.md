@@ -1,11 +1,14 @@
 ---
-name: world42-cbt-mvp
-description: Implement an MVP per-planet terrain LOD choice for World42 where each planet uses either CDLOD or CBT (never both at once). Use when requests mention Concurrent Binary Trees, large_cbt, triangle-area LOD, or selecting per-planet terrain algorithm in paths under src/systems/lod/, src/app/setup_lod_and_shadows.ts, src/game_world/stellar_system/, and camera-space contracts.
+name: world42-cbt
+description: World42's CBT/OCBT terrain-LOD knowledge and workflow. Per planet a planet runs CDLOD or a Concurrent Binary Tree (never both); the CBT side has grown from a CPU stub into an integrated, validated GPU pool-CBT (OCBT) engine. Use when requests mention Concurrent Binary Trees, OCBT, large_cbt, bisectors, triangle-area/screen-space LOD, the GPU topology engine, or selecting the per-planet terrain algorithm in paths under src/systems/lod/, src/app/setup_lod_and_shadows.ts, src/game_world/stellar_system/, and camera-space contracts.
 ---
 
-# World42 CBT MVP
+# World42 CBT / OCBT terrain engine
 
-Implement a minimal per-planet algorithm choice first: one planet is either `cdlod` or `cbt`, with no hybrid blending.
+Per planet, a planet runs **either** CDLOD **or** CBT — no hybrid blending on a single planet.
+The CBT path has grown from a CPU stub into an integrated, validated GPU pool-CBT (OCBT)
+engine. The Claude mirror (`.claude/skills/world42-cbt/`) carries the full reference set
+(10–15) and is the authoritative copy.
 
 ## MVP Goal
 
@@ -54,7 +57,7 @@ No cross-fade, no near/far mix for the same planet.
 Run:
 
 ```powershell
-./.codex/skills/world42-cbt-mvp/scripts/check-cbt-mvp-integration.ps1
+./.codex/skills/world42-cbt/scripts/check-cbt-mvp-integration.ps1
 npm run pw:validate
 ```
 
