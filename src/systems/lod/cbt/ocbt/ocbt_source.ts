@@ -50,6 +50,9 @@ export class OcbtSource implements CbtGeometrySource {
     private readonly mergeThresholdPx: number;
     private readonly cullMinDot: number;
     private readonly maxLevel: number;
+    /** Max radial vertex displacement (noise globalAmplitude) — widens the frustum cull so
+     *  tall relief near the camera is not wrongly culled (the cull tests smooth-sphere corners). */
+    private readonly heightMargin: number;
     private frame = 0;
     private readonly tmpDir = new Vector3();
     private readonly tmpInv = new Matrix();
@@ -83,6 +86,7 @@ export class OcbtSource implements CbtGeometrySource {
         this.mergeThresholdPx = opts.mergeThresholdPx;
         this.cullMinDot = opts.cullMinDot ?? -0.1;
         this.maxLevel = opts.maxLevel;
+        this.heightMargin = Math.max(0, opts.noise.globalAmplitude);
 
         // useIndirect: the 7 work-list passes dispatch over their candidate counts
         // (not the full pool) via PrepareIndirect + dispatchIndirect.
@@ -167,9 +171,9 @@ export class OcbtSource implements CbtGeometrySource {
                 this.frustumF32[i * 4 + 2] = this.tmpNormal.z;
                 this.frustumF32[i * 4 + 3] = pl.d;
             }
-            this.kernel.setFrustum(this.frustumF32, OcbtSource.FRUSTUM_GUARD, true);
+            this.kernel.setFrustum(this.frustumF32, OcbtSource.FRUSTUM_GUARD, true, this.heightMargin);
         } else {
-            this.kernel.setFrustum(this.frustumF32, OcbtSource.FRUSTUM_GUARD, false);
+            this.kernel.setFrustum(this.frustumF32, OcbtSource.FRUSTUM_GUARD, false, this.heightMargin);
         }
 
         // Alternate split (even) / merge (odd) frames so the two halves never race on

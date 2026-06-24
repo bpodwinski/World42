@@ -208,8 +208,13 @@ export function buildOcbtRenderMaterial(
             storageBuffers: ['ocbtHeap', 'ocbtPos', 'ocbtIndices', 'cbtPerm']
         }
     );
-    // Implicit mesh, no enforced winding yet — keep both sides.
-    material.backFaceCulling = false;
+    // Back-face culling: the octahedron is consistently wound so only the camera-facing
+    // surface should draw. With it OFF, the planet's far-side / underside leaves (coarsened
+    // by the backside cull, but still live and drawn) bleed THROUGH the near surface and
+    // paint coarse facets over the fine foreground near the horizon. The template winding
+    // (createOcbtTemplateMesh: indices [0,2,1]) makes the OUTER surface front-facing so
+    // this culls the inner/far side, not the visible near surface.
+    material.backFaceCulling = true;
 
     // logarithmicDepthConstant is not auto-bound for a ShaderMaterial; refresh it each
     // bind from the active camera's far plane (mirrors the implicit material).
@@ -259,7 +264,11 @@ export function createOcbtTemplateMesh(scene: Scene, key: string): Mesh {
     const mesh = new Mesh(`ocbt_mesh_${key}`, scene);
     const vd = new VertexData();
     vd.positions = [0, 0, 0, 0, 0, 0, 0, 0, 0]; // ignored — VS uses vertexIndex
-    vd.indices = [0, 1, 2];
+    // Winding [0,2,1] (not [0,1,2]): the EvaluateLEB corner order (v0=right, v1=apex,
+    // v2=left) plus the clip-space Y-flip leaves the OUTER surface back-facing; reversing
+    // the assembly order makes the outer surface front-facing so backFaceCulling can keep
+    // it and cull the inner/far side. Verified with a front_facing diagnostic (outer=green).
+    vd.indices = [0, 2, 1];
     vd.applyToMesh(mesh, false);
     mesh.alwaysSelectAsActiveMesh = true; // procedural bounds — never frustum-cull
     return mesh;

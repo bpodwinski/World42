@@ -664,12 +664,14 @@ export class OcbtTopologyKernel {
      * the caller rotates each render-space normal by R^T and keeps d. `guardScale` widens
      * the cull by that many leaf-edges (anti-pop). `enabled = false` disables the test.
      */
-    setFrustum(planes: Float32Array, guardScale: number, enabled: boolean): void {
+    setFrustum(planes: Float32Array, guardScale: number, enabled: boolean, heightMargin = 0): void {
         if (!this.frustumParams) {
             throw new Error('OcbtTopologyKernel.setFrustum requires classifyMode "metric"');
         }
+        // ctrl = (enabled, guardScale, heightMargin, _). heightMargin (= max radial vertex
+        // displacement) widens the cull so tall relief near the camera is not wrongly culled.
         this.frustumParams.updateUniformArray('planes', planes, 24);
-        this.frustumParams.updateFloat4('ctrl', enabled ? 1 : 0, guardScale, 0, 0);
+        this.frustumParams.updateFloat4('ctrl', enabled ? 1 : 0, guardScale, heightMargin, 0);
         this.frustumParams.update();
     }
 

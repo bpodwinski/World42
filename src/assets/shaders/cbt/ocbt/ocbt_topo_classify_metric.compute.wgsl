@@ -94,11 +94,24 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>,
     // is coarsened so the fixed pool concentrates on what is actually on screen — the
     // only way the visible patch can refine deep (off-screen breadth would otherwise
     // saturate the pool). Conformity (merge engine) keeps the seam to visible leaves watertight.
+    // Conservative triangle-vs-frustum test: cull ONLY when all THREE corners are outside
+    // the SAME plane (beyond the margin). Two reasons the margin must be generous:
+    //  - guard band (e * ctrl.y): anti-pop prefetch, keeps just-off-screen leaves fine;
+    //  - HEIGHT margin (ctrl.z = max radial displacement = noise globalAmplitude): the
+    //    positions tested here are the SMOOTH-SPHERE corners (EvaluateLEB adds no height),
+    //    but the render displaces each vertex radially by up to ±globalAmplitude. With tall
+    //    relief and the camera embedded in the terrain shell, a visible near-peak has its
+    //    sphere-base far off-screen; without this margin it gets culled -> force-merged into
+    //    coarse facets at the bottom of the screen ("culling au sol"). Expanding the keep
+    //    region by the max displacement guarantees no rendered-visible leaf is dropped.
     if (fp.ctrl.x > 0.5) {
-        let margin = e * fp.ctrl.y;
+        let margin = e * fp.ctrl.y + fp.ctrl.z;
         for (var i = 0u; i < 6u; i = i + 1u) {
             let pl = fp.planes[i];
-            if (dot(pl.xyz, centroidRel) + pl.w < -margin) { culled = true; break; }
+            let d0 = dot(pl.xyz, r0) + pl.w;
+            let d1 = dot(pl.xyz, r1) + pl.w;
+            let d2 = dot(pl.xyz, r2) + pl.w;
+            if (d0 < -margin && d1 < -margin && d2 < -margin) { culled = true; break; }
         }
     }
 
