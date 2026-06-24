@@ -54,6 +54,11 @@ export class OcbtSource implements CbtGeometrySource {
     private readonly tmpDir = new Vector3();
     private readonly tmpInv = new Matrix();
     private readonly tmpCamLocal = new Vector3();
+    private readonly tmpNormal = new Vector3();
+    /** 6 frustum planes packed as (nx,ny,nz,d) in camera-relative planet-local space. */
+    private readonly frustumF32 = new Float32Array(24);
+    /** Anti-pop guard band, in leaf-edge multiples (off-screen kept fine within this band). */
+    private static readonly FRUSTUM_GUARD = 1.5;
 
     private ready = false;
     private disposed = false;
@@ -139,6 +144,25 @@ export class OcbtSource implements CbtGeometrySource {
             cullMinDot: this.cullMinDot,
             maxLevel: this.maxLevel
         });
+
+        // Frustum cull: rotate each render-space plane normal into camera-relative
+        // planet-local space (R^T·n via the inverse world matrix; renderPos = R·rel, so
+        // n·renderPos = (R^T·n)·rel), keep d. Lets the fixed pool concentrate on the
+        // visible cone instead of saturating on the whole hemisphere.
+        const planes = frame.frustumPlanes;
+        if (planes && planes.length >= 6) {
+            for (let i = 0; i < 6; i++) {
+                const pl = planes[i];
+                Vector3.TransformNormalToRef(pl.normal, this.tmpInv, this.tmpNormal);
+                this.frustumF32[i * 4 + 0] = this.tmpNormal.x;
+                this.frustumF32[i * 4 + 1] = this.tmpNormal.y;
+                this.frustumF32[i * 4 + 2] = this.tmpNormal.z;
+                this.frustumF32[i * 4 + 3] = pl.d;
+            }
+            this.kernel.setFrustum(this.frustumF32, OcbtSource.FRUSTUM_GUARD, true);
+        } else {
+            this.kernel.setFrustum(this.frustumF32, OcbtSource.FRUSTUM_GUARD, false);
+        }
 
         // Alternate split (even) / merge (odd) frames so the two halves never race on
         // the same neighbor buffer; both share the metric classify's candidate lists.

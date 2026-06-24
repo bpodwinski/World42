@@ -18,11 +18,22 @@ struct ClassifyParams {
     limits    : vec4<f32>  // x = maxLevel (as f32)
 };
 
+// Camera frustum, EXPRESSED IN CAMERA-RELATIVE PLANET-LOCAL SPACE (the same space as
+// the positions buffer). The CPU rotates each render-space plane normal by R^T (the
+// inverse of the planet world rotation) and keeps d, so the test is a plain dot here:
+// a leaf is fully outside when dot(n, centroidRel) + d < -(edge * guard) for any plane.
+// Inward normals (World42 convention): inside => dot >= 0.
+struct FrustumParams {
+    planes : array<vec4<f32>, 6>, // xyz = local-space normal, w = d
+    ctrl   : vec4<f32>            // x = enabled (0/1), y = guard scale (edge multiplier)
+};
+
 @group(0) @binding(2)  var<storage, read>       heapID         : array<vec2<u32>>;
 @group(0) @binding(5)  var<storage, read_write> bisectorData   : array<u32>;
 @group(0) @binding(6)  var<storage, read_write> classification : array<atomic<u32>>;
 @group(0) @binding(17) var<uniform>             cp             : ClassifyParams;
 @group(0) @binding(19) var<storage, read>       positions      : array<f32>;
+@group(0) @binding(20) var<uniform>             fp             : FrustumParams;
 
 // EvaluateLEB (f64 variant) writes 18 f32/slot: per corner [relative.xyz, dir.xyz].
 // `relative` is the camera-relative planet-local position (so |relative| = distance to
@@ -68,16 +79,28 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>,
     let r2 = corner_rel(id, 2u);
     let centroidRel = (r0 + r1 + r2) * (1.0 / 3.0);
 
-    // Backside / horizon cull from the unit surface directions.
-    let centroidDir = normalize(corner_dir(id, 0u) + corner_dir(id, 1u) + corner_dir(id, 2u));
-    let camDir = normalize(cam);
-    let facing = dot(centroidDir, camDir);
-    let culled = facing < cullMinDot;
-
     // Longest-edge screen size in pixels (edge vectors are exact corner differences).
     let e = max(max(length(r0 - r1), length(r1 - r2)), length(r2 - r0));
     let dist = max(length(centroidRel), 1.0);
     let screenPx = e * focal / dist;
+
+    // Backside / horizon cull from the unit surface directions.
+    let centroidDir = normalize(corner_dir(id, 0u) + corner_dir(id, 1u) + corner_dir(id, 2u));
+    let camDir = normalize(cam);
+    let facing = dot(centroidDir, camDir);
+    var culled = facing < cullMinDot;
+
+    // Frustum cull: a leaf fully outside the camera cone (beyond a one-edge guard band)
+    // is coarsened so the fixed pool concentrates on what is actually on screen — the
+    // only way the visible patch can refine deep (off-screen breadth would otherwise
+    // saturate the pool). Conformity (merge engine) keeps the seam to visible leaves watertight.
+    if (fp.ctrl.x > 0.5) {
+        let margin = e * fp.ctrl.y;
+        for (var i = 0u; i < 6u; i = i + 1u) {
+            let pl = fp.planes[i];
+            if (dot(pl.xyz, centroidRel) + pl.w < -margin) { culled = true; break; }
+        }
+    }
 
     if (!culled && screenPx > splitT && level < maxLevel) {
         bisectorData[b + BD_STATE] = ST_BISECT;

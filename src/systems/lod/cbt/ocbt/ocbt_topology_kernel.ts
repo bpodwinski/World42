@@ -141,6 +141,8 @@ export class OcbtTopologyKernel {
     private readonly classifyMode: OcbtClassifyMode;
     /** Camera/threshold UBO for the metric classify (null in predicate mode). */
     private readonly classifyParams: UniformBuffer | null = null;
+    /** Frustum-planes UBO for the metric classify (null in predicate mode). */
+    private readonly frustumParams: UniformBuffer | null = null;
 
     /** Ping-pong parity: 0 => current = nbA, 1 => current = nbB. */
     private parity = 0;
@@ -236,7 +238,8 @@ export class OcbtTopologyKernel {
                         bisectorData: { group: 0, binding: 5 },
                         classification: { group: 0, binding: 6 },
                         cp: { group: 0, binding: 17 },
-                        positions: { group: 0, binding: 19 }
+                        positions: { group: 0, binding: 19 },
+                        fp: { group: 0, binding: 20 }
                     }
                 }
             );
@@ -249,11 +252,19 @@ export class OcbtTopologyKernel {
             this.classifyParams.updateFloat4('thresh', 1, 1e9, 1e9, -1);
             this.classifyParams.updateFloat4('limits', 0, 0, 0, 0);
             this.classifyParams.update();
+            // Frustum UBO (camera-relative planet-local planes). Default disabled.
+            this.frustumParams = new UniformBuffer(engine, undefined, undefined, 'ocbt_frustum_params');
+            this.frustumParams.addUniform('planes', 4, 6);
+            this.frustumParams.addUniform('ctrl', 4);
+            this.frustumParams.updateUniformArray('planes', new Float32Array(24), 24);
+            this.frustumParams.updateFloat4('ctrl', 0, 1.5, 0, 0);
+            this.frustumParams.update();
             this.classify.setStorageBuffer('heapID', this.heapID);
             this.classify.setStorageBuffer('bisectorData', this.bisectorData);
             this.classify.setStorageBuffer('classification', this.classification);
             this.classify.setStorageBuffer('positions', this.positions);
             this.classify.setUniformBuffer('cp', this.classifyParams);
+            this.classify.setUniformBuffer('fp', this.frustumParams);
         } else {
             this.classify = new ComputeShader(
                 'ocbt_topo_classify',
@@ -560,6 +571,21 @@ export class OcbtTopologyKernel {
         this.classifyParams.update();
     }
 
+    /**
+     * Set the camera frustum for the metric classify (metric mode only). `planes` is 24
+     * floats = 6 × (nx, ny, nz, d) in CAMERA-RELATIVE PLANET-LOCAL space (inward normals);
+     * the caller rotates each render-space normal by R^T and keeps d. `guardScale` widens
+     * the cull by that many leaf-edges (anti-pop). `enabled = false` disables the test.
+     */
+    setFrustum(planes: Float32Array, guardScale: number, enabled: boolean): void {
+        if (!this.frustumParams) {
+            throw new Error('OcbtTopologyKernel.setFrustum requires classifyMode "metric"');
+        }
+        this.frustumParams.updateUniformArray('planes', planes, 24);
+        this.frustumParams.updateFloat4('ctrl', enabled ? 1 : 0, guardScale, 0, 0);
+        this.frustumParams.update();
+    }
+
     /** Rebuild the pool sum-tree from the bitfield (leaf prepass, then levels D-1..0). */
     runReduce(): void {
         this.reduce.setUniformBuffer('reduceParams', this.levelParams[this.depth]);
@@ -682,6 +708,7 @@ export class OcbtTopologyKernel {
         for (const ubo of this.levelParams) ubo.dispose();
         this.levelParams.length = 0;
         this.classifyParams?.dispose();
+        this.frustumParams?.dispose();
         this.poolBitfield.dispose();
         this.poolTree.dispose();
         this.heapID.dispose();
