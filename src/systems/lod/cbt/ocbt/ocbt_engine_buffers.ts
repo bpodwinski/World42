@@ -97,7 +97,9 @@ export const BINDING = {
     VALIDATION: 16, // array<atomic<u32>>  (1) dev-only
     UPDATE_PARAMS: 17, // uniform (camera / thresholds / counts)
     FACE_TARGET: 18, // array<u32> (8) per-face target level (cross-check predicate)
-    POSITIONS: 19 // array<f32> (9/slot) EvaluateLEB output: 3 unit-dir corners
+    POSITIONS: 19, // array<f32> (9 or 18/slot) EvaluateLEB output
+    FRUSTUM: 20, // uniform: 6 camera-relative frustum planes + ctrl (metric)
+    DRAW_COUNT: 21 // array<atomic<u32>> (1) compaction cursor / live draw count (metric)
 } as const;
 
 // --- per-slot strides (u32 words) -----------------------------------------------

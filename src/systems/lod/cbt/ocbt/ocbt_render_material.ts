@@ -65,6 +65,7 @@ function vertexSource(opts: OcbtRenderOptions): string {
         bakedHeader(opts),
         'var<storage, read> ocbtHeap : array<u32>;', // 2 u32/slot (u64 lo,hi)
         'var<storage, read> ocbtPos : array<f32>;', // 18 f32/slot: per corner [relative.xyz, dir.xyz]
+        'var<storage, read> ocbtIndices : array<u32>;', // compacted live-slot list
         'var<storage, read> cbtPerm : array<u32>;',
         cbtNoiseWgsl,
         // Camera-relative path (Phase 3): the EvaluateLEB pass already produced each
@@ -82,7 +83,9 @@ function vertexSource(opts: OcbtRenderOptions): string {
         'attribute position : vec3<f32>;',
         '@vertex',
         'fn main(input : VertexInputs) -> FragmentInputs {',
-        '    let slot = vertexInputs.instanceIndex;',
+        '    // Compacted draw: instance i -> live slot. The over-estimated forcedInstanceCount',
+        '    // may index a stale tail entry (now-dead slot) -> the heap-id-0 gate degenerates it.',
+        '    let slot = ocbtIndices[vertexInputs.instanceIndex];',
         '    let lo = ocbtHeap[slot * 2u];',
         '    let hi = ocbtHeap[slot * 2u + 1u];',
         '    // Dead pool slot (heap id 0): collapse to a clipped degenerate triangle.',
@@ -189,7 +192,8 @@ export function buildOcbtRenderMaterial(
     key: string,
     opts: OcbtRenderOptions,
     heapBuffer: StorageBufferType,
-    positionsBuffer: StorageBufferType
+    positionsBuffer: StorageBufferType,
+    indicesBuffer: StorageBufferType
 ): OcbtRenderMaterial {
     const engine = scene.getEngine() as WebGPUEngine;
 
@@ -201,7 +205,7 @@ export function buildOcbtRenderMaterial(
             shaderLanguage: ShaderLanguage.WGSL,
             attributes: ['position'],
             uniforms: ['viewProjection', 'world', 'uLightDirection', 'logarithmicDepthConstant', 'uDebugLod'],
-            storageBuffers: ['ocbtHeap', 'ocbtPos', 'cbtPerm']
+            storageBuffers: ['ocbtHeap', 'ocbtPos', 'ocbtIndices', 'cbtPerm']
         }
     );
     // Implicit mesh, no enforced winding yet — keep both sides.
@@ -229,6 +233,7 @@ export function buildOcbtRenderMaterial(
 
     material.setStorageBuffer('ocbtHeap', heapBuffer);
     material.setStorageBuffer('ocbtPos', positionsBuffer);
+    material.setStorageBuffer('ocbtIndices', indicesBuffer);
     material.setStorageBuffer('cbtPerm', permBuffer);
     material.setVector3('uLightDirection', new Vector3(0, -1, 0));
     material.setInt('uDebugLod', 0);

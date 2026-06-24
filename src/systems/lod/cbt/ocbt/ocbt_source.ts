@@ -59,6 +59,9 @@ export class OcbtSource implements CbtGeometrySource {
     private readonly frustumF32 = new Float32Array(24);
     /** Anti-pop guard band, in leaf-edge multiples (off-screen kept fine within this band). */
     private static readonly FRUSTUM_GUARD = 1.5;
+    /** forcedInstanceCount = min(capacity, liveCount*SAFETY + FLOOR) — absorbs readback lag. */
+    private static readonly INSTANCE_SAFETY = 2;
+    private static readonly INSTANCE_FLOOR = 8192;
 
     private ready = false;
     private disposed = false;
@@ -88,7 +91,8 @@ export class OcbtSource implements CbtGeometrySource {
             opts.key,
             { radius: opts.radiusSim, noise: opts.noise, lightColor: opts.starColor },
             this.kernel.heapBuffer,
-            this.kernel.positionsBuffer
+            this.kernel.positionsBuffer,
+            this.kernel.indicesBuffer
         );
 
         this.mesh = createOcbtTemplateMesh(scene, opts.key);
@@ -108,10 +112,12 @@ export class OcbtSource implements CbtGeometrySource {
                 if (this.disposed) return;
                 this.kernel.uploadSeed();
                 this.kernel.runEvalLeb(); // decode the seed so the metric classify has corners
+                this.kernel.runCompact(); // build the seed's draw-index list
                 // Re-apply any debug toggles requested before init completed.
                 this.render.material.wireframe = this.wantWireframe;
                 this.render.setDebugLod(this.wantDebugLod);
-                // Seed + positions are valid now — enable the draw (VS degenerates dead slots).
+                // Start at full capacity (no holes); the readback ramps it DOWN to
+                // liveCount*safety as soon as the first count arrives.
                 this.mesh.forcedInstanceCount = this.kernel.capacity;
                 this.ready = true;
             })
@@ -174,6 +180,9 @@ export class OcbtSource implements CbtGeometrySource {
         // Decode the live slots to vertex corners for this frame's draw (and next
         // frame's classify, which reads the positions buffer).
         this.kernel.runEvalLeb();
+        // Compact the live slots into the draw-index list so the draw issues liveCount
+        // instances (not CAPACITY) — the per-vertex fbm noise makes that the big win.
+        this.kernel.runCompact();
 
         // Light points from the star toward the planet (shader negates it).
         if (this.starPos) {
@@ -193,6 +202,16 @@ export class OcbtSource implements CbtGeometrySource {
                     this.statsReadPending = false;
                     if (this.disposed) return;
                     this.liveLeafCount = count;
+                    // Bound the draw to the live count (= compaction count = pool_tree[1]),
+                    // over-estimated to absorb readback latency + growth. Jump UP instantly,
+                    // ramp DOWN slowly so a single stale-small read can't pop holes.
+                    const want = Math.min(
+                        this.kernel.capacity,
+                        Math.ceil(count * OcbtSource.INSTANCE_SAFETY) + OcbtSource.INSTANCE_FLOOR
+                    );
+                    const cur = this.mesh.forcedInstanceCount || this.kernel.capacity;
+                    this.mesh.forcedInstanceCount =
+                        want >= cur ? want : Math.max(want, Math.ceil(cur * 0.9));
                     this.listener(null, {
                         leafCount: count,
                         splitsThisFrame: 0,

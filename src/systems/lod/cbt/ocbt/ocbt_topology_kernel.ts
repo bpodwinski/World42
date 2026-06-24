@@ -43,6 +43,7 @@ import ocbtEvalLebWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_eval_leb.w
 import ocbtF64Wgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_f64.wgsl';
 import ocbtTopoEvalLebWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_eval_leb.compute.wgsl';
 import ocbtTopoEvalLebF64Wgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_eval_leb_f64.compute.wgsl';
+import ocbtTopoCompactWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_compact.compute.wgsl';
 import {
     engineLayout,
     engineWgslPreamble,
@@ -119,6 +120,10 @@ export class OcbtTopologyKernel {
     private readonly positions: StorageBuffer;
     /** f32 words per slot in the positions buffer (9 predicate / 18 metric). */
     readonly positionsWords: number;
+    /** Compacted live-slot list + cursor (metric mode only; null in predicate). */
+    private readonly bisectorIndices: StorageBuffer | null = null;
+    private readonly drawCount: StorageBuffer | null = null;
+    private readonly drawCountZero = new Uint32Array(1);
 
     // Passes.
     private readonly reduce: ComputeShader;
@@ -133,6 +138,8 @@ export class OcbtTopologyKernel {
     private readonly simplify: ComputeShader;
     private readonly propagateSimplify: ComputeShader;
     private readonly evalLeb: ComputeShader;
+    /** Draw compaction (metric mode only). */
+    private readonly compact: ComputeShader | null = null;
 
     /** One UBO per reduce level 0..depth (index `depth` = leaf prepass). */
     private readonly levelParams: UniformBuffer[] = [];
@@ -489,6 +496,29 @@ export class OcbtTopologyKernel {
             this.evalLeb.setStorageBuffer('positions', this.positions);
         }
 
+        // --- draw compaction (metric only): live slots -> contiguous index list so the
+        // render draws liveCount instances instead of CAPACITY. ---
+        if (classifyMode === 'metric') {
+            this.bisectorIndices = mk(capacity * 4, STORAGE | READ | WRITE, 'ocbt_topo_indices');
+            this.drawCount = mk(4, STORAGE | WRITE, 'ocbt_topo_drawcount');
+            this.compact = new ComputeShader(
+                'ocbt_topo_compact',
+                engine,
+                { computeSource: compose(ocbtU64Wgsl, ocbtTopoCommonWgsl, ocbtTopoCompactWgsl) },
+                {
+                    bindingsMapping: {
+                        heapID: { group: 0, binding: 2 },
+                        indices: { group: 0, binding: 13 },
+                        drawCount: { group: 0, binding: 21 }
+                    }
+                }
+            );
+            this.compact.onError = onErr('compact');
+            this.compact.setStorageBuffer('heapID', this.heapID);
+            this.compact.setStorageBuffer('indices', this.bisectorIndices);
+            this.compact.setStorageBuffer('drawCount', this.drawCount);
+        }
+
         // One UBO per reduce level (0..depth). Reusing one UBO across same-submit
         // dispatches coalesces to the last value, so each level needs its own.
         for (let level = 0; level <= this.depth; level++) {
@@ -513,7 +543,8 @@ export class OcbtTopologyKernel {
             this.prepareSimplify,
             this.simplify,
             this.propagateSimplify,
-            this.evalLeb
+            this.evalLeb,
+            ...(this.compact ? [this.compact] : [])
         ];
         const end = performance.now() + timeoutMs;
         while (!shaders.every((s) => s.isReady())) {
@@ -663,6 +694,20 @@ export class OcbtTopologyKernel {
         return this.positions;
     }
 
+    /** Compacted live-slot index list (metric mode). Render: slot = indices[instanceIndex]. */
+    get indicesBuffer(): StorageBuffer {
+        if (!this.bisectorIndices) throw new Error('indicesBuffer requires classifyMode "metric"');
+        return this.bisectorIndices;
+    }
+
+    /** Compact the live slots into the contiguous index list (metric mode only). */
+    runCompact(): void {
+        if (!this.compact || !this.drawCount) return;
+        this.drawCount.update(this.drawCountZero); // CPU clear the atomic cursor (4 bytes)
+        const full = grid2D(Math.ceil(this.capacity / WORKGROUP_SIZE));
+        this.compact.dispatch(full[0], full[1], 1);
+    }
+
     /** Decode every live slot's heap id to 3 unit-dir corners into the positions buffer. */
     runEvalLeb(): void {
         const full = grid2D(Math.ceil(this.capacity / WORKGROUP_SIZE));
@@ -709,6 +754,8 @@ export class OcbtTopologyKernel {
         this.levelParams.length = 0;
         this.classifyParams?.dispose();
         this.frustumParams?.dispose();
+        this.bisectorIndices?.dispose();
+        this.drawCount?.dispose();
         this.poolBitfield.dispose();
         this.poolTree.dispose();
         this.heapID.dispose();
