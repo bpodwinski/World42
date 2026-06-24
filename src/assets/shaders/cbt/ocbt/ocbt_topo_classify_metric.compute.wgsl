@@ -84,10 +84,17 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>,
     let dist = max(length(centroidRel), 1.0);
     let screenPx = e * focal / dist;
 
-    // Backside / horizon cull from the unit surface directions.
-    let centroidDir = normalize(corner_dir(id, 0u) + corner_dir(id, 1u) + corner_dir(id, 2u));
+    // Backside / horizon cull from the unit surface directions. Use the MOST-facing corner
+    // (not the centroid): a coarse leaf spans a wide arc, so its centroid can fall beyond the
+    // horizon threshold while a corner is still on the near side. Centroid-culling such a leaf
+    // would set the no-split gate and DEADLOCK it coarse (the whole tree collapses to the 8
+    // roots under an aggressive threshold). Culling only when ALL corners are over the limb
+    // lets coarse leaves keep splitting toward the boundary; fine leaves past it still cull.
     let camDir = normalize(cam);
-    let facing = dot(centroidDir, camDir);
+    let facing = max(
+        dot(corner_dir(id, 0u), camDir),
+        max(dot(corner_dir(id, 1u), camDir), dot(corner_dir(id, 2u), camDir))
+    );
     var culled = facing < cullMinDot;
 
     // Frustum cull: a leaf fully outside the camera cone (beyond a one-edge guard band)

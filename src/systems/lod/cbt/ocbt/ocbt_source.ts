@@ -138,6 +138,30 @@ export class OcbtSource implements CbtGeometrySource {
         // update refines it. Nothing to emit on the main thread.
     }
 
+    /**
+     * Altitude-adaptive horizon cull threshold (replaces a fixed cullMinDot). A leaf is
+     * over the planet limb (occluded) when its centroid direction d satisfies
+     * dot(d, camDir) < cos(theta), where theta is the angular radius of what the camera can
+     * possibly see. Relief-aware so it never culls a visible peak:
+     *   theta = acos((R-A)/r_cam)   // camera's horizon over the LOWEST possible limb (R-A)
+     *         + acos((R-A)/(R+A))   // extra reach: a MAX peak (R+A) seen over that limb
+     * At 1 km altitude this keeps a ~17 deg cap instead of the old ~96 deg (cullMinDot -0.1),
+     * so the pool stops refining occluded over-horizon terrain. A is the max radial relief.
+     * At high altitude theta -> ~90 deg+, so it relaxes to (more than) a hemisphere.
+     */
+    private horizonCullMinDot(): number {
+        const R = this.radius;
+        const A = Math.min(this.heightMargin, R * 0.5); // clamp pathological relief
+        const rCam = Math.max(this.tmpCamLocal.length(), R - A + 1e-3);
+        const rLow = Math.max(1, R - A);
+        const camTerm = Math.acos(Math.min(1, rLow / rCam));
+        const peakTerm = Math.acos(Math.min(1, rLow / (R + A)));
+        // Small extra guard so leaves right at the limb are not popped.
+        const theta = Math.min(Math.PI, camTerm + peakTerm + 0.05);
+        // Never let the dynamic value be LESS aggressive than the configured floor.
+        return Math.max(this.cullMinDot, Math.cos(theta));
+    }
+
     requestUpdate(frame: CbtFrameParams): void {
         if (this.disposed || !this.ready) return;
 
@@ -153,7 +177,7 @@ export class OcbtSource implements CbtGeometrySource {
             focalPx,
             splitThresholdPx: this.splitThresholdPx,
             mergeThresholdPx: this.mergeThresholdPx,
-            cullMinDot: this.cullMinDot,
+            cullMinDot: this.horizonCullMinDot(),
             maxLevel: this.maxLevel
         });
 
