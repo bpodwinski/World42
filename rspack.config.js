@@ -20,7 +20,11 @@ const config = (env, argv) => ({
         index: './src/index.ts',
         ...(isProd(argv)
             ? {}
-            : { ocbtTest: './src/systems/lod/cbt/ocbt/ocbt_pool_gpu_test_main.ts' })
+            : {
+                  ocbtTest: './src/systems/lod/cbt/ocbt/ocbt_pool_gpu_test_main.ts',
+                  ocbtTopoTest:
+                      './src/systems/lod/cbt/ocbt/ocbt_topology_gpu_test_main.ts'
+              })
     },
     output: {
         path: path.resolve(__dirname, 'dist'),
@@ -69,6 +73,11 @@ const config = (env, argv) => ({
                       template: './ocbt-test.html',
                       filename: 'ocbt-test.html',
                       chunks: ['ocbtTest']
+                  }),
+                  new HtmlWebpackPlugin({
+                      template: './ocbt-topo-test.html',
+                      filename: 'ocbt-topo-test.html',
+                      chunks: ['ocbtTopoTest']
                   })
               ]),
         new TsCheckerRspackPlugin(),
