@@ -1,4 +1,4 @@
-import type { ChunkMeshDataTyped } from '../workers/worker_protocol';
+import type { ChunkMeshDataTyped } from '../cdlod/workers/worker_protocol';
 import type { CbtNode } from './cbt_state';
 import { fbmNoise, type NoiseParams, DEFAULT_NOISE } from './cbt_noise';
 

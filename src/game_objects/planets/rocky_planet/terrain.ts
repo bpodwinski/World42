@@ -1,6 +1,6 @@
 import { Scene, Mesh, Vector3, VertexData } from "@babylonjs/core";
 import { Face } from "../../../systems/lod/types";
-import type { ChunkBoundsInfo } from "../../../systems/lod/workers/worker_protocol";
+import type { ChunkBoundsInfo } from "../../../systems/lod/cdlod/workers/worker_protocol";
 
 type FloatLike = Float32Array | number[] | ReadonlyArray<number>;
 type IndexLike = Uint16Array | Uint32Array | number[] | ReadonlyArray<number>;

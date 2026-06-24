@@ -14,7 +14,7 @@ import {
 import initWasm, {
     build_chunk,
     type InitInput,
-} from '../../../../terrain/pkg/terrain_generator.js';
+} from '../../../../../terrain/pkg/terrain_generator.js';
 
 const workerScope: DedicatedWorkerGlobalScope = self as DedicatedWorkerGlobalScope;
 const PROTOCOL = MESH_KERNEL_PROTOCOL;
@@ -25,7 +25,7 @@ let cancelCurrent = false;
 
 function ensureWasmReady(): Promise<void> {
     if (!wasmReady) {
-        const wasmUrl = new URL('../../../../terrain/pkg/terrain_generator_bg.wasm', import.meta.url);
+        const wasmUrl = new URL('../../../../../terrain/pkg/terrain_generator_bg.wasm', import.meta.url);
         wasmReady = initWasm(wasmUrl as InitInput).then(() => undefined);
     }
     return wasmReady;

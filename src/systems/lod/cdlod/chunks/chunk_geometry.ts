@@ -1,6 +1,6 @@
 import { Matrix, Vector3 } from "@babylonjs/core";
-import { Terrain } from "../../../game_objects/planets/rocky_planet/terrain";
-import type { Bounds, Face } from "../types";
+import { Terrain } from "../../../../game_objects/planets/rocky_planet/terrain";
+import type { Bounds, Face } from "../../types";
 
 export type ChunkBaseGeometry = {
     /** Patch center on base sphere in planet-local */

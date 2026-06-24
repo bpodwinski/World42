@@ -1,10 +1,10 @@
 import { Scene, Mesh, Vector3, TransformNode, Matrix, ShaderMaterial } from "@babylonjs/core";
 import { ChunkTree } from "./chunk_tree";
-import { Terrain } from "../../../game_objects/planets/rocky_planet/terrain";
-import { TerrainShader } from "../../../game_objects/planets/rocky_planet/terrains_shader";
-import type { FloatingEntityInterface } from "../../../core/camera/camera_manager";
+import { Terrain } from "../../../../game_objects/planets/rocky_planet/terrain";
+import { TerrainShader } from "../../../../game_objects/planets/rocky_planet/terrains_shader";
+import type { FloatingEntityInterface } from "../../../../core/camera/camera_manager";
 import { WorkerPool } from "../workers/worker_pool";
-import type { Bounds, Face } from "../types";
+import type { Bounds, Face } from "../../types";
 import type {
     ChunkMeshData,
     MeshKernelBuildChunkRequest,

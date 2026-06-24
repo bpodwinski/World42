@@ -1,6 +1,6 @@
 import type { Plane, Vector3 } from '@babylonjs/core';
 import { Plane as PlaneValue, Vector3 as Vector3Value } from '@babylonjs/core';
-import type { OriginCamera } from '../../../core/camera/camera_manager';
+import type { OriginCamera } from '../../../../core/camera/camera_manager';
 
 export type FrustumCullCache = {
     planes: Plane[];

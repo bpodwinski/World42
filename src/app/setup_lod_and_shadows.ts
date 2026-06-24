@@ -29,7 +29,7 @@ import {
     noiseForQuality,
     type CbtQualityLevel,
 } from '../systems/lod/cbt/cbt_quality';
-import { LodScheduler } from '../systems/lod/lod_scheduler';
+import { LodScheduler } from '../systems/lod/cdlod/lod_scheduler';
 
 /**
  * CBT quality preset. Change this to tune mesh density, max depth and terrain

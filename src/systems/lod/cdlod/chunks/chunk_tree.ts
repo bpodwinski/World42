@@ -1,6 +1,6 @@
 import { Matrix, Mesh, Plane, Scene, ShaderMaterial, TransformNode, Vector3 } from "@babylonjs/core";
-import type { FloatingEntityInterface, OriginCamera } from "../../../core/camera/camera_manager";
-import type { Bounds, Face } from "../types";
+import type { FloatingEntityInterface, OriginCamera } from "../../../../core/camera/camera_manager";
+import type { Bounds, Face } from "../../types";
 import type { ChunkBoundsInfo } from "../workers/worker_protocol";
 import { globalWorkerPool } from "../workers/global_worker_pool";
 import { ChunkForge } from "./chunk_forge";

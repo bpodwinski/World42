@@ -1,5 +1,5 @@
 import type { Observer, Scene } from "@babylonjs/core";
-import type { OriginCamera } from "../../core/camera/camera_manager";
+import type { OriginCamera } from "../../../core/camera/camera_manager";
 import { ChunkTree } from "./chunks/chunk_tree";
 import { MinHeap } from "./lod_priority_queue";
 

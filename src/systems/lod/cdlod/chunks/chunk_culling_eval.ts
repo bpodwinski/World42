@@ -1,7 +1,7 @@
 import type { Plane, Vector3 } from "@babylonjs/core";
 import { isSphereInFrustum } from "./chunk_metrics";
 import { backsideCulling } from "./backside_culling";
-import type { OriginCamera } from "../../../core/camera/camera_manager";
+import type { OriginCamera } from "../../../../core/camera/camera_manager";
 
 /**
  * Result of the culling evaluation combining strict visibility and prefetch guard-bands.

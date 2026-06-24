@@ -31,7 +31,7 @@ describe('stellar_catalog_normalizer', () => {
                     bodies: {
                         Proxima: {
                             type: 'sun',
-                            lod_algorithm: 'cbt',
+                            lod_algorithm: 'cbt-cpu',
                             position_km: [0, 0, 0],
                             diameter: 1000,
                             rotation_period_days: null,
@@ -46,7 +46,7 @@ describe('stellar_catalog_normalizer', () => {
         expect(catalog.systems.AlphaCentauri.displayName).toBe('Alpha Centauri');
         expect(catalog.systems.AlphaCentauri.bodies.Proxima.type).toBe('star');
         expect(catalog.systems.AlphaCentauri.bodies.Proxima.diameter_km).toBe(1000);
-        expect(catalog.systems.AlphaCentauri.bodies.Proxima.lod_algorithm).toBe('cbt');
+        expect(catalog.systems.AlphaCentauri.bodies.Proxima.lod_algorithm).toBe('cbt-cpu');
         expect(catalog.systems.AlphaCentauri.bodies.Proxima.star?.color_rgb).toEqual([1, 0.8, 0.7]);
     });
 
