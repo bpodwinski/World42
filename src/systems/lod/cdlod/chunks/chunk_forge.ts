@@ -4,6 +4,7 @@ import { Terrain } from "../../../../game_objects/planets/rocky_planet/terrain";
 import { TerrainShader } from "../../../../game_objects/planets/rocky_planet/terrains_shader";
 import type { FloatingEntityInterface } from "../../../../core/camera/camera_manager";
 import { WorkerPool } from "../workers/worker_pool";
+import { DEFAULT_NOISE } from "../../cbt/cbt_noise";
 import type { Bounds, Face } from "../../types";
 import type {
     ChunkMeshData,
@@ -259,14 +260,17 @@ export class ChunkForge {
                 id: jobId,
                 payload: {
                     ...params,
+                    // Single source of truth shared with CBT/OCBT + the WASM simplex
+                    // port, so CDLOD renders the SAME topology. (Payload uses
+                    // `globalTerrainAmplitude`; NoiseParams calls it `globalAmplitude`.)
                     noise: {
-                        seed: 1,
-                        octaves: 16,
-                        baseFrequency: 20.0,
-                        baseAmplitude: 15.0,
-                        lacunarity: 1.8,
-                        persistence: 0.5,
-                        globalTerrainAmplitude: 80.0,
+                        seed: DEFAULT_NOISE.seed,
+                        octaves: DEFAULT_NOISE.octaves,
+                        baseFrequency: DEFAULT_NOISE.baseFrequency,
+                        baseAmplitude: DEFAULT_NOISE.baseAmplitude,
+                        lacunarity: DEFAULT_NOISE.lacunarity,
+                        persistence: DEFAULT_NOISE.persistence,
+                        globalTerrainAmplitude: DEFAULT_NOISE.globalAmplitude,
                     },
                     meshFormat: "typed",
                 },

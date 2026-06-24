@@ -117,14 +117,24 @@ export type NoiseParams = {
     globalAmplitude: number;
 };
 
+/**
+ * Canonical terrain noise — the SINGLE source of truth shared by every LOD
+ * backend so a planet has the same topology under CDLOD, CBT and OCBT:
+ *  - the CBT/OCBT GPU shaders bake these via the material header,
+ *  - the CDLOD worker (terrain/src/lib.rs) ports the identical simplex + uses
+ *    these params (fed through chunk_forge.ts),
+ *  - the analytic ground collision (fbmNoise) reproduces the same surface.
+ * octaves is capped at 12 (the CBT shader's CBT_MAX_OCTAVES); beyond ~12 the
+ * contribution is sub-millimetre at this persistence, so it is imperceptible.
+ */
 export const DEFAULT_NOISE: NoiseParams = {
     seed: 1,
-    octaves: 8,
+    octaves: 16,
     baseFrequency: 8.0,
-    baseAmplitude: 10.0,
-    lacunarity: 2.0,
-    persistence: 0.45,
-    globalAmplitude: 15.0,
+    baseAmplitude: 16.0,
+    lacunarity: 1.8,
+    persistence: 0.5,
+    globalAmplitude: 50.0,
 };
 
 let cachedPerm: Uint8Array | null = null;

@@ -1,10 +1,129 @@
 use js_sys::{Array, Float32Array, Object, Reflect, Uint16Array, Uint32Array};
-use noise::{NoiseFn, OpenSimplex};
 use wasm_bindgen::prelude::*;
 
 pub mod cbt;
 
 const PI: f64 = core::f64::consts::PI;
+
+// ---------------------------------------------------------------------------
+// Gustavson 3D simplex noise — a VERBATIM port of src/systems/lod/cbt/cbt_noise.ts
+// (which the CBT/OCBT GPU shaders mirror in cbt_noise.wgsl). CDLOD previously used
+// `noise::OpenSimplex`, a different algorithm, so the same planet had a different
+// topology under CDLOD vs CBT/OCBT. Sharing this primitive (and the same noise
+// params, see DEFAULT_NOISE / noiseForQuality) makes the terrain identical across
+// all backends and lets the analytic CPU collision (cbt_noise.fbmNoise) match the
+// CDLOD ground too. Keep this in lockstep with cbt_noise.ts.
+// ---------------------------------------------------------------------------
+
+#[rustfmt::skip]
+const GRAD3: [[f64; 3]; 12] = [
+    [1.0, 1.0, 0.0], [-1.0, 1.0, 0.0], [1.0, -1.0, 0.0], [-1.0, -1.0, 0.0],
+    [1.0, 0.0, 1.0], [-1.0, 0.0, 1.0], [1.0, 0.0, -1.0], [-1.0, 0.0, -1.0],
+    [0.0, 1.0, 1.0], [0.0, -1.0, 1.0], [0.0, 1.0, -1.0], [0.0, -1.0, -1.0],
+];
+
+const F3: f64 = 1.0 / 3.0;
+const G3: f64 = 1.0 / 6.0;
+
+/// Seeded permutation table (512 entries = 256 doubled for wrap-around), matching
+/// `buildPerm` in cbt_noise.ts (same LCG Fisher-Yates shuffle).
+fn build_perm(seed: i32) -> [u8; 512] {
+    let mut p = [0u8; 512];
+    for i in 0..256 {
+        p[i] = i as u8;
+    }
+    let mut s: i32 = seed;
+    for i in (1..256).rev() {
+        s = s.wrapping_mul(1664525).wrapping_add(1013904223);
+        let j = ((s as u32) % ((i as u32) + 1)) as usize;
+        p.swap(i, j);
+    }
+    for i in 0..256 {
+        p[i + 256] = p[i];
+    }
+    p
+}
+
+#[inline]
+fn dot3(g: &[f64; 3], x: f64, y: f64, z: f64) -> f64 {
+    g[0] * x + g[1] * y + g[2] * z
+}
+
+/// 3D simplex noise in approximately [-1, 1] — verbatim port of `simplex3`.
+fn simplex3(perm: &[u8; 512], x: f64, y: f64, z: f64) -> f64 {
+    let s = (x + y + z) * F3;
+    let i = (x + s).floor();
+    let j = (y + s).floor();
+    let k = (z + s).floor();
+
+    let t = (i + j + k) * G3;
+    let x0 = x - (i - t);
+    let y0 = y - (j - t);
+    let z0 = z - (k - t);
+
+    let (i1, j1, k1, i2, j2, k2);
+    if x0 >= y0 {
+        if y0 >= z0 {
+            i1 = 1; j1 = 0; k1 = 0; i2 = 1; j2 = 1; k2 = 0;
+        } else if x0 >= z0 {
+            i1 = 1; j1 = 0; k1 = 0; i2 = 1; j2 = 0; k2 = 1;
+        } else {
+            i1 = 0; j1 = 0; k1 = 1; i2 = 1; j2 = 0; k2 = 1;
+        }
+    } else if y0 < z0 {
+        i1 = 0; j1 = 0; k1 = 1; i2 = 0; j2 = 1; k2 = 1;
+    } else if x0 < z0 {
+        i1 = 0; j1 = 1; k1 = 0; i2 = 0; j2 = 1; k2 = 1;
+    } else {
+        i1 = 0; j1 = 1; k1 = 0; i2 = 1; j2 = 1; k2 = 0;
+    }
+
+    let x1 = x0 - i1 as f64 + G3;
+    let y1 = y0 - j1 as f64 + G3;
+    let z1 = z0 - k1 as f64 + G3;
+    let x2 = x0 - i2 as f64 + 2.0 * G3;
+    let y2 = y0 - j2 as f64 + 2.0 * G3;
+    let z2 = z0 - k2 as f64 + 2.0 * G3;
+    let x3 = x0 - 1.0 + 3.0 * G3;
+    let y3 = y0 - 1.0 + 3.0 * G3;
+    let z3 = z0 - 1.0 + 3.0 * G3;
+
+    let ii = (i as i64 & 255) as usize;
+    let jj = (j as i64 & 255) as usize;
+    let kk = (k as i64 & 255) as usize;
+
+    let mut n = 0.0;
+
+    let mut t0 = 0.6 - x0 * x0 - y0 * y0 - z0 * z0;
+    if t0 > 0.0 {
+        t0 *= t0;
+        let gi0 = (perm[ii + perm[jj + perm[kk] as usize] as usize] % 12) as usize;
+        n += t0 * t0 * dot3(&GRAD3[gi0], x0, y0, z0);
+    }
+
+    let mut t1 = 0.6 - x1 * x1 - y1 * y1 - z1 * z1;
+    if t1 > 0.0 {
+        t1 *= t1;
+        let gi1 = (perm[ii + i1 + perm[jj + j1 + perm[kk + k1] as usize] as usize] % 12) as usize;
+        n += t1 * t1 * dot3(&GRAD3[gi1], x1, y1, z1);
+    }
+
+    let mut t2 = 0.6 - x2 * x2 - y2 * y2 - z2 * z2;
+    if t2 > 0.0 {
+        t2 *= t2;
+        let gi2 = (perm[ii + i2 + perm[jj + j2 + perm[kk + k2] as usize] as usize] % 12) as usize;
+        n += t2 * t2 * dot3(&GRAD3[gi2], x2, y2, z2);
+    }
+
+    let mut t3 = 0.6 - x3 * x3 - y3 * y3 - z3 * z3;
+    if t3 > 0.0 {
+        t3 *= t3;
+        let gi3 = (perm[ii + 1 + perm[jj + 1 + perm[kk + 1] as usize] as usize] % 12) as usize;
+        n += t3 * t3 * dot3(&GRAD3[gi3], x3, y3, z3);
+    }
+
+    32.0 * n
+}
 
 // fn saturate(x: f64) -> f64 {
 //     if x < 0.0 {
@@ -81,7 +200,7 @@ fn tri_normal(v0: [f64; 3], v1: [f64; 3], v2: [f64; 3]) -> [f64; 3] {
 }
 
 fn fractal_noise(
-    simplex: &OpenSimplex,
+    perm: &[u8; 512],
     x: f64,
     y: f64,
     z: f64,
@@ -97,7 +216,7 @@ fn fractal_noise(
     let mut amp = base_amplitude;
 
     for _ in 0..octaves {
-        let v = simplex.get([x * freq, y * freq, z * freq]); // [-1..1]
+        let v = simplex3(perm, x * freq, y * freq, z * freq); // [-1..1]
         sum += v * amp;
         max_possible += amp;
         freq *= lacunarity;
@@ -135,7 +254,7 @@ pub fn build_chunk(
     let vert_count = (res + 1) * (res + 1);
     let index_count = res * res * 6;
 
-    let simplex = OpenSimplex::new(seed as u32);
+    let perm = build_perm(seed);
 
     // angles (bounds en tan-space)
     let a_u_min = u_min.atan();
@@ -177,7 +296,7 @@ pub fn build_chunk(
             let unit = normalize3(cube);
 
             let f = fractal_noise(
-                &simplex,
+                &perm,
                 unit[0],
                 unit[1],
                 unit[2],
