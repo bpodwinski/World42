@@ -8,6 +8,7 @@
 // it (do not bind it). pool_tree(1) is read by pool_freeCount().
 
 @group(0) @binding(6)  var<storage, read_write> classification : array<atomic<u32>>;
+@group(0) @binding(7)  var<storage, read_write> simplification : array<atomic<u32>>;
 @group(0) @binding(8)  var<storage, read_write> allocate       : array<atomic<u32>>;
 @group(0) @binding(9)  var<storage, read_write> propagate      : array<atomic<u32>>;
 @group(0) @binding(10) var<storage, read_write> memory         : array<atomic<i32>>;
@@ -23,6 +24,7 @@ fn main() {
     atomicStore(&classification[SIMPLIFY_COUNTER], 0u);
 
     atomicStore(&allocate[0], 0u);
+    atomicStore(&simplification[0], 0u);
 
     atomicStore(&propagate[0], 0u);
     atomicStore(&propagate[1], 0u);

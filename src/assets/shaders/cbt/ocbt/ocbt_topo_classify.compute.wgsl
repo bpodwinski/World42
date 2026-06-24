@@ -34,15 +34,24 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>,
     bisectorData[b + BD_PROBLEMATIC] = OCBT_INVALID;
     bisectorData[b + BD_FLAGS]       = FLAG_VISIBLE;
 
-    // Refine while this leaf's level is below its face's target level.
+    // Compare this leaf's level to its face's target: below => split, above => simplify.
     let level = depth - BASE_DEPTH;
     let faceNode = u64_shr(heap, level); // = 8 + face (the depth-3 ancestor)
     let face = faceNode.x - 8u;          // 0..7
-    let wantsSplit = level < faceTarget[face];
+    let tgt = faceTarget[face];
 
-    if (wantsSplit) {
+    if (level < tgt) {
         bisectorData[b + BD_STATE] = ST_BISECT;
         let slot = atomicAdd(&classification[SPLIT_COUNTER], 1u);
         atomicStore(&classification[CLASSIFY_COUNTER_OFFSET + slot], id);
+    } else if (level > tgt) {
+        // Wants to be coarser. Mark ALL such leaves SIMPLIFY (the merge passes inspect
+        // the whole diamond's state), but only register the EVEN heap ids — the odd
+        // partner is collapsed by its even pair (reference ClassifyElement).
+        bisectorData[b + BD_STATE] = ST_SIMPLIFY;
+        if (u64_bit(heap, 0u) == 0u) {
+            let slot = atomicAdd(&classification[SIMPLIFY_COUNTER], 1u);
+            atomicStore(&classification[CLASSIFY_COUNTER_OFFSET + OCBT_CAPACITY + slot], id);
+        }
     }
 }

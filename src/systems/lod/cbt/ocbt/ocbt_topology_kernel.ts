@@ -34,6 +34,9 @@ import ocbtTopoAllocateWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_
 import ocbtTopoCopyNeighborsWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_copy_neighbors.compute.wgsl';
 import ocbtTopoBisectWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_bisect.compute.wgsl';
 import ocbtTopoPropagateBisectWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_propagate_bisect.compute.wgsl';
+import ocbtTopoPrepareSimplifyWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_prepare_simplify.compute.wgsl';
+import ocbtTopoSimplifyWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_simplify.compute.wgsl';
+import ocbtTopoPropagateSimplifyWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_propagate_simplify.compute.wgsl';
 import ocbtPoolReduceWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_pool_reduce.compute.wgsl';
 import {
     engineLayout,
@@ -88,6 +91,7 @@ export class OcbtTopologyKernel {
     private readonly nbB: StorageBuffer;
     private readonly bisectorData: StorageBuffer;
     private readonly classification: StorageBuffer;
+    private readonly simplification: StorageBuffer;
     private readonly allocateBuf: StorageBuffer;
     private readonly propagate: StorageBuffer;
     private readonly memory: StorageBuffer;
@@ -102,6 +106,9 @@ export class OcbtTopologyKernel {
     private readonly copy: ComputeShader;
     private readonly bisect: ComputeShader;
     private readonly propagateBisect: ComputeShader;
+    private readonly prepareSimplify: ComputeShader;
+    private readonly simplify: ComputeShader;
+    private readonly propagateSimplify: ComputeShader;
 
     /** One UBO per reduce level 0..depth (index `depth` = leaf prepass). */
     private readonly levelParams: UniformBuffer[] = [];
@@ -129,6 +136,7 @@ export class OcbtTopologyKernel {
         this.nbB = mk(layout.neighborsBytes, STORAGE | READ | WRITE, 'ocbt_topo_nbB');
         this.bisectorData = mk(layout.bisectorDataBytes, STORAGE | WRITE, 'ocbt_topo_bisectordata');
         this.classification = mk(layout.classificationBytes, STORAGE | WRITE, 'ocbt_topo_classify');
+        this.simplification = mk(layout.simplificationBytes, STORAGE | WRITE, 'ocbt_topo_simplify');
         this.allocateBuf = mk(layout.allocateBytes, STORAGE | WRITE, 'ocbt_topo_allocate');
         this.propagate = mk(layout.propagateBytes, STORAGE | WRITE, 'ocbt_topo_propagate');
         this.memory = mk(layout.memoryBytes, STORAGE | WRITE, 'ocbt_topo_memory');
@@ -166,6 +174,7 @@ export class OcbtTopologyKernel {
                 bindingsMapping: {
                     pool_tree: { group: 0, binding: 1 },
                     classification: { group: 0, binding: 6 },
+                    simplification: { group: 0, binding: 7 },
                     allocate: { group: 0, binding: 8 },
                     propagate: { group: 0, binding: 9 },
                     memory: { group: 0, binding: 10 }
@@ -175,6 +184,7 @@ export class OcbtTopologyKernel {
         this.reset.onError = onErr('reset');
         this.reset.setStorageBuffer('pool_tree', this.poolTree);
         this.reset.setStorageBuffer('classification', this.classification);
+        this.reset.setStorageBuffer('simplification', this.simplification);
         this.reset.setStorageBuffer('allocate', this.allocateBuf);
         this.reset.setStorageBuffer('propagate', this.propagate);
         this.reset.setStorageBuffer('memory', this.memory);
@@ -297,6 +307,67 @@ export class OcbtTopologyKernel {
         this.propagateBisect.setStorageBuffer('bisectorData', this.bisectorData);
         this.propagateBisect.setStorageBuffer('propagate', this.propagate);
 
+        // --- merge half: prepare-simplify / simplify / propagate-simplify ---
+        this.prepareSimplify = new ComputeShader(
+            'ocbt_topo_prepare_simplify',
+            engine,
+            { computeSource: compose(ocbtU64Wgsl, ocbtTopoCommonWgsl, ocbtTopoPrepareSimplifyWgsl) },
+            {
+                bindingsMapping: {
+                    heapID: { group: 0, binding: 2 },
+                    neighbors: { group: 0, binding: 3 },
+                    bisectorData: { group: 0, binding: 5 },
+                    classification: { group: 0, binding: 6 },
+                    simplification: { group: 0, binding: 7 }
+                }
+            }
+        );
+        this.prepareSimplify.onError = onErr('prepareSimplify');
+        this.prepareSimplify.setStorageBuffer('heapID', this.heapID);
+        this.prepareSimplify.setStorageBuffer('bisectorData', this.bisectorData);
+        this.prepareSimplify.setStorageBuffer('classification', this.classification);
+        this.prepareSimplify.setStorageBuffer('simplification', this.simplification);
+
+        this.simplify = new ComputeShader(
+            'ocbt_topo_simplify',
+            engine,
+            { computeSource: compose(ocbtU64Wgsl, ocbtPoolWgsl, ocbtTopoCommonWgsl, ocbtTopoSimplifyWgsl) },
+            {
+                bindingsMapping: {
+                    pool_bitfield: { group: 0, binding: 0 },
+                    heapID: { group: 0, binding: 2 },
+                    neighbors: { group: 0, binding: 3 },
+                    bisectorData: { group: 0, binding: 5 },
+                    simplification: { group: 0, binding: 7 },
+                    propagate: { group: 0, binding: 9 }
+                }
+            }
+        );
+        this.simplify.onError = onErr('simplify');
+        this.simplify.setStorageBuffer('pool_bitfield', this.poolBitfield);
+        this.simplify.setStorageBuffer('heapID', this.heapID);
+        this.simplify.setStorageBuffer('bisectorData', this.bisectorData);
+        this.simplify.setStorageBuffer('simplification', this.simplification);
+        this.simplify.setStorageBuffer('propagate', this.propagate);
+
+        this.propagateSimplify = new ComputeShader(
+            'ocbt_topo_propagate_simplify',
+            engine,
+            { computeSource: compose(ocbtU64Wgsl, ocbtTopoCommonWgsl, ocbtTopoPropagateSimplifyWgsl) },
+            {
+                bindingsMapping: {
+                    heapID: { group: 0, binding: 2 },
+                    neighbors: { group: 0, binding: 3 },
+                    bisectorData: { group: 0, binding: 5 },
+                    propagate: { group: 0, binding: 9 }
+                }
+            }
+        );
+        this.propagateSimplify.onError = onErr('propagateSimplify');
+        this.propagateSimplify.setStorageBuffer('heapID', this.heapID);
+        this.propagateSimplify.setStorageBuffer('bisectorData', this.bisectorData);
+        this.propagateSimplify.setStorageBuffer('propagate', this.propagate);
+
         // One UBO per reduce level (0..depth). Reusing one UBO across same-submit
         // dispatches coalesces to the last value, so each level needs its own.
         for (let level = 0; level <= this.depth; level++) {
@@ -317,7 +388,10 @@ export class OcbtTopologyKernel {
             this.allocate,
             this.copy,
             this.bisect,
-            this.propagateBisect
+            this.propagateBisect,
+            this.prepareSimplify,
+            this.simplify,
+            this.propagateSimplify
         ];
         const end = performance.now() + timeoutMs;
         while (!shaders.every((s) => s.isReady())) {
@@ -409,6 +483,28 @@ export class OcbtTopologyKernel {
         this.parity ^= 1;
     }
 
+    /**
+     * One coarsening frame (the merge / simplification half). Unlike the split half,
+     * the collapse rewires neighbors IN PLACE on the live buffer (PrepareSimplify
+     * guarantees disjoint conformant diamonds), so there is no ping-pong. Drives:
+     * Reset -> Classify (emits simplify candidates) -> PrepareSimplify -> Simplify
+     * (frees slots) -> PropagateSimplify -> pool reduce.
+     */
+    runMergeFrame(): void {
+        const live = this.liveNeighbors; // Classify needs no neighbor buffer
+        this.prepareSimplify.setStorageBuffer('neighbors', live);
+        this.simplify.setStorageBuffer('neighbors', live);
+        this.propagateSimplify.setStorageBuffer('neighbors', live);
+
+        const full = grid2D(Math.ceil(this.capacity / WORKGROUP_SIZE));
+        this.reset.dispatch(1, 1, 1);
+        this.classify.dispatch(full[0], full[1], 1);
+        this.prepareSimplify.dispatch(full[0], full[1], 1);
+        this.simplify.dispatch(full[0], full[1], 1);
+        this.propagateSimplify.dispatch(full[0], full[1], 1);
+        this.runReduce();
+    }
+
     /** Read the live topology back to the CPU for the cross-check (forced flush). */
     async readState(): Promise<OcbtGpuState> {
         const heapBytes = (await this.heapID.read(0, undefined, undefined, true)) as Uint8Array;
@@ -441,6 +537,7 @@ export class OcbtTopologyKernel {
         this.nbB.dispose();
         this.bisectorData.dispose();
         this.classification.dispose();
+        this.simplification.dispose();
         this.allocateBuf.dispose();
         this.propagate.dispose();
         this.memory.dispose();

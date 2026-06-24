@@ -168,6 +168,27 @@ export class OcbtTopology {
         return count;
     }
 
+    /**
+     * Coarsen to a fixpoint: repeatedly conservative-merge every internal node whose
+     * `wantsMerge(heapID, depth)` holds (heapID/depth of the internal node, i.e. the
+     * would-be coarse leaf). Out-of-order attempts that violate conformity are refused
+     * by {@link merge} and retried next pass, so this converges to the conforming
+     * coarse closure. Used by the GPU merge cross-check.
+     */
+    coarsenByPredicate(wantsMerge: (heapID: number, depth: number) => boolean): void {
+        for (let pass = 0; pass < 100000; pass++) {
+            let merged = 0;
+            for (let slot = 0; slot < this.nextFresh; slot++) {
+                if (!this.testBit(this.alive, slot)) continue;
+                if (this.testBit(this.leafBits, slot)) continue; // internal nodes only
+                if (wantsMerge(this.heapID[slot], this.level[slot] + 3)) {
+                    if (this.merge(slot)) merged++;
+                }
+            }
+            if (merged === 0) break;
+        }
+    }
+
     requestSplit(slot: number): boolean {
         if (slot < 0 || slot >= this.nextFresh) return false;
         if (!this.testBit(this.alive, slot)) return false;

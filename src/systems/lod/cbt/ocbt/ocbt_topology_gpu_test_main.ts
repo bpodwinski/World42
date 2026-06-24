@@ -47,6 +47,8 @@ interface Scenario {
     capacity: number;
     /** Per-face target LEVEL (depth-3); face f refines uniformly to this level. */
     faceDepths: number[];
+    /** Optional per-face target to COARSEN to after refining (exercises the merge half). */
+    coarse?: number[];
 }
 
 type V3 = [number, number, number];
@@ -133,6 +135,12 @@ function runOracle(scenario: Scenario): { centroids: string[]; count: number } {
         if (toSplit.length === 0) break;
         topo.splitSlots(toSplit);
     }
+    if (scenario.coarse) {
+        // Coarsen: merge internal nodes whose level >= the face target (their children
+        // are then finer than wanted), to the conforming coarse closure.
+        const coarse = scenario.coarse;
+        topo.coarsenByPredicate((heapID, depth) => depth - 3 >= coarse[faceOf(heapID, depth)]);
+    }
     const leaves = topo.leaves();
     const centroids = leaves.map((l) => centroidKey(l.a as V3, l.l as V3, l.r as V3)).sort();
     return { centroids, count: leaves.length };
@@ -144,7 +152,33 @@ interface GpuRun {
     grewAtCap: boolean;
 }
 
-/** Drive the GPU kernel until the live count is stable for 2 frames (the fixpoint). */
+/** Run split or merge frames until the live count is stable for 2 frames (fixpoint). */
+async function fixpoint(
+    kernel: OcbtTopologyKernel,
+    merge: boolean,
+    maxFrames: number
+): Promise<{ state: OcbtGpuState; frames: number; converged: boolean }> {
+    let prevCount = (await kernel.readState()).count;
+    let stable = 0;
+    let frames = 0;
+    let state = await kernel.readState();
+    for (let f = 0; f < maxFrames; f++) {
+        if (merge) kernel.runMergeFrame();
+        else kernel.runFrame();
+        state = await kernel.readState();
+        frames = f + 1;
+        if (state.count === prevCount) {
+            stable++;
+            if (stable >= 2) return { state, frames, converged: true };
+        } else {
+            stable = 0;
+        }
+        prevCount = state.count;
+    }
+    return { state, frames, converged: false };
+}
+
+/** Drive the GPU kernel: refine to faceDepths, then (optionally) coarsen to `coarse`. */
 async function runGpu(engine: WebGPUEngine, scenario: Scenario): Promise<GpuRun> {
     const kernel = new OcbtTopologyKernel(engine, scenario.capacity);
     try {
@@ -152,25 +186,20 @@ async function runGpu(engine: WebGPUEngine, scenario: Scenario): Promise<GpuRun>
         kernel.uploadSeed(); // self-primes the sum-tree (runReduce) for frame 0
         kernel.setFaceDepths(scenario.faceDepths);
 
-        const maxLevel = Math.max(...scenario.faceDepths);
-        const maxFrames = 6 * maxLevel + 40;
-        let prevCount = 8;
-        let stable = 0;
-        let frames = 0;
-        let state = await kernel.readState();
-        for (let f = 0; f < maxFrames; f++) {
-            kernel.runFrame();
-            state = await kernel.readState();
-            frames = f + 1;
-            if (state.count === prevCount) {
-                stable++;
-                if (stable >= 2) break;
-            } else {
-                stable = 0;
-            }
-            prevCount = state.count;
+        const maxLevel = Math.max(...scenario.faceDepths, ...(scenario.coarse ?? []));
+        const cap = 6 * maxLevel + 40;
+        const split = await fixpoint(kernel, false, cap);
+        let frames = split.frames;
+        let converged = split.converged;
+        let state = split.state;
+        if (scenario.coarse) {
+            kernel.setFaceDepths(scenario.coarse);
+            const merged = await fixpoint(kernel, true, cap);
+            frames += merged.frames;
+            converged = converged && merged.converged;
+            state = merged.state;
         }
-        return { state, frames, grewAtCap: frames >= maxFrames && stable < 2 };
+        return { state, frames, grewAtCap: !converged };
     } finally {
         kernel.dispose();
     }
@@ -283,7 +312,32 @@ function scenarios(): Scenario[] {
         { name: 'one face deep (face0 L6)', capacity: 4096, faceDepths: [6, 0, 0, 0, 0, 0, 0, 0] },
         { name: 'seam step (0:L6 4:L1)', capacity: 4096, faceDepths: [6, 1, 1, 1, 1, 1, 1, 1] },
         { name: 'checker depths', capacity: 8192, faceDepths: [5, 1, 5, 1, 2, 4, 2, 4] },
-        { name: 'deep face1 L9', capacity: 16384, faceDepths: [1, 9, 1, 1, 1, 1, 1, 1] }
+        { name: 'deep face1 L9', capacity: 16384, faceDepths: [1, 9, 1, 1, 1, 1, 1, 1] },
+        // --- merge (simplification) half: refine, then coarsen ---
+        {
+            name: 'MERGE uniform L4 -> L2',
+            capacity: 4096,
+            faceDepths: [4, 4, 4, 4, 4, 4, 4, 4],
+            coarse: [2, 2, 2, 2, 2, 2, 2, 2]
+        },
+        {
+            name: 'MERGE round-trip L3 -> seed',
+            capacity: 4096,
+            faceDepths: [3, 3, 3, 3, 3, 3, 3, 3],
+            coarse: [0, 0, 0, 0, 0, 0, 0, 0]
+        },
+        {
+            name: 'MERGE face0 L6 -> L0',
+            capacity: 4096,
+            faceDepths: [6, 0, 0, 0, 0, 0, 0, 0],
+            coarse: [0, 0, 0, 0, 0, 0, 0, 0]
+        },
+        {
+            name: 'MERGE checker -> flat L1',
+            capacity: 8192,
+            faceDepths: [5, 1, 5, 1, 2, 4, 2, 4],
+            coarse: [1, 1, 1, 1, 1, 1, 1, 1]
+        }
     ];
 }
 
