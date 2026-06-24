@@ -1,10 +1,12 @@
 import {
+    Engine,
     Scene,
     Vector3,
     MeshBuilder,
     PBRMetallicRoughnessMaterial,
     Color3,
     TransformNode,
+    WebGPUEngine,
 } from "@babylonjs/core";
 
 import { FloatingEntity, OriginCamera } from "../../core/camera/camera_manager";
@@ -26,7 +28,7 @@ export type StarJSON = {
     intensity?: number;
 };
 
-export type LodAlgorithm = "cdlod" | "cbt";
+export type LodAlgorithm = "cdlod" | "cbt-cpu" | "cbt-gpu" | "cbt-ocbt";
 
 export type BodyJSON = {
     type: string;
@@ -133,12 +135,8 @@ export type CBTOptions = {
     splitHysteresis?: number;
     /** Noise field (CPU displacement + per-pixel shader); default DEFAULT_NOISE. */
     noise?: NoiseParams;
-    /** Run CBT classify/split/merge/emit in a Rust/WASM worker (default false). */
-    offThreadCbt?: boolean;
-    /** Run the full CBT on the GPU (WebGPU only, Dupuy 2021); default false. */
-    gpuCbt?: boolean;
-    /** Geometry backend selector (supersedes gpuCbt). See CbtPlanetOptions.cbtType. */
-    cbtType?: CbtType;
+    /** Engine reference — needed to check WebGPU availability for gpu/ocbt backends. */
+    engine?: Engine | WebGPUEngine;
     skip?: (name: string, body: LoadedBody) => boolean;
 };
 
@@ -361,12 +359,15 @@ export function createCBTForSystem(
         splitThresholdPx2 = 900,
         splitHysteresis = 0.7,
         noise,
-        offThreadCbt = false,
-        gpuCbt = false,
-        cbtType,
+        engine,
         skip = (_name: string, body: LoadedBody) =>
-            body.bodyType === "star" || body.lodAlgorithm !== "cbt",
+            body.bodyType === "star" ||
+            (body.lodAlgorithm !== "cbt-cpu" &&
+                body.lodAlgorithm !== "cbt-gpu" &&
+                body.lodAlgorithm !== "cbt-ocbt"),
     } = opts;
+
+    const isWebGPU = engine?.isWebGPU ?? false;
 
     for (const [name, body] of loaded.bodies) {
         if (!body.entity) {
@@ -389,6 +390,27 @@ export function createCBTForSystem(
 
         const { pos: starPosWorldDouble, color: starColor, intensity: starIntensity, name: starName } =
             pickNearestStar(body, stars);
+
+        let offThreadCbt = false;
+        let gpuCbt = false;
+        let cbtType: CbtType | undefined;
+
+        switch (body.lodAlgorithm) {
+            case "cbt-cpu":
+                offThreadCbt = true;
+                break;
+            case "cbt-gpu":
+                gpuCbt = isWebGPU;
+                offThreadCbt = !isWebGPU;
+                break;
+            case "cbt-ocbt":
+                if (isWebGPU) {
+                    cbtType = "gpu-ocbt";
+                } else {
+                    offThreadCbt = true;
+                }
+                break;
+        }
 
         const ent = body.entity!;
         const runtime = new CbtPlanet(scene, camera, {

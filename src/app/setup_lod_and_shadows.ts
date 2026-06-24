@@ -37,24 +37,6 @@ import { LodScheduler } from '../systems/lod/lod_scheduler';
  */
 const CBT_QUALITY: CbtQualityLevel = 'high';
 
-/**
- * Run CBT classify/split/merge/emit in a Rust/WASM worker (off the main thread)
- * via the bit-exact Rust port. Default true; set false to use the synchronous TS
- * path (the fallback + golden-test reference). See cbt skill ref 12.
- */
-const OFF_THREAD_CBT = true;
-
-/**
- * Run the full CBT on the GPU (Dupuy 2021 — bit-packed heap + sum-reduction +
- * compute forced-diamond split/merge + implicit-mesh instanced draw), WebGPU only.
- * Watertight (intra-face + octahedron seams) and validated; main-thread cost ~0.
- * Only takes effect when the engine is WebGPU — on WebGL2 it falls back to the
- * worker/sync path. When active it supersedes OFF_THREAD_CBT. Set false to force
- * the worker path everywhere. Known v1 limits: depth capped at 18, and no
- * self-shadow or collisions on GPU planets (see references/13_gpu_cbt_webgpu.md).
- */
-const GPU_CBT = true;
-
 export type LodController = {
     resetNow: () => void;
     /** Aggregate CBT telemetry for the perf HUD / headless capture. */
@@ -95,16 +77,6 @@ export function setupLodAndShadows(
         }
 
         const quality = CBT_QUALITY_PRESETS[CBT_QUALITY];
-        // GPU CBT is WebGPU-only; on WebGL2 it silently falls back to the worker.
-        const gpuCbt = GPU_CBT && engine.isWebGPU;
-        // Dev override: `?cbt=ocbt` selects the pool-CBT concurrent engine (Phase 2
-        // bring-up). Without it, the implicit/worker path is used as before.
-        const cbtTypeOverride =
-            typeof window !== 'undefined' &&
-            new URLSearchParams(window.location.search).get('cbt') === 'ocbt' &&
-            engine.isWebGPU
-                ? ('gpu-ocbt' as const)
-                : undefined;
         const cbt = createCBTForSystem(scene, camera, system, {
             maxDepth: quality.maxDepth,
             maxSplitsPerFrame: 8,
@@ -112,9 +84,7 @@ export function setupLodAndShadows(
             splitThresholdPx2: quality.splitThresholdPx2,
             splitHysteresis: 0.75,
             noise: noiseForQuality(quality),
-            offThreadCbt: OFF_THREAD_CBT,
-            gpuCbt,
-            cbtType: cbtTypeOverride,
+            engine,
         });
 
         for (const [name, planet] of cbt.entries()) {

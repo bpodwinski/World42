@@ -13,7 +13,9 @@ function canonicalType(typeRaw: unknown): string {
 
 function canonicalLodAlgorithm(value: unknown): LodAlgorithm {
     if (typeof value !== 'string') return 'cdlod';
-    return value.toLowerCase().trim() === 'cbt' ? 'cbt' : 'cdlod';
+    const v = value.toLowerCase().trim() as LodAlgorithm;
+    const valid: LodAlgorithm[] = ['cdlod', 'cbt-cpu', 'cbt-gpu', 'cbt-ocbt'];
+    return valid.includes(v) ? v : 'cdlod';
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
