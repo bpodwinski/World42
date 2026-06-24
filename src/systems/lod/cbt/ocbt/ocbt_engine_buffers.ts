@@ -95,7 +95,9 @@ export const BINDING = {
     VISIBLE_INDICES: 14, // array<u32>          (cap)
     MODIFIED_INDICES: 15, // array<u32>          (cap)
     VALIDATION: 16, // array<atomic<u32>>  (1) dev-only
-    UPDATE_PARAMS: 17 // uniform (camera / thresholds / counts)
+    UPDATE_PARAMS: 17, // uniform (camera / thresholds / counts)
+    FACE_TARGET: 18, // array<u32> (8) per-face target level (cross-check predicate)
+    POSITIONS: 19 // array<f32> (9/slot) EvaluateLEB output: 3 unit-dir corners
 } as const;
 
 // --- per-slot strides (u32 words) -----------------------------------------------
@@ -109,6 +111,8 @@ export const HEAP_ID_WORDS = 2;
 export const NEIGHBORS_WORDS = 3;
 /** u32 words per BisectorData slot: pattern + 3 indices + problematic + state + flags + propID. */
 export const BISECTOR_DATA_WORDS = 8;
+/** f32 words per positions slot: 3 corners * (x,y,z). EvaluateLEB output. */
+export const POSITIONS_WORDS = 9;
 
 // Field offsets within a BisectorData slot (u32 index relative to slot*8).
 export const BD_PATTERN = 0;

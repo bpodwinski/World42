@@ -11,7 +11,7 @@ import { FloatingEntity, OriginCamera } from "../../core/camera/camera_manager";
 import { ScaleManager } from "../../core/scale/scale_manager";
 import { TextureManager } from "../../core/io/texture_manager";
 import { ChunkTree } from "../../systems/lod/chunks/chunk_tree";
-import { CbtPlanet } from "../../systems/lod/cbt/cbt_scheduler";
+import { CbtPlanet, type CbtType } from "../../systems/lod/cbt/cbt_scheduler";
 import type { NoiseParams } from "../../systems/lod/cbt/cbt_noise";
 import type { Face } from "../../systems/lod/types";
 import {
@@ -137,6 +137,8 @@ export type CBTOptions = {
     offThreadCbt?: boolean;
     /** Run the full CBT on the GPU (WebGPU only, Dupuy 2021); default false. */
     gpuCbt?: boolean;
+    /** Geometry backend selector (supersedes gpuCbt). See CbtPlanetOptions.cbtType. */
+    cbtType?: CbtType;
     skip?: (name: string, body: LoadedBody) => boolean;
 };
 
@@ -361,6 +363,7 @@ export function createCBTForSystem(
         noise,
         offThreadCbt = false,
         gpuCbt = false,
+        cbtType,
         skip = (_name: string, body: LoadedBody) =>
             body.bodyType === "star" || body.lodAlgorithm !== "cbt",
     } = opts;
@@ -401,6 +404,7 @@ export function createCBTForSystem(
             noise,
             offThreadCbt,
             gpuCbt,
+            cbtType,
             starPosWorldDouble,
             starColor,
             starIntensity,

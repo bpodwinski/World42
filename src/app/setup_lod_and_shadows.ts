@@ -97,6 +97,14 @@ export function setupLodAndShadows(
         const quality = CBT_QUALITY_PRESETS[CBT_QUALITY];
         // GPU CBT is WebGPU-only; on WebGL2 it silently falls back to the worker.
         const gpuCbt = GPU_CBT && engine.isWebGPU;
+        // Dev override: `?cbt=ocbt` selects the pool-CBT concurrent engine (Phase 2
+        // bring-up). Without it, the implicit/worker path is used as before.
+        const cbtTypeOverride =
+            typeof window !== 'undefined' &&
+            new URLSearchParams(window.location.search).get('cbt') === 'ocbt' &&
+            engine.isWebGPU
+                ? ('gpu-ocbt' as const)
+                : undefined;
         const cbt = createCBTForSystem(scene, camera, system, {
             maxDepth: quality.maxDepth,
             maxSplitsPerFrame: 8,
@@ -106,6 +114,7 @@ export function setupLodAndShadows(
             noise: noiseForQuality(quality),
             offThreadCbt: OFF_THREAD_CBT,
             gpuCbt,
+            cbtType: cbtTypeOverride,
         });
 
         for (const [name, planet] of cbt.entries()) {

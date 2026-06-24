@@ -30,7 +30,11 @@ import { createCbtTerrainMaterial } from './cbt_terrain_shader';
 import { getGlobalCbtKernelClient } from './workers/cbt_kernel_client';
 import { WorkerCbtSource } from './workers/cbt_worker_source';
 import { GpuCbtSource } from './gpu/gpu_cbt_source';
+import { OcbtSource } from './ocbt/ocbt_source';
 import type { WebGPUEngine } from '@babylonjs/core';
+
+/** Geometry backend for a CBT planet. */
+export type CbtType = 'cpu' | 'gpu-implicit' | 'gpu-ocbt';
 
 export type CbtPlanetOptions = {
     key: string;
@@ -76,6 +80,13 @@ export type CbtPlanetOptions = {
      * engine is WebGPU; otherwise the worker/sync path is used. Wired in Phase 5.
      */
     gpuCbt?: boolean;
+    /**
+     * Geometry backend selector (supersedes {@link gpuCbt}). 'cpu' = worker/sync,
+     * 'gpu-implicit' = the Dupuy 2021 implicit CBT, 'gpu-ocbt' = the pool-CBT
+     * concurrent engine (HPG 2024). When unset, falls back to gpuCbt ?
+     * 'gpu-implicit' : 'cpu'. WebGPU required for both GPU paths.
+     */
+    cbtType?: CbtType;
 };
 
 /** Per-planet telemetry, refreshed on each {@link CbtPlanet.update}. */
@@ -162,11 +173,42 @@ export class CbtPlanet {
     }
 
     private createSource(opts: CbtPlanetOptions): CbtGeometrySource {
+        const engine = this.scene.getEngine();
+        const cbtType: CbtType = opts.cbtType ?? (opts.gpuCbt ? 'gpu-implicit' : 'cpu');
+
+        // OCBT path (WebGPU only): the pool-CBT concurrent engine (HPG 2024). Cost is
+        // decoupled from subdivision depth (fixed pool capacity). Owns its own
+        // mesh/material; the listener is telemetry-only.
+        if (cbtType === 'gpu-ocbt' && (engine as WebGPUEngine).isWebGPU) {
+            // Phase 2 bring-up constants: a fixed pool plus a screen-space-area metric.
+            // f32 vertex decode caps usable depth (~16); Phase 3 lifts it via f64.
+            const OCBT_CAPACITY = 1 << 16; // 65536 slots
+            const OCBT_MAX_LEVEL = 16;
+            const OCBT_SPLIT_PX = 48; // split when longest edge > 48 px
+            const OCBT_MERGE_PX = 24; // merge < 24 px (hysteresis)
+            return new OcbtSource(
+                engine as WebGPUEngine,
+                this.scene,
+                {
+                    key: opts.key,
+                    renderParent: this.renderParent,
+                    radiusSim: opts.radiusSim,
+                    noise: this.noise,
+                    starColor: this.starColor,
+                    starPosWorldDouble: this.starPosWorldDouble,
+                    capacity: OCBT_CAPACITY,
+                    splitThresholdPx: OCBT_SPLIT_PX,
+                    mergeThresholdPx: OCBT_MERGE_PX,
+                    maxLevel: OCBT_MAX_LEVEL
+                },
+                this.onSourceUpdate
+            );
+        }
+
         // GPU CBT path (WebGPU only): a fully GPU-resident concurrent binary tree
         // rendered as an implicit mesh. Owns its own mesh/material; the listener is
         // called for telemetry only. Supersedes the worker/sync path when enabled.
-        const engine = this.scene.getEngine();
-        if (opts.gpuCbt && (engine as WebGPUEngine).isWebGPU) {
+        if (cbtType === 'gpu-implicit' && (engine as WebGPUEngine).isWebGPU) {
             // The update is now dispatched INDIRECTLY (workgroups = ceil(liveLeaves/256))
             // and the draw is bounded via forcedInstanceCount, so per-frame cost scales
             // with the LIVE leaf count, not 2^maxDepth. The residual O(2^maxDepth) term

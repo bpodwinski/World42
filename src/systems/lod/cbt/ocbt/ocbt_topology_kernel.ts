@@ -29,6 +29,7 @@ import ocbtPoolWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_pool.wgsl';
 import ocbtTopoCommonWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_common.wgsl';
 import ocbtTopoResetWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_reset.compute.wgsl';
 import ocbtTopoClassifyWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_classify.compute.wgsl';
+import ocbtTopoClassifyMetricWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_classify_metric.compute.wgsl';
 import ocbtTopoSplitWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_split.compute.wgsl';
 import ocbtTopoAllocateWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_allocate.compute.wgsl';
 import ocbtTopoCopyNeighborsWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_copy_neighbors.compute.wgsl';
@@ -38,6 +39,8 @@ import ocbtTopoPrepareSimplifyWgsl from '../../../../assets/shaders/cbt/ocbt/ocb
 import ocbtTopoSimplifyWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_simplify.compute.wgsl';
 import ocbtTopoPropagateSimplifyWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_propagate_simplify.compute.wgsl';
 import ocbtPoolReduceWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_pool_reduce.compute.wgsl';
+import ocbtEvalLebWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_eval_leb.wgsl';
+import ocbtTopoEvalLebWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_eval_leb.compute.wgsl';
 import {
     engineLayout,
     engineWgslPreamble,
@@ -45,6 +48,7 @@ import {
     HEAP_ID_WORDS,
     NEIGHBORS_WORDS,
     BISECTOR_DATA_WORDS,
+    POSITIONS_WORDS,
     OCBT_INVALID
 } from './ocbt_engine_buffers';
 import { log2PowerOfTwo } from './ocbt_pool';
@@ -54,6 +58,20 @@ const MAX_DIM = 65535;
 
 /** Number of octahedron faces (root bisectors). */
 export const OCBT_FACE_COUNT = 8;
+
+/** Classify metric source: deterministic per-face predicate (cross-check) or camera. */
+export type OcbtClassifyMode = 'predicate' | 'metric';
+
+/** Camera + threshold inputs for the metric classify (all in planet-local sim units). */
+export interface OcbtCameraParams {
+    camLocal: [number, number, number];
+    radius: number;
+    focalPx: number;
+    splitThresholdPx: number;
+    mergeThresholdPx: number;
+    cullMinDot: number;
+    maxLevel: number;
+}
 
 /** Live topology snapshot read back from the GPU for the cross-check. */
 export interface OcbtGpuState {
@@ -96,6 +114,7 @@ export class OcbtTopologyKernel {
     private readonly propagate: StorageBuffer;
     private readonly memory: StorageBuffer;
     private readonly faceTargets: StorageBuffer;
+    private readonly positions: StorageBuffer;
 
     // Passes.
     private readonly reduce: ComputeShader;
@@ -109,18 +128,25 @@ export class OcbtTopologyKernel {
     private readonly prepareSimplify: ComputeShader;
     private readonly simplify: ComputeShader;
     private readonly propagateSimplify: ComputeShader;
+    private readonly evalLeb: ComputeShader;
 
     /** One UBO per reduce level 0..depth (index `depth` = leaf prepass). */
     private readonly levelParams: UniformBuffer[] = [];
+
+    /** Classify metric source. */
+    private readonly classifyMode: OcbtClassifyMode;
+    /** Camera/threshold UBO for the metric classify (null in predicate mode). */
+    private readonly classifyParams: UniformBuffer | null = null;
 
     /** Ping-pong parity: 0 => current = nbA, 1 => current = nbB. */
     private parity = 0;
     /** The neighbor buffer currently holding the live topology (read back here). */
     private liveNeighbors: StorageBuffer;
 
-    constructor(engine: WebGPUEngine, capacity: number) {
+    constructor(engine: WebGPUEngine, capacity: number, classifyMode: OcbtClassifyMode = 'predicate') {
         this.engine = engine;
         this.capacity = capacity;
+        this.classifyMode = classifyMode;
         this.depth = log2PowerOfTwo(capacity);
         const layout = engineLayout(capacity);
         const preamble = engineWgslPreamble(capacity);
@@ -141,6 +167,7 @@ export class OcbtTopologyKernel {
         this.propagate = mk(layout.propagateBytes, STORAGE | WRITE, 'ocbt_topo_propagate');
         this.memory = mk(layout.memoryBytes, STORAGE | WRITE, 'ocbt_topo_memory');
         this.faceTargets = mk(OCBT_FACE_COUNT * 4, STORAGE | WRITE, 'ocbt_topo_facetargets');
+        this.positions = mk(capacity * POSITIONS_WORDS * 4, STORAGE | READ | WRITE, 'ocbt_topo_positions');
         this.liveNeighbors = this.nbA;
 
         const onErr = (tag: string) => (_e: unknown, errors: string) => {
@@ -189,25 +216,56 @@ export class OcbtTopologyKernel {
         this.reset.setStorageBuffer('propagate', this.propagate);
         this.reset.setStorageBuffer('memory', this.memory);
 
-        // --- classify ---
-        this.classify = new ComputeShader(
-            'ocbt_topo_classify',
-            engine,
-            { computeSource: compose(ocbtU64Wgsl, ocbtTopoCommonWgsl, ocbtTopoClassifyWgsl) },
-            {
-                bindingsMapping: {
-                    heapID: { group: 0, binding: 2 },
-                    bisectorData: { group: 0, binding: 5 },
-                    classification: { group: 0, binding: 6 },
-                    faceTarget: { group: 0, binding: 18 }
+        // --- classify (predicate: faceTarget; metric: camera screen-space) ---
+        if (classifyMode === 'metric') {
+            this.classify = new ComputeShader(
+                'ocbt_topo_classify_metric',
+                engine,
+                { computeSource: compose(ocbtU64Wgsl, ocbtTopoCommonWgsl, ocbtTopoClassifyMetricWgsl) },
+                {
+                    bindingsMapping: {
+                        heapID: { group: 0, binding: 2 },
+                        bisectorData: { group: 0, binding: 5 },
+                        classification: { group: 0, binding: 6 },
+                        cp: { group: 0, binding: 17 },
+                        positions: { group: 0, binding: 19 }
+                    }
                 }
-            }
-        );
-        this.classify.onError = onErr('classify');
-        this.classify.setStorageBuffer('heapID', this.heapID);
-        this.classify.setStorageBuffer('bisectorData', this.bisectorData);
-        this.classify.setStorageBuffer('classification', this.classification);
-        this.classify.setStorageBuffer('faceTarget', this.faceTargets);
+            );
+            this.classify.onError = onErr('classify(metric)');
+            this.classifyParams = new UniformBuffer(engine, undefined, undefined, 'ocbt_classify_params');
+            this.classifyParams.addUniform('camRadius', 4);
+            this.classifyParams.addUniform('thresh', 4);
+            this.classifyParams.addUniform('limits', 4);
+            this.classifyParams.updateFloat4('camRadius', 0, 0, 0, 1);
+            this.classifyParams.updateFloat4('thresh', 1, 1e9, 1e9, -1);
+            this.classifyParams.updateFloat4('limits', 0, 0, 0, 0);
+            this.classifyParams.update();
+            this.classify.setStorageBuffer('heapID', this.heapID);
+            this.classify.setStorageBuffer('bisectorData', this.bisectorData);
+            this.classify.setStorageBuffer('classification', this.classification);
+            this.classify.setStorageBuffer('positions', this.positions);
+            this.classify.setUniformBuffer('cp', this.classifyParams);
+        } else {
+            this.classify = new ComputeShader(
+                'ocbt_topo_classify',
+                engine,
+                { computeSource: compose(ocbtU64Wgsl, ocbtTopoCommonWgsl, ocbtTopoClassifyWgsl) },
+                {
+                    bindingsMapping: {
+                        heapID: { group: 0, binding: 2 },
+                        bisectorData: { group: 0, binding: 5 },
+                        classification: { group: 0, binding: 6 },
+                        faceTarget: { group: 0, binding: 18 }
+                    }
+                }
+            );
+            this.classify.onError = onErr('classify');
+            this.classify.setStorageBuffer('heapID', this.heapID);
+            this.classify.setStorageBuffer('bisectorData', this.bisectorData);
+            this.classify.setStorageBuffer('classification', this.classification);
+            this.classify.setStorageBuffer('faceTarget', this.faceTargets);
+        }
 
         // --- split ---
         this.split = new ComputeShader(
@@ -368,6 +426,22 @@ export class OcbtTopologyKernel {
         this.propagateSimplify.setStorageBuffer('bisectorData', this.bisectorData);
         this.propagateSimplify.setStorageBuffer('propagate', this.propagate);
 
+        // --- eval-leb (decode each live slot's heap id -> 3 unit-dir corners) ---
+        this.evalLeb = new ComputeShader(
+            'ocbt_topo_eval_leb',
+            engine,
+            { computeSource: compose(ocbtU64Wgsl, ocbtEvalLebWgsl, ocbtTopoCommonWgsl, ocbtTopoEvalLebWgsl) },
+            {
+                bindingsMapping: {
+                    heapID: { group: 0, binding: 2 },
+                    positions: { group: 0, binding: 19 }
+                }
+            }
+        );
+        this.evalLeb.onError = onErr('evalLeb');
+        this.evalLeb.setStorageBuffer('heapID', this.heapID);
+        this.evalLeb.setStorageBuffer('positions', this.positions);
+
         // One UBO per reduce level (0..depth). Reusing one UBO across same-submit
         // dispatches coalesces to the last value, so each level needs its own.
         for (let level = 0; level <= this.depth; level++) {
@@ -391,7 +465,8 @@ export class OcbtTopologyKernel {
             this.propagateBisect,
             this.prepareSimplify,
             this.simplify,
-            this.propagateSimplify
+            this.propagateSimplify,
+            this.evalLeb
         ];
         const end = performance.now() + timeoutMs;
         while (!shaders.every((s) => s.isReady())) {
@@ -436,6 +511,17 @@ export class OcbtTopologyKernel {
             throw new Error(`OcbtTopologyKernel.setFaceDepths needs ${OCBT_FACE_COUNT} levels`);
         }
         this.faceTargets.update(new Uint32Array(levels.map((l) => l >>> 0)));
+    }
+
+    /** Set the camera + thresholds for the metric classify (metric mode only). */
+    setCameraParams(p: OcbtCameraParams): void {
+        if (!this.classifyParams) {
+            throw new Error('OcbtTopologyKernel.setCameraParams requires classifyMode "metric"');
+        }
+        this.classifyParams.updateFloat4('camRadius', p.camLocal[0], p.camLocal[1], p.camLocal[2], p.radius);
+        this.classifyParams.updateFloat4('thresh', p.focalPx, p.splitThresholdPx, p.mergeThresholdPx, p.cullMinDot);
+        this.classifyParams.updateFloat4('limits', p.maxLevel, 0, 0, 0);
+        this.classifyParams.update();
     }
 
     /** Rebuild the pool sum-tree from the bitfield (leaf prepass, then levels D-1..0). */
@@ -505,6 +591,35 @@ export class OcbtTopologyKernel {
         this.runReduce();
     }
 
+    /** The per-slot heap id buffer (flat u32, 2/slot). Render path reads it to gate dead slots. */
+    get heapBuffer(): StorageBuffer {
+        return this.heapID;
+    }
+
+    /** The EvaluateLEB output buffer (f32, 9/slot: 3 unit-dir corners). Render path reads it. */
+    get positionsBuffer(): StorageBuffer {
+        return this.positions;
+    }
+
+    /** Decode every live slot's heap id to 3 unit-dir corners into the positions buffer. */
+    runEvalLeb(): void {
+        const full = grid2D(Math.ceil(this.capacity / WORKGROUP_SIZE));
+        this.evalLeb.dispatch(full[0], full[1], 1);
+    }
+
+    /** Read the positions buffer back (capacity * 9 f32: c0.xyz,c1.xyz,c2.xyz per slot). */
+    async readPositions(): Promise<Float32Array> {
+        const bytes = (await this.positions.read(0, undefined, undefined, true)) as Uint8Array;
+        return new Float32Array(bytes.buffer, bytes.byteOffset, bytes.byteLength >> 2);
+    }
+
+    /** Cheap live-slot count readback (pool_tree[1]) for HUD telemetry. */
+    async readCount(): Promise<number> {
+        const treeBytes = (await this.poolTree.read(0, 16, undefined, true)) as Uint8Array;
+        const tu = new Uint32Array(treeBytes.buffer, treeBytes.byteOffset, treeBytes.byteLength >> 2);
+        return tu[1];
+    }
+
     /** Read the live topology back to the CPU for the cross-check (forced flush). */
     async readState(): Promise<OcbtGpuState> {
         const heapBytes = (await this.heapID.read(0, undefined, undefined, true)) as Uint8Array;
@@ -530,6 +645,7 @@ export class OcbtTopologyKernel {
     dispose(): void {
         for (const ubo of this.levelParams) ubo.dispose();
         this.levelParams.length = 0;
+        this.classifyParams?.dispose();
         this.poolBitfield.dispose();
         this.poolTree.dispose();
         this.heapID.dispose();
@@ -542,5 +658,6 @@ export class OcbtTopologyKernel {
         this.propagate.dispose();
         this.memory.dispose();
         this.faceTargets.dispose();
+        this.positions.dispose();
     }
 }

@@ -21,7 +21,7 @@
 import { EngineManager } from '../../../../core/render/engine_manager';
 import { OcbtTopology } from './ocbt_topology';
 import { OcbtTopologyKernel, type OcbtGpuState } from './ocbt_topology_kernel';
-import { lebDepth } from './ocbt_leb';
+import { ocbtCorners, ocbtFaceOf, type V3 } from './ocbt_eval_leb';
 import type { WebGPUEngine } from '@babylonjs/core';
 
 const INVALID = OcbtTopologyKernel.INVALID;
@@ -51,8 +51,6 @@ interface Scenario {
     coarse?: number[];
 }
 
-type V3 = [number, number, number];
-
 function norm(x: number, y: number, z: number): V3 {
     const inv = 1 / Math.sqrt(x * x + y * y + z * z);
     return [x * inv, y * inv, z * inv];
@@ -68,59 +66,11 @@ function centroidKey(a: V3, b: V3, c: V3): string {
     return key(norm(a[0] + b[0] + c[0], a[1] + b[1] + c[1], a[2] + b[2] + c[2]));
 }
 
-function faceOf(heapID: number, depth: number): number {
-    return Math.floor(heapID / Math.pow(2, depth - 3)) - 8;
-}
-
-// Consistently-wound octahedron face corners {apex, left, right} matching the GPU
-// seed adjacency in ocbt_engine_buffers (top faces 0..3 have l/r swapped vs
-// lebFaceCorners; bottom faces 4..7 identical). Every shared edge is traversed in
-// opposite directions by its two faces, as the reference engine requires.
-const GPU_FACE_CORNERS: ReadonlyArray<{ a: V3; l: V3; r: V3 }> = [
-    { a: [0, 1, 0], l: [0, 0, 1], r: [1, 0, 0] },
-    { a: [0, 1, 0], l: [-1, 0, 0], r: [0, 0, 1] },
-    { a: [0, 1, 0], l: [0, 0, -1], r: [-1, 0, 0] },
-    { a: [0, 1, 0], l: [1, 0, 0], r: [0, 0, -1] },
-    { a: [0, -1, 0], l: [1, 0, 0], r: [0, 0, 1] },
-    { a: [0, -1, 0], l: [0, 0, 1], r: [-1, 0, 0] },
-    { a: [0, -1, 0], l: [-1, 0, 0], r: [0, 0, -1] },
-    { a: [0, -1, 0], l: [0, 0, -1], r: [1, 0, 0] }
-];
-
-/**
- * Decode a GPU heap id to its three unit-sphere corners in the REFERENCE leb
- * convention (the convention the ported engine uses). Mirrors leb.hlsl's splitting
- * matrix (bit0: v0'=v2, v1'=mid(v0,v2), v2'=v1; bit1: v0'=v1, v1'=mid, v2'=v0) with the
- * midpoint normalized each step (sphere). CRITICAL: seed v0=right, v1=apex, v2=left
- * (the orientation that makes the reference per-bit rule consistent with the seed's
- * neighbor lanes), over the consistently-wound GPU_FACE_CORNERS.
- */
-function gpuCorners(heapID: number): [V3, V3, V3] {
-    const depth = lebDepth(heapID);
-    const face = faceOf(heapID, depth);
-    const fc = GPU_FACE_CORNERS[face];
-    let v0: V3 = [...fc.r] as V3;
-    let v1: V3 = [...fc.a] as V3;
-    let v2: V3 = [...fc.l] as V3;
-    const steps = depth - 3;
-    for (let s = 0; s < steps; s++) {
-        const bit = Math.floor(heapID / Math.pow(2, steps - 1 - s)) % 2;
-        const m = norm(v0[0] + v2[0], v0[1] + v2[1], v0[2] + v2[2]);
-        if (bit === 0) {
-            const nv0 = v2; // v0'=v2
-            v2 = v1; // v2'=v1
-            v0 = nv0;
-            v1 = m;
-        } else {
-            const nv0 = v1; // v0'=v1
-            const nv2 = v0; // v2'=v0
-            v0 = nv0;
-            v1 = m;
-            v2 = nv2;
-        }
-    }
-    return [v0, v1, v2];
-}
+// Convention-invariant face index (top heap bits) — shared with the GPU decoder.
+const faceOf = ocbtFaceOf;
+// `gpuCorners` (the proven reference-convention decoder) now lives in the shared
+// ocbt_eval_leb module; the GPU's ocbt_eval_leb.wgsl is its bit-for-bit twin.
+const gpuCorners = ocbtCorners;
 
 /** Drive the CPU oracle to its conforming fixpoint under the per-face predicate. */
 function runOracle(scenario: Scenario): { centroids: string[]; count: number } {
@@ -148,6 +98,8 @@ function runOracle(scenario: Scenario): { centroids: string[]; count: number } {
 
 interface GpuRun {
     state: OcbtGpuState;
+    /** EvaluateLEB output: capacity * 9 f32 (c0.xyz, c1.xyz, c2.xyz per slot). */
+    positions: Float32Array;
     frames: number;
     grewAtCap: boolean;
 }
@@ -199,7 +151,11 @@ async function runGpu(engine: WebGPUEngine, scenario: Scenario): Promise<GpuRun>
             converged = converged && merged.converged;
             state = merged.state;
         }
-        return { state, frames, grewAtCap: !converged };
+        // Decode the converged topology to corners on the GPU (the render path's
+        // EvaluateLEB) so the WGSL decoder can be cross-checked against the TS.
+        kernel.runEvalLeb();
+        const positions = await kernel.readPositions();
+        return { state, positions, frames, grewAtCap: !converged };
     } finally {
         kernel.dispose();
     }
@@ -286,6 +242,30 @@ function checkWatertight(gpu: OcbtGpuState): string | null {
     return null;
 }
 
+/**
+ * D. The GPU EvaluateLEB decoder (ocbt_eval_leb.wgsl) matches the proven TS decoder
+ * (ocbtCorners) for every live slot — proves the render-path decoder bit-for-bit.
+ */
+function checkEvalLeb(gpu: OcbtGpuState, positions: Float32Array): string | null {
+    const tol = 1e-5; // f32 GPU vs f64 TS spherical decode
+    for (let s = 0; s < gpu.heapID.length; s++) {
+        const h = gpu.heapID[s];
+        if (h === 0) continue;
+        const tri = ocbtCorners(h);
+        const b = s * 9;
+        for (let c = 0; c < 3; c++) {
+            for (let k = 0; k < 3; k++) {
+                const got = positions[b + c * 3 + k];
+                const want = tri[c][k];
+                if (Math.abs(got - want) > tol) {
+                    return `slot ${s} (h=${h}) corner ${c}.${k}: GPU=${got.toFixed(6)} TS=${want.toFixed(6)}`;
+                }
+            }
+        }
+    }
+    return null;
+}
+
 async function runScenario(engine: WebGPUEngine, scenario: Scenario): Promise<CaseResult> {
     const oracle = runOracle(scenario);
     const run = await runGpu(engine, scenario);
@@ -295,13 +275,15 @@ async function runScenario(engine: WebGPUEngine, scenario: Scenario): Promise<Ca
     const a = checkGeometry(gpuC, oracle.centroids);
     const b = checkReciprocity(gpu);
     const c = checkWatertight(gpu);
-    if (!a && !b && !c) {
-        return { name: scenario.name, pass: true, detail: `leaves=${oracle.count} frames=${run.frames} A+B+C OK` };
+    const d = checkEvalLeb(gpu, run.positions);
+    if (!a && !b && !c && !d) {
+        return { name: scenario.name, pass: true, detail: `leaves=${oracle.count} frames=${run.frames} A+B+C+D OK` };
     }
     const parts: string[] = [`frames=${run.frames}${run.grewAtCap ? ' GREW@CAP' : ''}`, `gpu=${gpuC.length} oracle=${oracle.count}`];
     if (a) parts.push(`A:${a}`);
     if (b) parts.push(`B:${b}`);
     if (c) parts.push(`C:${c}`);
+    if (d) parts.push(`D:${d}`);
     return { name: scenario.name, pass: false, detail: parts.join(' | ') };
 }
 
