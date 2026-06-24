@@ -247,12 +247,21 @@ export function engineLayout(
 }
 
 // --- octahedron SEED (8 root bisectors, heapIDs 8..15) --------------------------
-// Mirror of ROOT_NEIGHBORS in ocbt_topology.ts, in World42 [BASE,LEFT,RIGHT] order.
+// [BASE,LEFT,RIGHT] adjacency for a CONSISTENTLY-ORIENTED octahedron (every shared
+// edge is traversed in OPPOSITE directions by its two faces — standard manifold
+// orientation). This is REQUIRED by the ported reference engine: BisectElement's
+// `evaluate_neighbors` assumes a BASE-twin shares the split edge FLIPPED, which only
+// holds for consistent orientation. World42's ocbt_topology.ts ROOT_NEIGHBORS (and
+// lebFaceCorners) wind the 4 TOP faces opposite to the 4 BOTTOM faces, so vs that
+// mirror the top faces (0..3) have LEFT<->RIGHT swapped here; the bottom faces (4..7)
+// are identical. The matching consistently-wound face corners (top faces' l<->r
+// swapped) live in the GPU eval-leb decoder. The CPU oracle keeps its own convention;
+// the cross-check compares geometry, so both still describe the same octahedron.
 const ROOT_NEIGHBORS_W42: ReadonlyArray<readonly [number, number, number]> = [
-    [4, 3, 1],
-    [5, 0, 2],
-    [6, 1, 3],
-    [7, 2, 0],
+    [4, 1, 3],
+    [5, 2, 0],
+    [6, 3, 1],
+    [7, 0, 2],
     [0, 7, 5],
     [1, 4, 6],
     [2, 5, 7],

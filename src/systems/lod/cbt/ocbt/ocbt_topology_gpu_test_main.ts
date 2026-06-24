@@ -21,7 +21,7 @@
 import { EngineManager } from '../../../../core/render/engine_manager';
 import { OcbtTopology } from './ocbt_topology';
 import { OcbtTopologyKernel, type OcbtGpuState } from './ocbt_topology_kernel';
-import { lebDecode, lebDepth } from './ocbt_leb';
+import { lebDepth } from './ocbt_leb';
 import type { WebGPUEngine } from '@babylonjs/core';
 
 const INVALID = OcbtTopologyKernel.INVALID;
@@ -70,15 +70,54 @@ function faceOf(heapID: number, depth: number): number {
     return Math.floor(heapID / Math.pow(2, depth - 3)) - 8;
 }
 
+// Consistently-wound octahedron face corners {apex, left, right} matching the GPU
+// seed adjacency in ocbt_engine_buffers (top faces 0..3 have l/r swapped vs
+// lebFaceCorners; bottom faces 4..7 identical). Every shared edge is traversed in
+// opposite directions by its two faces, as the reference engine requires.
+const GPU_FACE_CORNERS: ReadonlyArray<{ a: V3; l: V3; r: V3 }> = [
+    { a: [0, 1, 0], l: [0, 0, 1], r: [1, 0, 0] },
+    { a: [0, 1, 0], l: [-1, 0, 0], r: [0, 0, 1] },
+    { a: [0, 1, 0], l: [0, 0, -1], r: [-1, 0, 0] },
+    { a: [0, 1, 0], l: [1, 0, 0], r: [0, 0, -1] },
+    { a: [0, -1, 0], l: [1, 0, 0], r: [0, 0, 1] },
+    { a: [0, -1, 0], l: [0, 0, 1], r: [-1, 0, 0] },
+    { a: [0, -1, 0], l: [-1, 0, 0], r: [0, 0, -1] },
+    { a: [0, -1, 0], l: [0, 0, -1], r: [1, 0, 0] }
+];
+
 /**
- * Decode a GPU heap id to its three unit-sphere corners. Empirically the GPU's
- * combinatorial split over the World42 octahedron seed produces geometry consistent
- * with ocbt_leb (the oracle's convention), so we decode both sides with lebDecode and
- * compare geometry directly.
+ * Decode a GPU heap id to its three unit-sphere corners in the REFERENCE leb
+ * convention (the convention the ported engine uses). Mirrors leb.hlsl's splitting
+ * matrix (bit0: v0'=v2, v1'=mid(v0,v2), v2'=v1; bit1: v0'=v1, v1'=mid, v2'=v0) with the
+ * midpoint normalized each step (sphere). CRITICAL: seed v0=right, v1=apex, v2=left
+ * (the orientation that makes the reference per-bit rule consistent with the seed's
+ * neighbor lanes), over the consistently-wound GPU_FACE_CORNERS.
  */
 function gpuCorners(heapID: number): [V3, V3, V3] {
-    const t = lebDecode(heapID, lebDepth(heapID));
-    return [t.a as V3, t.l as V3, t.r as V3];
+    const depth = lebDepth(heapID);
+    const face = faceOf(heapID, depth);
+    const fc = GPU_FACE_CORNERS[face];
+    let v0: V3 = [...fc.r] as V3;
+    let v1: V3 = [...fc.a] as V3;
+    let v2: V3 = [...fc.l] as V3;
+    const steps = depth - 3;
+    for (let s = 0; s < steps; s++) {
+        const bit = Math.floor(heapID / Math.pow(2, steps - 1 - s)) % 2;
+        const m = norm(v0[0] + v2[0], v0[1] + v2[1], v0[2] + v2[2]);
+        if (bit === 0) {
+            const nv0 = v2; // v0'=v2
+            v2 = v1; // v2'=v1
+            v0 = nv0;
+            v1 = m;
+        } else {
+            const nv0 = v1; // v0'=v1
+            const nv2 = v0; // v2'=v0
+            v0 = nv0;
+            v1 = m;
+            v2 = nv2;
+        }
+    }
+    return [v0, v1, v2];
 }
 
 /** Drive the CPU oracle to its conforming fixpoint under the per-face predicate. */
@@ -239,6 +278,7 @@ async function runScenario(engine: WebGPUEngine, scenario: Scenario): Promise<Ca
 
 function scenarios(): Scenario[] {
     return [
+        { name: 'uniform L1 all faces', capacity: 4096, faceDepths: [1, 1, 1, 1, 1, 1, 1, 1] },
         { name: 'uniform L2 all faces', capacity: 4096, faceDepths: [2, 2, 2, 2, 2, 2, 2, 2] },
         { name: 'one face deep (face0 L6)', capacity: 4096, faceDepths: [6, 0, 0, 0, 0, 0, 0, 0] },
         { name: 'seam step (0:L6 4:L1)', capacity: 4096, faceDepths: [6, 1, 1, 1, 1, 1, 1, 1] },

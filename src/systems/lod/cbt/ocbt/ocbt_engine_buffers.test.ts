@@ -94,10 +94,10 @@ describe('ocbt_engine_buffers — octahedron seed', () => {
     });
     it('remaps ROOT_NEIGHBORS [BASE,LEFT,RIGHT] -> reference (n0=LEFT,n1=RIGHT,n2=BASE)', () => {
         const seed = buildEngineSeed(1 << 18);
-        // Face 0 ROOT_NEIGHBORS = [base=4, left=3, right=1].
+        // Face 0 consistently-oriented adjacency = [base=4, left=1, right=3].
         const o = 0 * NEIGHBORS_WORDS;
-        expect(seed.neighbors[o + N0]).toBe(3); // LEFT
-        expect(seed.neighbors[o + N1]).toBe(1); // RIGHT
+        expect(seed.neighbors[o + N0]).toBe(1); // LEFT
+        expect(seed.neighbors[o + N1]).toBe(3); // RIGHT
         expect(seed.neighbors[o + N2]).toBe(4); // BASE / twin
     });
     it('seed neighbor twins (n2) are reciprocal across the 4 base diamonds', () => {
