@@ -25,7 +25,7 @@ import {
     type CbtSourceStats,
     type LocalCbtSourceOptions,
 } from './cbt_geometry_source';
-import { DEFAULT_NOISE, type NoiseParams } from './cbt_noise';
+import { DEFAULT_NOISE, fbmNoise, type NoiseParams } from './cbt_noise';
 import { createCbtTerrainMaterial } from './cbt_terrain_shader';
 import { getGlobalCbtKernelClient } from './workers/cbt_kernel_client';
 import { WorkerCbtSource } from './workers/cbt_worker_source';
@@ -313,6 +313,54 @@ export class CbtPlanet {
         return Vector3.Distance(camera.doublepos, this.entity.doublepos);
     }
 
+    private readonly tmpCollOffset = new Vector3();
+    private readonly tmpCollDir = new Vector3();
+    private readonly tmpCollInv = new Matrix();
+
+    /**
+     * Analytic hard-floor ground collision. The CBT/OCBT surface has no CPU mesh
+     * (it lives only in GPU buffers / is procedurally bounded), so Babylon mesh
+     * collision can't see it. Instead we clamp the camera against the SAME fbm
+     * height field the shader renders:
+     *
+     *   groundRadius(dir) = radiusSim + fbmNoise(dir)   (planet-LOCAL rotating frame)
+     *
+     * When the camera is below ground + clearance, it is pushed radially out to
+     * the floor. Returns true if it moved. Cheap early-rejects for far planets.
+     * Exact at any LOD depth — no GPU readback. (CDLOD planets use a different,
+     * worker-side height field and are not handled here.)
+     */
+    resolveGroundCollision(clearanceSim: number): boolean {
+        const center = this.entity.doublepos;
+        const cam = this.camera.doublepos;
+        this.tmpCollOffset.copyFrom(cam).subtractInPlace(center);
+        const dist = this.tmpCollOffset.length();
+        if (dist < 1e-6) return false;
+        // Above the highest possible ground + clearance: nothing to do.
+        const maxGround = this.radiusSim + this.noise.globalAmplitude + clearanceSim;
+        if (dist >= maxGround) return false;
+        // Local (rotating-frame) direction = inverse(renderParent rotation) * worldOffset.
+        // TransformNormal uses the matrix' 3x3 only, so the per-frame render-space
+        // translation is irrelevant; the rotation matches the shader's mat3(world).
+        this.renderParent.getWorldMatrix().invertToRef(this.tmpCollInv);
+        Vector3.TransformNormalToRef(this.tmpCollOffset, this.tmpCollInv, this.tmpCollDir);
+        this.tmpCollDir.normalize();
+        const groundR =
+            this.radiusSim +
+            fbmNoise(this.tmpCollDir.x, this.tmpCollDir.y, this.tmpCollDir.z, this.noise);
+        const minDist = groundR + clearanceSim;
+        if (dist >= minDist) return false;
+        // Push the camera radially out (world frame) to the floor; length is
+        // preserved by the rigid local<->world transform, so this lands at minDist.
+        const scale = minDist / dist;
+        this.camera.doublepos.set(
+            center.x + this.tmpCollOffset.x * scale,
+            center.y + this.tmpCollOffset.y * scale,
+            center.z + this.tmpCollOffset.z * scale
+        );
+        return true;
+    }
+
     resetNow(): void {
         this.source.reset();
     }
@@ -528,6 +576,17 @@ export class CbtScheduler {
             agg.vertexCount += s.lastVertexCount;
         }
         return agg;
+    }
+
+    /**
+     * Analytic hard-floor ground collision against the CBT/OCBT planets. The
+     * camera can only be inside one planet's surface at a time, so we stop at the
+     * first that clamps. Call once per frame AFTER the camera control has moved.
+     */
+    resolveGroundCollision(clearanceSim: number): void {
+        for (const planet of this.planets) {
+            if (planet.resolveGroundCollision(clearanceSim)) break;
+        }
     }
 
     /** Per-planet centers/radii for deterministic headless capture paths. */

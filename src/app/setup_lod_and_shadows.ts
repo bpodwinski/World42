@@ -45,6 +45,8 @@ export type LodController = {
     getCbtPlanetInfo: () => CbtPlanetInfo[];
     /** Same, for CDLOD planets — lets the perf harness locate any backend's planet. */
     getCdlodPlanetInfo: () => CbtPlanetInfo[];
+    /** Analytic hard-floor camera-vs-ground collision for CBT/OCBT planets. */
+    resolveGroundCollision: (clearanceSim: number) => void;
 };
 
 export type LodSetupResult = {
@@ -135,6 +137,8 @@ export function setupLodAndShadows(
                 ],
                 radiusSim: planet.radiusSim,
             })),
+        resolveGroundCollision: (clearanceSim: number) =>
+            cbtScheduler.resolveGroundCollision(clearanceSim),
     };
 
     const mergedShadowPlanets = new Map<string, PlanetShadowSource>();
