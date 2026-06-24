@@ -24,8 +24,16 @@ struct ClassifyParams {
 @group(0) @binding(17) var<uniform>             cp             : ClassifyParams;
 @group(0) @binding(19) var<storage, read>       positions      : array<f32>;
 
-fn corner(slot : u32, c : u32) -> vec3<f32> {
-    let b = slot * 9u + c * 3u;
+// EvaluateLEB (f64 variant) writes 18 f32/slot: per corner [relative.xyz, dir.xyz].
+// `relative` is the camera-relative planet-local position (so |relative| = distance to
+// camera, and corner-to-corner differences are exact edge vectors). `dir` is the unit
+// surface direction (for the backside cull).
+fn corner_rel(slot : u32, c : u32) -> vec3<f32> {
+    let b = slot * 18u + c * 6u;
+    return vec3<f32>(positions[b], positions[b + 1u], positions[b + 2u]);
+}
+fn corner_dir(slot : u32, c : u32) -> vec3<f32> {
+    let b = slot * 18u + c * 6u + 3u;
     return vec3<f32>(positions[b], positions[b + 1u], positions[b + 2u]);
 }
 
@@ -47,7 +55,6 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>,
     bisectorData[b + BD_PROBLEMATIC] = OCBT_INVALID;
     bisectorData[b + BD_FLAGS]       = FLAG_VISIBLE;
 
-    let radius = cp.camRadius.w;
     let cam = cp.camRadius.xyz;
     let focal = cp.thresh.x;
     let splitT = cp.thresh.y;
@@ -55,23 +62,21 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>,
     let cullMinDot = cp.thresh.w;
     let maxLevel = cp.limits.x;
 
-    let d0 = corner(id, 0u);
-    let d1 = corner(id, 1u);
-    let d2 = corner(id, 2u);
-    let p0 = d0 * radius;
-    let p1 = d1 * radius;
-    let p2 = d2 * radius;
-    let centroidDir = normalize(d0 + d1 + d2);
-    let worldC = centroidDir * radius;
+    // Camera-relative corner positions (|rel| = distance to camera).
+    let r0 = corner_rel(id, 0u);
+    let r1 = corner_rel(id, 1u);
+    let r2 = corner_rel(id, 2u);
+    let centroidRel = (r0 + r1 + r2) * (1.0 / 3.0);
 
-    // Backside / horizon cull: leaves whose centroid faces away from the camera.
+    // Backside / horizon cull from the unit surface directions.
+    let centroidDir = normalize(corner_dir(id, 0u) + corner_dir(id, 1u) + corner_dir(id, 2u));
     let camDir = normalize(cam);
     let facing = dot(centroidDir, camDir);
     let culled = facing < cullMinDot;
 
-    // Longest-edge screen size in pixels.
-    let e = max(max(length(p0 - p1), length(p1 - p2)), length(p2 - p0));
-    let dist = max(length(worldC - cam), 1.0);
+    // Longest-edge screen size in pixels (edge vectors are exact corner differences).
+    let e = max(max(length(r0 - r1), length(r1 - r2)), length(r2 - r0));
+    let dist = max(length(centroidRel), 1.0);
     let screenPx = e * focal / dist;
 
     if (!culled && screenPx > splitT && level < maxLevel) {

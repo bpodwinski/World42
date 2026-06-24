@@ -64,12 +64,19 @@ function vertexSource(opts: OcbtRenderOptions): string {
     return [
         bakedHeader(opts),
         'var<storage, read> ocbtHeap : array<u32>;', // 2 u32/slot (u64 lo,hi)
-        'var<storage, read> ocbtPos : array<f32>;', // 9 f32/slot (3 unit-dir corners)
+        'var<storage, read> ocbtPos : array<f32>;', // 18 f32/slot: per corner [relative.xyz, dir.xyz]
         'var<storage, read> cbtPerm : array<u32>;',
         cbtNoiseWgsl,
-        'uniform worldViewProjection : mat4x4<f32>;',
+        // Camera-relative path (Phase 3): the EvaluateLEB pass already produced each
+        // corner CAMERA-RELATIVE in df64 then narrowed, so the per-vertex magnitude is
+        // small and precise. renderPos = mat3(world) * relative (the planet-center->camera
+        // translation cancels exactly: T_render = -R*camLocal, so R*localPos + T_render =
+        // R*(localPos - camLocal) = R*relative). We therefore need viewProjection + the
+        // world ROTATION/SCALE only, NOT worldViewProjection (which re-adds the big offset).
+        'uniform viewProjection : mat4x4<f32>;',
+        'uniform world : mat4x4<f32>;',
         'uniform logarithmicDepthConstant : f32;',
-        'varying vLocalPos : vec3<f32>;',
+        'varying vDir : vec3<f32>;',
         'varying vFragmentDepth : f32;',
         'varying vLevel : f32;',
         'attribute position : vec3<f32>;',
@@ -81,22 +88,27 @@ function vertexSource(opts: OcbtRenderOptions): string {
         '    // Dead pool slot (heap id 0): collapse to a clipped degenerate triangle.',
         '    if (lo == 0u && hi == 0u) {',
         '        vertexOutputs.position = vec4<f32>(0.0, 0.0, 2.0, 1.0);',
-        '        vertexOutputs.vLocalPos = vec3<f32>(0.0, 0.0, 0.0);',
+        '        vertexOutputs.vDir = vec3<f32>(0.0, 1.0, 0.0);',
         '        vertexOutputs.vFragmentDepth = 1.0;',
         '        vertexOutputs.vLevel = 0.0;',
         '        return vertexOutputs;',
         '    }',
         '    let vi = vertexInputs.vertexIndex;',
-        '    let base = slot * 9u + vi * 3u;',
-        '    let dir = vec3<f32>(ocbtPos[base], ocbtPos[base + 1u], ocbtPos[base + 2u]);',
+        '    let base = slot * 18u + vi * 6u;',
+        '    let rel = vec3<f32>(ocbtPos[base], ocbtPos[base + 1u], ocbtPos[base + 2u]);',
+        '    let dir = vec3<f32>(ocbtPos[base + 3u], ocbtPos[base + 4u], ocbtPos[base + 5u]);',
+        '    // Radial noise displacement: height along the (precise) unit direction. The',
+        '    // direction only needs ~f32 accuracy (height ~ km, dir error ~1e-7 -> mm).',
         '    let height = cbtFbmHeight(dir);',
-        '    let localPos = dir * (CBT_RADIUS + height);',
-        '    vertexOutputs.position = uniforms.worldViewProjection * vec4<f32>(localPos, 1.0);',
+        '    let localRel = rel + dir * height;',
+        '    let R = mat3x3<f32>(uniforms.world[0].xyz, uniforms.world[1].xyz, uniforms.world[2].xyz);',
+        '    let renderPos = R * localRel;',
+        '    vertexOutputs.position = uniforms.viewProjection * vec4<f32>(renderPos, 1.0);',
         '    // Hand-written WGSL ShaderMaterial: Babylon does NOT auto-inject the WebGPU',
         '    // NDC-Y flip (it does for transpiled GLSL), so flip clip-space Y to match',
         '    // the worker/GLSL terrain (otherwise the planet renders upside-down).',
         '    vertexOutputs.position.y = -vertexOutputs.position.y;',
-        '    vertexOutputs.vLocalPos = localPos;',
+        '    vertexOutputs.vDir = dir;',
         '    // Tree depth = firstLeadingBit(heap); faces are depth 3 => level = depth - 3.',
         '    var depth : u32;',
         '    if (hi != 0u) { depth = 32u + firstLeadingBit(hi); } else { depth = firstLeadingBit(lo); }',
@@ -117,7 +129,7 @@ function fragmentSource(opts: OcbtRenderOptions): string {
         'uniform uLightDirection : vec3<f32>;',
         'uniform logarithmicDepthConstant : f32;',
         'uniform uDebugLod : i32;',
-        'varying vLocalPos : vec3<f32>;',
+        'varying vDir : vec3<f32>;',
         'varying vFragmentDepth : f32;',
         'varying vLevel : f32;',
         // Per-LOD-level palette — mirrors LEVEL_COLORS / the implicit material's
@@ -150,7 +162,7 @@ function fragmentSource(opts: OcbtRenderOptions): string {
         '        fragmentOutputs.fragDepth = log2(fragmentInputs.vFragmentDepth) * uniforms.logarithmicDepthConstant * 0.5;',
         '        return fragmentOutputs;',
         '    }',
-        '    let dir = normalize(fragmentInputs.vLocalPos);',
+        '    let dir = normalize(fragmentInputs.vDir);',
         '    let nLocal = cbtNoiseNormal(dir, CBT_RADIUS);',
         '    let nWorld = normalize((uniforms.world * vec4<f32>(nLocal, 0.0)).xyz);',
         '    let L = normalize(-uniforms.uLightDirection);',
@@ -188,7 +200,7 @@ export function buildOcbtRenderMaterial(
         {
             shaderLanguage: ShaderLanguage.WGSL,
             attributes: ['position'],
-            uniforms: ['worldViewProjection', 'world', 'uLightDirection', 'logarithmicDepthConstant', 'uDebugLod'],
+            uniforms: ['viewProjection', 'world', 'uLightDirection', 'logarithmicDepthConstant', 'uDebugLod'],
             storageBuffers: ['ocbtHeap', 'ocbtPos', 'cbtPerm']
         }
     );

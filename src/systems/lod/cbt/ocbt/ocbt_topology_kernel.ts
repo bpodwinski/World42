@@ -40,7 +40,9 @@ import ocbtTopoSimplifyWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_
 import ocbtTopoPropagateSimplifyWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_propagate_simplify.compute.wgsl';
 import ocbtPoolReduceWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_pool_reduce.compute.wgsl';
 import ocbtEvalLebWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_eval_leb.wgsl';
+import ocbtF64Wgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_f64.wgsl';
 import ocbtTopoEvalLebWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_eval_leb.compute.wgsl';
+import ocbtTopoEvalLebF64Wgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_eval_leb_f64.compute.wgsl';
 import {
     engineLayout,
     engineWgslPreamble,
@@ -115,6 +117,8 @@ export class OcbtTopologyKernel {
     private readonly memory: StorageBuffer;
     private readonly faceTargets: StorageBuffer;
     private readonly positions: StorageBuffer;
+    /** f32 words per slot in the positions buffer (9 predicate / 18 metric). */
+    readonly positionsWords: number;
 
     // Passes.
     private readonly reduce: ComputeShader;
@@ -167,7 +171,11 @@ export class OcbtTopologyKernel {
         this.propagate = mk(layout.propagateBytes, STORAGE | WRITE, 'ocbt_topo_propagate');
         this.memory = mk(layout.memoryBytes, STORAGE | WRITE, 'ocbt_topo_memory');
         this.faceTargets = mk(OCBT_FACE_COUNT * 4, STORAGE | WRITE, 'ocbt_topo_facetargets');
-        this.positions = mk(capacity * POSITIONS_WORDS * 4, STORAGE | READ | WRITE, 'ocbt_topo_positions');
+        // Metric (render) mode emits camera-relative [relative.xyz, dir.xyz] (18/slot) via
+        // the df64 eval; predicate (cross-check) mode emits unit-dir corners (9/slot).
+        const posWords = classifyMode === 'metric' ? 18 : POSITIONS_WORDS;
+        this.positionsWords = posWords;
+        this.positions = mk(capacity * posWords * 4, STORAGE | READ | WRITE, 'ocbt_topo_positions');
         this.liveNeighbors = this.nbA;
 
         const onErr = (tag: string) => (_e: unknown, errors: string) => {
@@ -426,21 +434,49 @@ export class OcbtTopologyKernel {
         this.propagateSimplify.setStorageBuffer('bisectorData', this.bisectorData);
         this.propagateSimplify.setStorageBuffer('propagate', this.propagate);
 
-        // --- eval-leb (decode each live slot's heap id -> 3 unit-dir corners) ---
-        this.evalLeb = new ComputeShader(
-            'ocbt_topo_eval_leb',
-            engine,
-            { computeSource: compose(ocbtU64Wgsl, ocbtEvalLebWgsl, ocbtTopoCommonWgsl, ocbtTopoEvalLebWgsl) },
-            {
-                bindingsMapping: {
-                    heapID: { group: 0, binding: 2 },
-                    positions: { group: 0, binding: 19 }
+        // --- eval-leb: predicate = f32 unit-dir corners (9/slot, for the cross-check's
+        // check D); metric = df64 camera-relative [relative,dir] (18/slot, for render). ---
+        if (classifyMode === 'metric') {
+            this.evalLeb = new ComputeShader(
+                'ocbt_topo_eval_leb_f64',
+                engine,
+                {
+                    computeSource: compose(
+                        ocbtU64Wgsl,
+                        ocbtF64Wgsl,
+                        ocbtTopoCommonWgsl,
+                        ocbtTopoEvalLebF64Wgsl
+                    )
+                },
+                {
+                    bindingsMapping: {
+                        heapID: { group: 0, binding: 2 },
+                        ep: { group: 0, binding: 17 },
+                        positions: { group: 0, binding: 19 }
+                    }
                 }
-            }
-        );
-        this.evalLeb.onError = onErr('evalLeb');
-        this.evalLeb.setStorageBuffer('heapID', this.heapID);
-        this.evalLeb.setStorageBuffer('positions', this.positions);
+            );
+            this.evalLeb.onError = onErr('evalLeb(f64)');
+            this.evalLeb.setStorageBuffer('heapID', this.heapID);
+            this.evalLeb.setStorageBuffer('positions', this.positions);
+            // Reuse the metric classify camera UBO (camRadius.xyz=camLocal, .w=radius).
+            this.evalLeb.setUniformBuffer('ep', this.classifyParams!);
+        } else {
+            this.evalLeb = new ComputeShader(
+                'ocbt_topo_eval_leb',
+                engine,
+                { computeSource: compose(ocbtU64Wgsl, ocbtEvalLebWgsl, ocbtTopoCommonWgsl, ocbtTopoEvalLebWgsl) },
+                {
+                    bindingsMapping: {
+                        heapID: { group: 0, binding: 2 },
+                        positions: { group: 0, binding: 19 }
+                    }
+                }
+            );
+            this.evalLeb.onError = onErr('evalLeb');
+            this.evalLeb.setStorageBuffer('heapID', this.heapID);
+            this.evalLeb.setStorageBuffer('positions', this.positions);
+        }
 
         // One UBO per reduce level (0..depth). Reusing one UBO across same-submit
         // dispatches coalesces to the last value, so each level needs its own.

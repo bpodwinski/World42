@@ -182,8 +182,8 @@ export class CbtPlanet {
         if (cbtType === 'gpu-ocbt' && (engine as WebGPUEngine).isWebGPU) {
             // Phase 2 bring-up constants: a fixed pool plus a screen-space-area metric.
             // f32 vertex decode caps usable depth (~16); Phase 3 lifts it via f64.
-            const OCBT_CAPACITY = 1 << 16; // 65536 slots
-            const OCBT_MAX_LEVEL = 16;
+            const OCBT_CAPACITY = 1 << 17; // 65536 slots
+            const OCBT_MAX_LEVEL = 32;
             const OCBT_SPLIT_PX = 48; // split when longest edge > 48 px
             const OCBT_MERGE_PX = 24; // merge < 24 px (hysteresis)
             return new OcbtSource(
