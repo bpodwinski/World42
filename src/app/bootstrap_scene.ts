@@ -22,6 +22,11 @@ import {
     type LoadedBody,
     type LoadedSystem,
 } from '../game_world/stellar_system/stellar_catalog_loader';
+import {
+    applyBenchOverride,
+    benchSystemIds,
+    parseBenchAlgorithm,
+} from '../game_world/stellar_system/bench_override';
 
 export type SceneBootstrapResult = {
     scene: Scene;
@@ -56,11 +61,18 @@ export async function bootstrapScene(
     scene.collisionsEnabled = true;
     scene.onDisposeObservable.add(() => disposables.dispose());
 
-    const systemIds = listStellarSystems(planetsJson);
+    // Dev perf benchmark: `?bench=<algo>` loads ONLY the dedicated Benchmark
+    // system and forces its planet onto <algo>, so the same world can be timed
+    // under each LOD backend in isolation (see bench_override.ts).
+    const benchAlgo = parseBenchAlgorithm(
+        typeof window !== 'undefined' ? window.location.search : ''
+    );
+    const systemIds = benchSystemIds(listStellarSystems(planetsJson), benchAlgo);
     const loadedSystemsArr = await Promise.all(
         systemIds.map((id) => loadStellarSystemFromCatalog(scene, planetsJson, id))
     );
     const loadedSystems = new Map(loadedSystemsArr.map((system) => [system.systemId, system]));
+    applyBenchOverride(loadedSystems, benchAlgo);
     const spawnBody = pickSpawnBody(loadedSystems);
 
     scene.textures.forEach((texture) => {

@@ -41,8 +41,10 @@ export type LodController = {
     resetNow: () => void;
     /** Aggregate CBT telemetry for the perf HUD / headless capture. */
     getCbtStats: () => CbtAggregateStats;
-    /** Per-planet centers/radii for deterministic headless capture. */
+    /** Per-planet centers/radii for deterministic headless capture (CBT planets). */
     getCbtPlanetInfo: () => CbtPlanetInfo[];
+    /** Same, for CDLOD planets — lets the perf harness locate any backend's planet. */
+    getCdlodPlanetInfo: () => CbtPlanetInfo[];
 };
 
 export type LodSetupResult = {
@@ -123,6 +125,16 @@ export function setupLodAndShadows(
         },
         getCbtStats: () => cbtScheduler.getStats(),
         getCbtPlanetInfo: () => cbtScheduler.getPlanetInfo(),
+        getCdlodPlanetInfo: () =>
+            Array.from(mergedCDLOD.entries()).map(([key, planet]) => ({
+                key,
+                center: [
+                    planet.entity.doublepos.x,
+                    planet.entity.doublepos.y,
+                    planet.entity.doublepos.z,
+                ],
+                radiusSim: planet.radiusSim,
+            })),
     };
 
     const mergedShadowPlanets = new Map<string, PlanetShadowSource>();

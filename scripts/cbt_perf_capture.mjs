@@ -4,21 +4,25 @@ import { join } from 'node:path';
 import process from 'node:process';
 
 /**
- * Deterministic headless CBT perf capture.
+ * Deterministic headless LOD perf capture — PER ALTITUDE.
  *
- * Flies the camera along a fixed descent toward the first (or named) CBT planet
- * via the dev-only `window.__world42Perf` hook, samples per-frame timing + CBT
- * stats at each waypoint, and writes output/perf/<label>.json.
+ * Flies the camera along a fixed descent toward the benchmark planet via the
+ * dev-only `window.__world42Perf` hook, and at EACH altitude waypoint samples
+ * frame/GPU time + draw load + leaf count. Writes output/perf/<label>.json with
+ * a `byAltitude[]` breakdown (the headline) plus a global `summary`.
+ *
+ * Backend selection: `--lod <algo>` appends `?bench=<algo>` to the URL, which
+ * makes the app load ONLY the dedicated Benchmark planet on that backend
+ * (cdlod | cbt-cpu | cbt-gpu | cbt-ocbt) — see src/.../bench_override.ts.
  *
  * Usage:
- *   node scripts/cbt_perf_capture.mjs --label baseline
- *   CBT_PLANET=Sol:Earth node scripts/cbt_perf_capture.mjs --label phase1
+ *   node scripts/cbt_perf_capture.mjs --lod cbt-ocbt --label cbt-ocbt
+ *   node scripts/cbt_perf_capture.mjs --lod cdlod --altitudes "20,8,3,1.08"
  *
  * Requires the `playwright` package (not a default dep). If missing, prints the
- * one-time install command and exits 2 — so the script is correct when present
- * without forcing a heavy dependency on everyone.
+ * one-time install command and exits 2.
  *
- * Pair the result with: node scripts/cbt_perf_compare.mjs baseline <label>
+ * Compare runs with: node scripts/cbt_perf_matrix.mjs   (runs all 4 backends)
  */
 
 const argv = process.argv.slice(2);
@@ -27,16 +31,30 @@ function arg(name, fallback) {
     return i >= 0 && argv[i + 1] ? argv[i + 1] : fallback;
 }
 
-const label = arg('label', 'capture');
+const lod = arg('lod', ''); // '' = whatever data.json says (no bench override)
+const label = arg('label', lod || 'capture');
 const planetKey = process.env.CBT_PLANET || arg('planet', '');
 const defaultPort = process.env.PORT && process.env.PORT !== '0' ? process.env.PORT : '19000';
 let url = process.env.PW_URL || `http://localhost:${defaultPort}/`;
 const autoServe = process.env.PW_AUTO_SERVE !== '0';
+// CDP mode: connect to an ALREADY-RUNNING Chrome (started by the user in their
+// interactive desktop session) so the bench runs on the real GPU. Headless /
+// shell-spawned Chromium has no GPU process under RDP → no WebGPU. Start Chrome
+// with:  chrome --remote-debugging-port=9222   then pass --cdp http://localhost:9222
+const cdpUrl = process.env.PW_CDP || arg('cdp', '');
 
 // Descent: camera distance from planet center as a multiple of planet radius.
-const WAYPOINTS = [8, 5, 3, 2, 1.4, 1.08];
-const SETTLE_MS = 1200; // let LOD churn settle before sampling
-const SAMPLE_MS = 1500; // capture window per waypoint
+const DEFAULT_WAYPOINTS = [20, 8, 5, 3, 2, 1.4, 1.08, 1.02];
+const WAYPOINTS = arg('altitudes', '')
+    ? arg('altitudes', '').split(',').map((s) => Number(s.trim())).filter((n) => Number.isFinite(n) && n > 0)
+    : DEFAULT_WAYPOINTS;
+
+// CPU/worker backends build geometry asynchronously, so they need more time to
+// converge before a clean sample than the GPU paths.
+const isAsyncBackend = lod === 'cdlod' || lod === 'cbt-cpu';
+const SETTLE_MS = Number(arg('settle', isAsyncBackend ? '3000' : '1500'));
+const SAMPLE_MS = Number(arg('sample', '1500'));
+const WARMUP_MS = Number(arg('warmup', '4000')); // discarded: pipeline/shader compile + first churn
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -105,11 +123,64 @@ function percentile(sorted, p) {
     return sorted[idx];
 }
 
+function median(arr) {
+    if (arr.length === 0) return 0;
+    return percentile([...arr].sort((a, b) => a - b), 50);
+}
+
+function withBench(target) {
+    if (!lod) return target;
+    return target + (target.includes('?') ? '&' : '?') + `bench=${encodeURIComponent(lod)}`;
+}
+
+/** Position + aim the camera at a waypoint, then sample a window in-page. */
+async function sampleWaypoint(page, planet, mult) {
+    const [cx, cy, cz] = planet.center;
+    const dist = planet.radiusSim * mult;
+    const pos = [cx, cy, cz + dist];
+
+    await page.evaluate(
+        ({ pos, center }) => {
+            window.__world42Perf.setCameraDoublePos(pos[0], pos[1], pos[2]);
+            window.__world42Perf.lookAtDoublePos(center[0], center[1], center[2]);
+        },
+        { pos, center: planet.center }
+    );
+
+    await sleep(SETTLE_MS);
+
+    return page.evaluate(async (sampleMs) => {
+        const hook = window.__world42Perf;
+        const frames = [];
+        const gpu = [];
+        const draws = [];
+        const indices = [];
+        let maxLeaves = 0;
+        let last = performance.now();
+        const end = last + sampleMs;
+        await new Promise((resolve) => {
+            const tick = (now) => {
+                frames.push(now - last);
+                last = now;
+                const s = hook.getStats();
+                gpu.push(s.gpuMs);
+                draws.push(s.drawCalls);
+                indices.push(s.activeIndices);
+                if (s.cbt.leafCount > maxLeaves) maxLeaves = s.cbt.leafCount;
+                if (now < end) requestAnimationFrame(tick);
+                else resolve();
+            };
+            requestAnimationFrame(tick);
+        });
+        return { frames, gpu, draws, indices, maxLeaves };
+    }, SAMPLE_MS);
+}
+
 async function main() {
     const chromium = await loadPlaywright();
     if (!chromium) {
         console.error(
-            '[cbt-perf] Playwright is not installed. Enable scripted capture with:\n' +
+            '[perf] Playwright is not installed. Enable scripted capture with:\n' +
                 '    npm i -D playwright && npx playwright install chromium\n' +
                 '  (Or use the in-app perf HUD: press P in the running app.)'
         );
@@ -118,27 +189,36 @@ async function main() {
 
     let devServer = null;
     if (!(await isReachable(url)) && autoServe) {
-        console.log(`[cbt-perf] ${url} not reachable, starting dev server...`);
+        console.log(`[perf] ${url} not reachable, starting dev server...`);
         devServer = await startDevServer();
         url = devServer.url;
         await sleep(500);
     }
 
-    const browser = await chromium.launch({ headless: true });
-    const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
+    const pageUrl = withBench(url);
+    let browser;
+    let page;
+    if (cdpUrl) {
+        console.log(`[perf] connecting to existing Chrome over CDP: ${cdpUrl}`);
+        browser = await chromium.connectOverCDP(cdpUrl);
+        const ctx = browser.contexts()[0] ?? (await browser.newContext());
+        page = await ctx.newPage();
+        await page.setViewportSize({ width: 1920, height: 1080 });
+    } else {
+        browser = await chromium.launch({ headless: true });
+        page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
+    }
 
-    const frameSamples = [];
-    const gpuSamples = [];
-    const classifySamples = [];
-    let maxLeaves = 0;
-    let totalRebuilds = 0;
-    let rebuildMsSum = 0;
+    const byAltitude = [];
+    const allFrames = [];
+    const allGpu = [];
+    let maxLeavesAll = 0;
+    let maxIndicesAll = 0;
 
     try {
-        console.log(`[cbt-perf] url=${url} label=${label}`);
-        await page.goto(url, { waitUntil: 'load', timeout: 60000 });
+        console.log(`[perf] url=${pageUrl} label=${label} lod=${lod || '<data.json>'}`);
+        await page.goto(pageUrl, { waitUntil: 'load', timeout: 60000 });
 
-        // Wait for the dev hook + at least one CBT planet.
         await page.waitForFunction(
             () => !!window.__world42Perf && window.__world42Perf.getPlanets().length > 0,
             { timeout: 60000 }
@@ -148,102 +228,102 @@ async function main() {
         const planet = planetKey ? planets.find((p) => p.key === planetKey) : planets[0];
         if (!planet) {
             throw new Error(
-                `no CBT planet found (key=${planetKey || '<first>'}). available=${planets.map((p) => p.key).join(',')}`
+                `no planet found (key=${planetKey || '<first>'}). available=${planets.map((p) => p.key).join(',')}`
             );
         }
-        console.log(`[cbt-perf] planet=${planet.key} radius=${planet.radiusSim}`);
+        console.log(`[perf] planet=${planet.key} radius=${planet.radiusSim}`);
 
         await page.evaluate(() => window.__world42Perf.enableCapture(true));
 
+        // Warm-up at the farthest waypoint: compile pipelines / build first chunks,
+        // then discard — the first frames after load are not representative.
+        await page.evaluate(
+            ({ pos, center }) => {
+                window.__world42Perf.setCameraDoublePos(pos[0], pos[1], pos[2]);
+                window.__world42Perf.lookAtDoublePos(center[0], center[1], center[2]);
+            },
+            {
+                pos: [planet.center[0], planet.center[1], planet.center[2] + planet.radiusSim * WAYPOINTS[0]],
+                center: planet.center,
+            }
+        );
+        await sleep(WARMUP_MS);
+
         for (const mult of WAYPOINTS) {
-            const [cx, cy, cz] = planet.center;
-            const dist = planet.radiusSim * mult;
-            const pos = [cx, cy, cz + dist];
+            const wp = await sampleWaypoint(page, planet, mult);
 
-            await page.evaluate(
-                ({ pos, center }) => {
-                    window.__world42Perf.setCameraDoublePos(pos[0], pos[1], pos[2]);
-                    window.__world42Perf.lookAtDoublePos(center[0], center[1], center[2]);
-                },
-                { pos, center: planet.center }
+            const frameSorted = [...wp.frames].sort((a, b) => a - b);
+            const gpuSorted = [...wp.gpu].sort((a, b) => a - b);
+            const drawCalls = Math.round(median(wp.draws));
+            const activeIndices = Math.round(median(wp.indices));
+
+            const record = {
+                mult,
+                frameMsP50: percentile(frameSorted, 50),
+                frameMsP95: percentile(frameSorted, 95),
+                gpuMsP50: percentile(gpuSorted, 50),
+                gpuMsP95: percentile(gpuSorted, 95),
+                drawCalls,
+                activeIndices,
+                triangles: Math.round(activeIndices / 3),
+                leafCount: wp.maxLeaves,
+                samples: wp.frames.length,
+            };
+            byAltitude.push(record);
+            allFrames.push(...wp.frames);
+            allGpu.push(...wp.gpu);
+            maxLeavesAll = Math.max(maxLeavesAll, wp.maxLeaves);
+            maxIndicesAll = Math.max(maxIndicesAll, activeIndices);
+            console.log(
+                `[perf]   x${mult}: gpu ${record.gpuMsP50.toFixed(2)}ms  frame ${record.frameMsP50.toFixed(2)}ms  ` +
+                    `tris ${(record.triangles / 1000).toFixed(0)}k  draws ${drawCalls}  leaves ${wp.maxLeaves}`
             );
-
-            await sleep(SETTLE_MS);
-
-            const wp = await page.evaluate(async (sampleMs) => {
-                const hook = window.__world42Perf;
-                const frames = [];
-                const gpu = [];
-                const classify = [];
-                let maxLeaves = 0;
-                let rebuilds = 0;
-                let rebuildMsSum = 0;
-                let last = performance.now();
-                const end = last + sampleMs;
-                await new Promise((resolve) => {
-                    const tick = (now) => {
-                        frames.push(now - last);
-                        last = now;
-                        const s = hook.getStats();
-                        gpu.push(s.gpuMs);
-                        classify.push(s.cbt.classifyMs);
-                        if (s.cbt.leafCount > maxLeaves) maxLeaves = s.cbt.leafCount;
-                        if (s.cbt.rebuildMs > 0) {
-                            rebuilds++;
-                            rebuildMsSum += s.cbt.rebuildMs;
-                        }
-                        if (now < end) requestAnimationFrame(tick);
-                        else resolve();
-                    };
-                    requestAnimationFrame(tick);
-                });
-                return { frames, gpu, classify, maxLeaves, rebuilds, rebuildMsSum };
-            }, SAMPLE_MS);
-
-            frameSamples.push(...wp.frames);
-            gpuSamples.push(...wp.gpu);
-            classifySamples.push(...wp.classify);
-            maxLeaves = Math.max(maxLeaves, wp.maxLeaves);
-            totalRebuilds += wp.rebuilds;
-            rebuildMsSum += wp.rebuildMsSum;
-            console.log(`[cbt-perf]   waypoint x${mult}: leaves=${wp.maxLeaves} rebuilds=${wp.rebuilds}`);
         }
     } finally {
-        await browser.close();
+        // In CDP mode, only close our own page — never the user's browser.
+        if (cdpUrl) {
+            await page.close().catch(() => {});
+        } else {
+            await browser.close();
+        }
         if (devServer?.child) devServer.child.kill();
     }
 
-    const frameSorted = [...frameSamples].sort((a, b) => a - b);
-    const gpuSorted = [...gpuSamples].sort((a, b) => a - b);
-    const classifyMax = classifySamples.length ? Math.max(...classifySamples) : 0;
+    const frameSorted = [...allFrames].sort((a, b) => a - b);
+    const gpuSorted = [...allGpu].sort((a, b) => a - b);
+    const gpuAvailable = allGpu.some((v) => v > 0);
 
     const result = {
         label,
-        url,
+        lod: lod || null,
+        url: pageUrl,
         capturedAtMs: Number(process.env.PERF_STAMP_MS) || null,
+        gpuAvailable,
         waypoints: WAYPOINTS,
         settleMs: SETTLE_MS,
         sampleMs: SAMPLE_MS,
-        samples: frameSamples.length,
+        warmupMs: WARMUP_MS,
+        byAltitude,
         summary: {
             frameMsP50: percentile(frameSorted, 50),
             frameMsP95: percentile(frameSorted, 95),
             gpuMsP50: percentile(gpuSorted, 50),
-            maxLeaves,
-            totalRebuilds,
-            meanRebuildMs: totalRebuilds ? rebuildMsSum / totalRebuilds : 0,
-            maxClassifyMs: classifyMax,
+            gpuMsP95: percentile(gpuSorted, 95),
+            maxLeaves: maxLeavesAll,
+            maxActiveIndices: maxIndicesAll,
         },
     };
 
     mkdirSync(join(process.cwd(), 'output', 'perf'), { recursive: true });
     const out = join(process.cwd(), 'output', 'perf', `${label}.json`);
     writeFileSync(out, JSON.stringify(result, null, 2));
-    console.log(`[cbt-perf] wrote ${out}`);
-    console.log(`[cbt-perf] summary:`, result.summary);
+    console.log(`[perf] wrote ${out}`);
+    if (!gpuAvailable) {
+        console.log('[perf] note: gpuMs was 0 for all samples (GPU timestamps unavailable headless) — use frameMs.');
+    }
 }
 
 main().catch((err) => {
-    console.error(`[cbt-perf] failed: ${err instanceof Error ? err.message : String(err)}`);
+    console.error(`[perf] failed: ${err instanceof Error ? err.message : String(err)}`);
     process.exit(1);
 });

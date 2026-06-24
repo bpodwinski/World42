@@ -119,6 +119,26 @@
           "rotation_period_days": 6.4
         }
       }
+    },
+    "Benchmark": {
+      "origin_km": [80000000000000, 0, 0],
+      "displayName": "Benchmark",
+      "bodies": {
+        "BenchStar": {
+          "type": "star",
+          "position_km": [0, 0, 0],
+          "diameter_km": 1391000,
+          "rotation_period_days": 25.38,
+          "star": { "temperature_k": 5772, "intensity": 1.0 }
+        },
+        "BenchWorld": {
+          "type": "planet",
+          "lod_algorithm": "cdlod",
+          "position_km": [149600000, 0, 0],
+          "diameter_km": 12742,
+          "rotation_period_days": 1
+        }
+      }
     }
   }
 }

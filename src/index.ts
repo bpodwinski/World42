@@ -28,7 +28,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
     // Toggle the debug layer
     disposables.addDomListener(window, "keydown", async (e) => {
-        if (e.key === "p") {
+        if (e.key === "m") {
             await ensureDebugLayerReady();
             if (scene.debugLayer.isVisible()) {
                 scene.debugLayer.hide();

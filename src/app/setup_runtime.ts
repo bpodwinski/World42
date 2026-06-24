@@ -104,7 +104,7 @@ export function setupRuntime({
     const perfHook = {
         enableCapture: (on: boolean) => setCaptureEnabled(on),
         getStats: () => sampleStats(),
-        getPlanets: () => lod.getCbtPlanetInfo(),
+        getPlanets: () => [...lod.getCbtPlanetInfo(), ...lod.getCdlodPlanetInfo()],
         setCameraDoublePos: (x: number, y: number, z: number) => {
             camera.doublepos.set(x, y, z);
             lod.resetNow();
@@ -145,6 +145,30 @@ export function setupRuntime({
     const HUD_RATE_MS = 250;
     const DIST_LOG_RATE_MS = 500;
 
+    // Altitude read-out for the perf HUD: distance to the NEAREST planet's surface,
+    // in km and as a multiple of its radius (the unit the perf bench waypoints use).
+    const tmpPlanetCenter = new Vector3();
+    const formatAltitude = (): string => {
+        const infos = [...lod.getCbtPlanetInfo(), ...lod.getCdlodPlanetInfo()];
+        let bestKey = '';
+        let bestDist = Infinity;
+        let bestRadius = 1;
+        for (const p of infos) {
+            tmpPlanetCenter.set(p.center[0], p.center[1], p.center[2]);
+            const d = Vector3.Distance(camera.doublepos, tmpPlanetCenter);
+            if (d < bestDist) {
+                bestDist = d;
+                bestKey = p.key;
+                bestRadius = p.radiusSim;
+            }
+        }
+        if (!bestKey) return '';
+        const altKm = ScaleManager.toRealUnits(bestDist - bestRadius);
+        const ratio = bestDist / bestRadius;
+        const name = bestKey.split(':').pop() ?? bestKey;
+        return `alt ${altKm.toFixed(0)}km  ${ratio.toFixed(2)}xR  ${name}`;
+    };
+
     const hudObserver = scene.onBeforeRenderObservable.add(() => {
         const now = performance.now();
         if (now - lastDistLog >= DIST_LOG_RATE_MS) {
@@ -163,7 +187,9 @@ export function setupRuntime({
         if (nowHud - lastHudUpdate >= HUD_RATE_MS) {
             gui.setSpeed(Math.round(emaMS * 10) / 10);
             if (gui.isPerfVisible()) {
-                gui.setPerfText(formatPerf(sampleStats()));
+                const altLine = formatAltitude();
+                const body = formatPerf(sampleStats());
+                gui.setPerfText(altLine ? `${altLine}\n${body}` : body);
             }
             lastHudUpdate = nowHud;
         }

@@ -8,6 +8,8 @@
     "deploy": "gh-pages -d dist",
     "test": "vitest",
     "bench": "vitest bench --run",
+    "perf:capture": "node ./scripts/cbt_perf_capture.mjs",
+    "perf:matrix": "node ./scripts/cbt_perf_matrix.mjs",
     "coverage": "vitest run --coverage",
     "pw": "node ./scripts/playwright_cli.mjs",
     "pw:help": "node ./scripts/playwright_cli.mjs --help",
@@ -33,6 +35,7 @@
     "dotenv-webpack": "^8.1.1",
     "gh-pages": "^6.3.0",
     "html-webpack-plugin": "^5.6.4",
+    "playwright": "^1.61.1",
     "ts-checker-rspack-plugin": "^1.1.6",
     "ts-shader-loader": "^2.0.2",
     "vitest": "^4.0.5"
