@@ -73,14 +73,25 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>,
     let cullMinDot = cp.thresh.w;
     let maxLevel = cp.limits.x;
 
-    // Camera-relative corner positions (|rel| = distance to camera).
+    // Camera-relative corner positions (TERRAIN-displaced; |rel| = distance to camera).
     let r0 = corner_rel(id, 0u);
     let r1 = corner_rel(id, 1u);
     let r2 = corner_rel(id, 2u);
     let centroidRel = (r0 + r1 + r2) * (1.0 / 3.0);
 
-    // Longest-edge screen size in pixels (edge vectors are exact corner differences).
-    let e = max(max(length(r0 - r1), length(r1 - r2)), length(r2 - r0));
+    // Edge length for the screen-space metric uses the SMOOTH-SPHERE corners (dir*radius),
+    // NOT the displaced corners. The displaced edge is dominated by the height DELTA between
+    // corners: over tall relief a coarse leaf's corners sit at very different heights, so its
+    // edge balloons -> it over-splits -> the children's corners are close in height -> edge
+    // collapses below merge -> they merge back. That makes the split/merge passes oscillate
+    // every frame (leafCount flips, debug-LOD flickers). The sphere edge shrinks monotonically
+    // by ~1/sqrt(2) per level, so the split/merge hysteresis is stable. Distance still uses the
+    // displaced centroid, so subdivision stays terrain-aware (near peaks refine).
+    let d0 = corner_dir(id, 0u);
+    let d1 = corner_dir(id, 1u);
+    let d2 = corner_dir(id, 2u);
+    let radius = cp.camRadius.w;
+    let e = radius * max(max(length(d0 - d1), length(d1 - d2)), length(d2 - d0));
     let dist = max(length(centroidRel), 1.0);
     let screenPx = e * focal / dist;
 
@@ -91,10 +102,7 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>,
     // roots under an aggressive threshold). Culling only when ALL corners are over the limb
     // lets coarse leaves keep splitting toward the boundary; fine leaves past it still cull.
     let camDir = normalize(cam);
-    let facing = max(
-        dot(corner_dir(id, 0u), camDir),
-        max(dot(corner_dir(id, 1u), camDir), dot(corner_dir(id, 2u), camDir))
-    );
+    let facing = max(dot(d0, camDir), max(dot(d1, camDir), dot(d2, camDir)));
     var culled = facing < cullMinDot;
 
     // Frustum cull: a leaf fully outside the camera cone (beyond a one-edge guard band)

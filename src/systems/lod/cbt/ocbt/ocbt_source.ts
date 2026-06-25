@@ -203,8 +203,10 @@ export class OcbtSource implements CbtGeometrySource {
             this.kernel.setFrustum(this.frustumF32, OcbtSource.FRUSTUM_GUARD, false, 0);
         }
 
-        // Alternate split (even) / merge (odd) frames so the two halves never race on
-        // the same neighbor buffer; both share the metric classify's candidate lists.
+        // Alternate split (even) / merge (odd) frames so the two halves never race on the
+        // same neighbor buffer. The split/merge limit cycle that used to flicker the mesh is
+        // broken in PrepareSimplify (conformity guard: a leaf with a finer neighbor is not
+        // merged, so the split pass can't re-create it).
         if ((this.frame++ & 1) === 0) {
             this.kernel.runFrame();
         } else {
@@ -217,9 +219,9 @@ export class OcbtSource implements CbtGeometrySource {
         // instances (not CAPACITY) — the per-vertex fbm noise makes that the big win.
         this.kernel.runCompact();
 
-        // Light points from the star toward the planet (shader negates it).
+        // lightDirection convention: planetCenter - starPos (star→planet), shader negates to get L toward star.
         if (this.starPos) {
-            this.tmpDir.copyFrom(this.starPos).subtractInPlace(frame.planetCenterWorldDouble);
+            this.tmpDir.copyFrom(frame.planetCenterWorldDouble).subtractInPlace(this.starPos);
             if (this.tmpDir.lengthSquared() > 1e-12) {
                 this.tmpDir.normalize();
                 this.render.setLightDirection(this.tmpDir);

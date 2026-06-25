@@ -17,6 +17,22 @@
 fn nb(s : u32, k : u32) -> u32 { return neighbors[s * NB_WORDS + k]; }
 fn st(s : u32) -> u32 { return bisectorData[s * BD_WORDS + BD_STATE]; }
 
+// True if any neighbor of `s` is FINER (deeper) than depth `d`. Such a leaf is
+// conformity-required (a deeper neighbor forced it to this level via the LEPP cascade):
+// collapsing it would leave a 2-level seam, so the split pass would immediately re-split
+// it. Without this guard the metric-driven merge keeps removing these cascade leaves and
+// the split pass keeps re-creating them -> a per-frame split/merge LIMIT CYCLE (leaf set
+// flips every frame: debug-LOD checkerboard flicker, terrain shimmer while moving). Refusing
+// the merge here is conservative (it only PREVENTS merges, never enables a bad one, so it
+// cannot crack the mesh); real coarsening still proceeds coarse-edge-first as neighbors merge.
+fn anyFinerNeighbor(s : u32, d : u32) -> bool {
+    for (var k = 0u; k < 3u; k = k + 1u) {
+        let n = nb(s, k);
+        if (n != OCBT_INVALID && u64_depth(heapID[n]) > d) { return true; }
+    }
+    return false;
+}
+
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid : vec3<u32>,
         @builtin(num_workgroups) nwg : vec3<u32>) {
@@ -41,6 +57,13 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>,
         let highD = u64_depth(heapID[twinHighID]);
         if (lowD != currentDepth || highD != currentDepth) { return; }
         if (st(twinLowID) != ST_SIMPLIFY || st(twinHighID) != ST_SIMPLIFY) { return; }
+    }
+
+    // Conformity guard: refuse if any diamond member still has a finer neighbor (else the
+    // split pass re-splits it next frame -> the split/merge limit cycle / flicker).
+    if (anyFinerNeighbor(currentID, currentDepth) || anyFinerNeighbor(pairID, currentDepth)) { return; }
+    if (twinLowID != OCBT_INVALID) {
+        if (anyFinerNeighbor(twinLowID, currentDepth) || anyFinerNeighbor(twinHighID, currentDepth)) { return; }
     }
 
     let loc = atomicAdd(&simplification[0], 1u);

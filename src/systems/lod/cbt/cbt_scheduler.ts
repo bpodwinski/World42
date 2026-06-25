@@ -184,8 +184,12 @@ export class CbtPlanet {
             // f32 vertex decode caps usable depth (~16); Phase 3 lifts it via f64.
             const OCBT_CAPACITY = 1 << 20; // 1 048 576 slots
             const OCBT_MAX_LEVEL = 45; // u64 hard cap (depth 63); df64 cracks well before
+            // Hysteresis rule: MERGE must be < SPLIT / sqrt(2) (~0.707*SPLIT). A longest-edge
+            // split makes children edge = parent/sqrt(2); if MERGE >= that, the children merge
+            // back the next frame -> split/merge oscillate every frame (leafCount flips,
+            // debug-LOD flickers). 8/4 keeps a safe gap (4 < 5.66).
             const OCBT_SPLIT_PX = 8; // split when longest edge > 8 px
-            const OCBT_MERGE_PX = 8; // merge < 4 px (hysteresis)
+            const OCBT_MERGE_PX = 4; // merge < 8/sqrt(2)=5.66 px (stable hysteresis)
             return new OcbtSource(
                 engine as WebGPUEngine,
                 this.scene,
@@ -507,8 +511,8 @@ export class CbtPlanet {
     private updateSunDirection(): void {
         if (!this.starPosWorldDouble) return;
 
-        // Direction = normalize(starPos - planetCenter) → points from star toward planet
-        const dir = this.starPosWorldDouble.subtract(this.entity.doublepos);
+        // lightDirection convention: planetCenter - starPos (star→planet), shader negates to get L toward star.
+        const dir = this.entity.doublepos.subtract(this.starPosWorldDouble);
         if (dir.lengthSquared() < 1e-12) return;
         dir.normalize();
 
