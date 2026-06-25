@@ -43,6 +43,7 @@ import cbtNoiseWgsl from '../../../../assets/shaders/cbt/gpu/cbt_noise.wgsl';
 import { buildPerm, type NoiseParams } from '../cbt_noise';
 import ocbtEvalLebWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_eval_leb.wgsl';
 import ocbtF64Wgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_f64.wgsl';
+import cbtNoiseDf64Wgsl from '../../../../assets/shaders/cbt/ocbt/cbt_noise_df64.wgsl';
 import ocbtTopoEvalLebWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_eval_leb.compute.wgsl';
 import ocbtTopoEvalLebF64Wgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_eval_leb_f64.compute.wgsl';
 import ocbtTopoCompactWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_compact.compute.wgsl';
@@ -533,6 +534,7 @@ export class OcbtTopologyKernel {
                         cbtNoiseWgsl,
                         ocbtU64Wgsl,
                         ocbtF64Wgsl,
+                        cbtNoiseDf64Wgsl,
                         ocbtTopoCommonWgsl,
                         ocbtTopoEvalLebF64Wgsl
                     )

@@ -142,9 +142,12 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>,
     let base0 = narrow(dv_sub(dv_scale_f32(v0, radius), cam));
     let base1 = narrow(dv_sub(dv_scale_f32(v1, radius), cam));
     let base2 = narrow(dv_sub(dv_scale_f32(v2, radius), cam));
-    let rel0 = base0 + d0 * cbtFbmHeightAt(d0, length(base0), radius);
-    let rel1 = base1 + d1 * cbtFbmHeightAt(d1, length(base1), radius);
-    let rel2 = base2 + d2 * cbtFbmHeightAt(d2, length(base2), radius);
+    // Height from the df64-DOMAIN fbm: pass the df64 unit corners (v0/v1/v2) so the noise
+    // domain p*freq stays cell-precise to ~cm at depth (f32 dir banded the relief at
+    // ~1-30 m). The displacement direction + camera distance stay f32 (d0/length(base0)).
+    let rel0 = base0 + d0 * cbtFbmHeightAt_df64(v0.x, v0.y, v0.z, length(base0), radius);
+    let rel1 = base1 + d1 * cbtFbmHeightAt_df64(v1.x, v1.y, v1.z, length(base1), radius);
+    let rel2 = base2 + d2 * cbtFbmHeightAt_df64(v2.x, v2.y, v2.z, length(base2), radius);
 
     let b = id * 18u;
     positions[b + 0u] = rel0.x; positions[b + 1u] = rel0.y; positions[b + 2u] = rel0.z;
