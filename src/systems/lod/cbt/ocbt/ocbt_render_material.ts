@@ -68,8 +68,27 @@ function bakedHeader(opts: OcbtRenderOptions): string {
         `const CBT_GROUND_OFF_KM : f32 = 0.15;`,
         `const CBT_GROUND_STRENGTH : f32 = 0.03;`,
         `const CBT_GROUND_DETAIL_OCTAVES : i32 = 4;`,
-        `const CBT_GROUND_BASE_FREQ : f32 = ${f(opts.radius * 1000)};`
-    ].join('\n');
+        `const CBT_GROUND_BASE_FREQ : f32 = ${f(opts.radius * 1000)};`,
+        // Procedural albedo splatting driven by SLOPE + ALTITUDE (physically meaningful, not
+        // random color blotches): REGOLITH on flats, darker greyer ROCK on slopes, HIGHLAND
+        // tint by altitude. Slope is read from the SMOOTH landform normal (CBT_SLOPE_DIST
+        // fades the cm micro-relief out so rock follows 30m+ hills/crater walls, not per-pixel
+        // bumps). SLOPE_* are in slope units = 1 - dot(landformNormal, up); 0 = flat.
+        ...(() => {
+            const g = (albedo.x + albedo.y + albedo.z) / 3;
+            const rk = (c: number) => 0.45 * (0.5 * c + 0.5 * g); // darker + desaturated
+            return [
+                `const CBT_REGOLITH : vec3<f32> = vec3<f32>(${f(albedo.x)}, ${f(albedo.y)}, ${f(albedo.z)});`,
+                `const CBT_ROCK : vec3<f32> = vec3<f32>(${f(rk(albedo.x))}, ${f(rk(albedo.y))}, ${f(rk(albedo.z))});`
+            ];
+        })(),
+        `const CBT_HIGHLAND_TINT : vec3<f32> = vec3<f32>(1.12, 1.12, 1.16);`,
+        `const CBT_SLOPE_LO : f32 = 0.03;`,
+        `const CBT_SLOPE_HI : f32 = 0.22;`,
+        `const CBT_SLOPE_DIST : f32 = 2.0;`,
+        `const CBT_ALT_LO : f32 = ${f(opts.noise.globalAmplitude * 0.25)};`,
+        `const CBT_ALT_HI : f32 = ${f(opts.noise.globalAmplitude * 0.65)};`
+    ].flat().join('\n');
 }
 
 function vertexSource(opts: OcbtRenderOptions): string {
@@ -162,6 +181,16 @@ function fragmentSource(opts: OcbtRenderOptions): string {
         'varying vRel : vec3<f32>;',
         'varying vFragmentDepth : f32;',
         'varying vLevel : f32;',
+        // Procedural world-anchored albedo (no texture samplers). Driven by slope + altitude:
+        // regolith on flats, rock on slopes, highland tint up high. `slope01` = 1 - dot(landform
+        // normal, up) (0 flat) from the SMOOTH normal so rock follows landforms, not micro-bumps.
+        'fn cbtGroundAlbedo(slope01 : f32, altKm : f32) -> vec3<f32> {',
+        '    let rockW = smoothstep(CBT_SLOPE_LO, CBT_SLOPE_HI, slope01);',
+        '    var base = mix(CBT_REGOLITH, CBT_ROCK, rockW);',
+        '    let highW = smoothstep(CBT_ALT_LO, CBT_ALT_HI, altKm);',
+        '    base = mix(base, base * CBT_HIGHLAND_TINT, highW);',
+        '    return base;',
+        '}',
         // Per-LOD-level palette — mirrors LEVEL_COLORS / the implicit material's
         // cbtLodColor so the X-key debug view matches the rest of the terrain.
         'fn cbtLodColor(level : u32) -> vec3<f32> {',
@@ -197,7 +226,16 @@ function fragmentSource(opts: OcbtRenderOptions): string {
         '    // Same per-vertex camera distance (km) the height decode used -> the detail',
         '    // octaves in the normal match the displaced geometry (no shading mismatch).',
         '    let camDistKm = length(rel);',
+        '    // World-anchored cartesian (planet-local km) for the triplanar albedo + altitude.',
+        '    // = uCamAnchor + rel (f32 is fine here: textures tile and the scales stay coarse).',
+        '    let worldHi = uniforms.uCamAnchor + rel;',
+        '    let altKm = length(worldHi) - CBT_RADIUS;',
         '    var nLocal = cbtNoiseNormalAt(dir, CBT_RADIUS, camDistKm);',
+        '    // Landform slope for material splatting: a SMOOTH normal at a medium camera distance',
+        '    // (CBT_SLOPE_DIST) so the cm micro-relief is faded out and rock follows 30m+ hills /',
+        '    // crater walls instead of speckling every per-pixel bump.',
+        '    let nSlope = cbtNoiseNormalAt(dir, CBT_RADIUS, CBT_SLOPE_DIST);',
+        '    let slope01 = clamp(1.0 - dot(nSlope, dir), 0.0, 1.0);',
         '    // Near-ground WORLD-ANCHORED micro-relief. Reconstruct the surface direction in',
         '    // df64: world = uCamAnchor + rel (the eval subtracted the SAME f32 uCamAnchor, so',
         '    // its rounding error cancels and world == the true surface point to ~um). normalize',
@@ -226,7 +264,9 @@ function fragmentSource(opts: OcbtRenderOptions): string {
         '    let L = normalize(-uniforms.uLightDirection);',
         '    let ndl = max(dot(nWorld, L), 0.0);',
         '    let lighting = CBT_AMBIENT + CBT_LIGHTCOLOR * ndl;',
-        '    fragmentOutputs.color = vec4<f32>(CBT_ALBEDO * lighting, 1.0);',
+        '    // Procedural albedo + slope/altitude splatting (replaces the flat CBT_ALBEDO).',
+        '    let albedo = cbtGroundAlbedo(slope01, altKm);',
+        '    fragmentOutputs.color = vec4<f32>(albedo * lighting, 1.0);',
         '    fragmentOutputs.fragDepth = log2(fragmentInputs.vFragmentDepth) * uniforms.logarithmicDepthConstant * 0.5;',
         '    return fragmentOutputs;',
         '}'
