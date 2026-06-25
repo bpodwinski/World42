@@ -499,6 +499,8 @@ export class OcbtTopologyKernel {
                       `const CBT_LACUNARITY : f32 = ${f(n.lacunarity)};`,
                       `const CBT_PERSISTENCE : f32 = ${f(n.persistence)};`,
                       `const CBT_GLOBAL_AMP : f32 = ${f(n.globalAmplitude)};`,
+                      `const CBT_DETAIL_OCTAVES : i32 = ${Math.max(0, Math.floor(n.detailOctaves ?? 0))};`,
+                      `const CBT_DETAIL_RANGE : f32 = ${f(n.detailRange ?? 60)};`,
                       '@group(0) @binding(21) var<storage, read> cbtPerm : array<u32>;'
                   ].join('\n')
                 : [
@@ -509,6 +511,8 @@ export class OcbtTopologyKernel {
                       'const CBT_LACUNARITY : f32 = 2.0;',
                       'const CBT_PERSISTENCE : f32 = 0.5;',
                       'const CBT_GLOBAL_AMP : f32 = 0.0;',
+                      'const CBT_DETAIL_OCTAVES : i32 = 0;',
+                      'const CBT_DETAIL_RANGE : f32 = 60.0;',
                       '@group(0) @binding(21) var<storage, read> cbtPerm : array<u32>;'
                   ].join('\n');
 

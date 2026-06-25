@@ -51,6 +51,10 @@ function bakedHeader(opts: GpuCbtRenderOptions): string {
         `const CBT_LACUNARITY : f32 = ${f(n.lacunarity)};`,
         `const CBT_PERSISTENCE : f32 = ${f(n.persistence)};`,
         `const CBT_GLOBAL_AMP : f32 = ${f(n.globalAmplitude)};`,
+        // Detail-octave consts: cbt_noise.wgsl declares cbtFbm_d_at which references them, so
+        // they must exist even though this material's VS uses the macro-only cbtFbmHeight.
+        `const CBT_DETAIL_OCTAVES : i32 = ${Math.max(0, Math.floor(n.detailOctaves ?? 0))};`,
+        `const CBT_DETAIL_RANGE : f32 = ${f(n.detailRange ?? 60)};`,
         `const CBT_ALBEDO : vec3<f32> = vec3<f32>(${f(albedo.x)}, ${f(albedo.y)}, ${f(albedo.z)});`,
         `const CBT_AMBIENT : vec3<f32> = vec3<f32>(${f(ambient.x)}, ${f(ambient.y)}, ${f(ambient.z)});`,
         `const CBT_LIGHTCOLOR : vec3<f32> = vec3<f32>(${f(lightColor.x)}, ${f(lightColor.y)}, ${f(lightColor.z)});`,

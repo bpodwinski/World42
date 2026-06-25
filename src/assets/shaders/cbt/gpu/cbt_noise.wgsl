@@ -6,8 +6,12 @@
 //   const CBT_LACUNARITY : f32 = ...;  const CBT_PERSISTENCE : f32 = ...;
 //   const CBT_GLOBAL_AMP : f32 = ...;
 //   var<storage, read> cbtPerm : array<u32>;   // 256 entries, values 0..255
+// Callers of the *_at (continued-detail) helpers must ALSO define:
+//   const CBT_DETAIL_OCTAVES : i32 = ...;  // extra octaves past CBT_OCTAVES (0 = off)
+//   const CBT_DETAIL_RANGE : f32 = ...;    // fade-in distance in wavelengths (~60)
 
 const CBT_MAX_OCTAVES : i32 = 12;
+const CBT_MAX_DETAIL : i32 = 12;
 
 fn cbtGrad3(i : i32) -> vec3<f32> {
     switch (i % 12) {
@@ -123,6 +127,60 @@ fn cbtFbmHeight(dir : vec3<f32>) -> f32 {
     return cbtFbm_d(dir).x;
 }
 
+// Continued-detail fbm with per-octave camera-distance fade. Returns vec4(height, dHeight/dp).
+// The macro band (i < CBT_OCTAVES) is identical to cbtFbm_d and normalized by the MACRO
+// maxPossible ONLY, so it never shifts when detail fades — the CPU collision / other LOD
+// backends keep matching the macro surface. CBT_DETAIL_OCTAVES extra octaves CONTINUE the
+// cascade (freq *= lacunarity, amp *= persistence) and ADD on top, each faded in by camera
+// distance: a feature of wavelength wl(km) = radiusKm / freq is only sampled once the camera
+// is within ~CBT_DETAIL_RANGE wavelengths (closer => triangles small enough to carry it, no
+// aliasing) and fully on within half that. `camDistKm` is per-VERTEX (length of the camera-
+// relative position) so a shared vertex gets one fade => watertight, no cracks. At f32 the
+// detail stays precise to ~20-30 m wavelength (dir*freq keeps enough mantissa); below that a
+// df64 local-frame decode would be needed (deliberately out of scope here).
+fn cbtFbm_d_at(p : vec3<f32>, camDistKm : f32, radiusKm : f32) -> vec4<f32> {
+    var sum : f32 = 0.0;
+    var maxMacro : f32 = 0.0;
+    var grad : vec3<f32> = vec3<f32>(0.0);
+    var freq : f32 = CBT_BASE_FREQ;
+    var amp : f32 = CBT_BASE_AMP;
+
+    for (var i : i32 = 0; i < CBT_MAX_OCTAVES; i = i + 1) {
+        if (i >= CBT_OCTAVES) { break; }
+        let sd = cbtSimplex3_d(p * freq);
+        sum = sum + sd.x * amp;
+        grad = grad + sd.yzw * (amp * freq);
+        maxMacro = maxMacro + amp;
+        freq = freq * CBT_LACUNARITY;
+        amp = amp * CBT_PERSISTENCE;
+    }
+
+    if (maxMacro <= 1e-12) {
+        return vec4<f32>(0.0);
+    }
+
+    for (var j : i32 = 0; j < CBT_MAX_DETAIL; j = j + 1) {
+        if (j >= CBT_DETAIL_OCTAVES) { break; }
+        let wlKm = radiusKm / freq;
+        let onKm = CBT_DETAIL_RANGE * wlKm;
+        let fade = 1.0 - smoothstep(onKm, onKm * 2.0, camDistKm);
+        if (fade > 0.0) {
+            let sd = cbtSimplex3_d(p * freq);
+            sum = sum + sd.x * (amp * fade);
+            grad = grad + sd.yzw * (amp * freq * fade);
+        }
+        freq = freq * CBT_LACUNARITY;
+        amp = amp * CBT_PERSISTENCE;
+    }
+
+    let inv = CBT_GLOBAL_AMP / maxMacro;
+    return vec4<f32>(sum * inv, grad * inv);
+}
+
+fn cbtFbmHeightAt(dir : vec3<f32>, camDistKm : f32, radiusKm : f32) -> f32 {
+    return cbtFbm_d_at(dir, camDistKm, radiusKm).x;
+}
+
 fn cbtSphereTangents(nrm : vec3<f32>, tang : ptr<function, vec3<f32>>, bitan : ptr<function, vec3<f32>>) {
     var a : vec3<f32>;
     if (abs(nrm.y) > 0.9) { a = vec3<f32>(1.0, 0.0, 0.0); } else { a = vec3<f32>(0.0, 1.0, 0.0); }
@@ -137,6 +195,24 @@ fn cbtNoiseNormal(dir : vec3<f32>, radius : f32) -> vec3<f32> {
     cbtSphereTangents(nrm, &tang, &bitan);
 
     let grad = cbtFbm_d(nrm).yzw;
+    let dhdt = dot(grad, tang);
+    let dhdb = dot(grad, bitan);
+
+    let sc = 1.0 / radius;
+    let pn = nrm - dhdt * sc * tang - dhdb * sc * bitan;
+    return normalize(pn);
+}
+
+// Per-pixel normal that INCLUDES the faded detail octaves, so shading matches the
+// continued-detail geometry from cbtFbm_d_at. camDistKm must be the same distance the
+// height decode used for this surface point (length of the camera-relative position).
+fn cbtNoiseNormalAt(dir : vec3<f32>, radius : f32, camDistKm : f32) -> vec3<f32> {
+    let nrm = normalize(dir);
+    var tang : vec3<f32>;
+    var bitan : vec3<f32>;
+    cbtSphereTangents(nrm, &tang, &bitan);
+
+    let grad = cbtFbm_d_at(nrm, camDistKm, radius).yzw;
     let dhdt = dot(grad, tang);
     let dhdb = dot(grad, bitan);
 

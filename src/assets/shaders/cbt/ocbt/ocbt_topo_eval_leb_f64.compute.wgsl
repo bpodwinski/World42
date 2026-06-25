@@ -127,10 +127,17 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>,
     // positions buffer holds the real terrain surface, making screenPx / frustum / horizon
     // terrain-aware. The big radius cancellation is done in df64; the small height add is f32
     // (post-narrow), exactly as the render vertex shader did it.
-    // relative_c = dir_c * (radius + height(dir_c)) - camLocal.
-    let rel0 = narrow(dv_sub(dv_scale_f32(v0, radius), cam)) + d0 * cbtFbmHeight(d0);
-    let rel1 = narrow(dv_sub(dv_scale_f32(v1, radius), cam)) + d1 * cbtFbmHeight(d1);
-    let rel2 = narrow(dv_sub(dv_scale_f32(v2, radius), cam)) + d2 * cbtFbmHeight(d2);
+    // relative_c = dir_c * (radius + height(dir_c)) - camLocal. The height now includes the
+    // continued-detail octaves, faded by the per-corner camera distance (length of the
+    // smooth-sphere camera-relative base, in sim units = km). Same distance the render's
+    // fragment normal uses (vRel) so geometry and shading stay consistent; per-vertex so a
+    // shared corner gets one fade => watertight.
+    let base0 = narrow(dv_sub(dv_scale_f32(v0, radius), cam));
+    let base1 = narrow(dv_sub(dv_scale_f32(v1, radius), cam));
+    let base2 = narrow(dv_sub(dv_scale_f32(v2, radius), cam));
+    let rel0 = base0 + d0 * cbtFbmHeightAt(d0, length(base0), radius);
+    let rel1 = base1 + d1 * cbtFbmHeightAt(d1, length(base1), radius);
+    let rel2 = base2 + d2 * cbtFbmHeightAt(d2, length(base2), radius);
 
     let b = id * 18u;
     positions[b + 0u] = rel0.x; positions[b + 1u] = rel0.y; positions[b + 2u] = rel0.z;

@@ -115,6 +115,25 @@ export type NoiseParams = {
     lacunarity: number;
     persistence: number;
     globalAmplitude: number;
+    /**
+     * Extra "detail" octaves that CONTINUE the fbm cascade past {@link octaves}
+     * (same lacunarity/persistence). They are GPU-only and fade in by camera
+     * distance so they cost nothing from orbit and add ground-scale relief on
+     * approach — the fix for "no detail below ~1.2 km" (the macro cascade's
+     * frequency floor). They ADD on top of the macro band (which stays
+     * normalized by itself), so the macro surface is unchanged whatever the
+     * fade — the CPU collision / CDLOD field still match the macro topology.
+     * Optional: omitted => 0 (no detail, legacy behaviour).
+     */
+    detailOctaves?: number;
+    /**
+     * How eagerly detail octaves fade in, in "wavelengths of camera distance".
+     * Octave j (wavelength wl = radiusKm / freq_j) is fully on when the camera
+     * is within detailRange * wl and fully off beyond 2 * detailRange * wl.
+     * ~60 aligns detail-on with the LOD splitting the triangles fine enough to
+     * carry the feature (no aliasing). Optional: omitted => 60.
+     */
+    detailRange?: number;
 };
 
 /**
@@ -129,12 +148,14 @@ export type NoiseParams = {
  */
 export const DEFAULT_NOISE: NoiseParams = {
     seed: 1,
-    octaves: 16,
-    baseFrequency: 8.0,
+    octaves: 12,
+    baseFrequency: 6.0,
     baseAmplitude: 16.0,
-    lacunarity: 1.8,
+    lacunarity: 2.0,
     persistence: 0.5,
-    globalAmplitude: 50.0,
+    globalAmplitude: 80.0,
+    detailOctaves: 8,
+    detailRange: 30.0,
 };
 
 let cachedPerm: Uint8Array | null = null;
