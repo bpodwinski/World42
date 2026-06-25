@@ -1,0 +1,126 @@
+{
+  "label": "cdlod",
+  "lod": "cdlod",
+  "url": "http://localhost:19000/?bench=cdlod",
+  "capturedAtMs": null,
+  "gpuAvailable": false,
+  "waypoints": [
+    20,
+    8,
+    5,
+    3,
+    2,
+    1.4,
+    1.08,
+    1.02
+  ],
+  "settleMs": 3000,
+  "sampleMs": 1500,
+  "warmupMs": 4000,
+  "byAltitude": [
+    {
+      "mult": 20,
+      "frameMsP50": 1.2,
+      "frameMsP95": 4.4357142852885385,
+      "gpuMsP50": 0,
+      "gpuMsP95": 0,
+      "drawCalls": 27,
+      "activeIndices": 829480,
+      "triangles": 276493,
+      "leafCount": 0,
+      "samples": 91
+    },
+    {
+      "mult": 8,
+      "frameMsP50": 0.9966666666169961,
+      "frameMsP95": 1.0299999992052713,
+      "gpuMsP50": 0,
+      "gpuMsP95": 0,
+      "drawCalls": 27,
+      "activeIndices": 829480,
+      "triangles": 276493,
+      "leafCount": 0,
+      "samples": 91
+    },
+    {
+      "mult": 5,
+      "frameMsP50": 0.9283333331346512,
+      "frameMsP95": 0.9283333331346512,
+      "gpuMsP50": 0,
+      "gpuMsP95": 0,
+      "drawCalls": 27,
+      "activeIndices": 829480,
+      "triangles": 276493,
+      "leafCount": 0,
+      "samples": 91
+    },
+    {
+      "mult": 3,
+      "frameMsP50": 0.9150000010927518,
+      "frameMsP95": 0.9150000010927518,
+      "gpuMsP50": 0,
+      "gpuMsP95": 0,
+      "drawCalls": 27,
+      "activeIndices": 829480,
+      "triangles": 276493,
+      "leafCount": 0,
+      "samples": 91
+    },
+    {
+      "mult": 2,
+      "frameMsP50": 0.9599999994039535,
+      "frameMsP95": 1.034999999900659,
+      "gpuMsP50": 0,
+      "gpuMsP95": 0,
+      "drawCalls": 36,
+      "activeIndices": 1327144,
+      "triangles": 442381,
+      "leafCount": 0,
+      "samples": 91
+    },
+    {
+      "mult": 1.4,
+      "frameMsP50": 1.6966666663686434,
+      "frameMsP95": 1.7616666669646899,
+      "gpuMsP50": 0,
+      "gpuMsP95": 0,
+      "drawCalls": 144,
+      "activeIndices": 7299112,
+      "triangles": 2433037,
+      "leafCount": 0,
+      "samples": 91
+    },
+    {
+      "mult": 1.08,
+      "frameMsP50": 1.9516666680574417,
+      "frameMsP95": 2.058333333581686,
+      "gpuMsP50": 0,
+      "gpuMsP95": 0,
+      "drawCalls": 204,
+      "activeIndices": 10616872,
+      "triangles": 3538957,
+      "leafCount": 0,
+      "samples": 91
+    },
+    {
+      "mult": 1.02,
+      "frameMsP50": 2.221666666616996,
+      "frameMsP95": 2.2266666658222674,
+      "gpuMsP50": 0,
+      "gpuMsP95": 0,
+      "drawCalls": 231,
+      "activeIndices": 12109864,
+      "triangles": 4036621,
+      "leafCount": 0,
+      "samples": 91
+    }
+  ],
+  "summary": {
+    "frameMsP50": 1.120000000546376,
+    "frameMsP95": 2.2266666658222674,
+    "gpuMsP50": 0,
+    "gpuMsP95": 0,
+    "maxLeaves": 0,
+    "maxActiveIndices": 12109864
+  }
+}

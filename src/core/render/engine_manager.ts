@@ -33,6 +33,10 @@ export class EngineManager {
         const engine = new WebGPUEngine(canvas, {
             stencil: true,
             antialias: true,
+            // Request the timestamp-query feature so EngineInstrumentation.gpuFrameTime
+            // (perf HUD + headless bench) reports real GPU time instead of 0. Negligible
+            // overhead; degrades gracefully to 0 on adapters without the feature.
+            enableGPUTimingMeasurements: true,
         } as WebGPUEngineOptions);
 
         await engine.initAsync();
@@ -89,6 +93,7 @@ export class EngineManager {
                 const engine = new WebGPUEngine(canvas, {
                     stencil: true,
                     antialias: true,
+                    enableGPUTimingMeasurements: true, // real GPU time for HUD + bench
                 } as WebGPUEngineOptions);
 
                 await engine.initAsync();
@@ -119,6 +124,7 @@ export class EngineManager {
                 const engine = new WebGPUEngine(canvas, {
                     stencil: true,
                     antialias: true,
+                    enableGPUTimingMeasurements: true, // real GPU time for HUD + bench
                 } as WebGPUEngineOptions);
 
                 await engine.initAsync();

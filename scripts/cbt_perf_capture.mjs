@@ -156,14 +156,14 @@ async function sampleWaypoint(page, planet, mult) {
         const draws = [];
         const indices = [];
         let maxLeaves = 0;
-        let last = performance.now();
-        const end = last + sampleMs;
+        const end = performance.now() + sampleMs;
         await new Promise((resolve) => {
             const tick = (now) => {
-                frames.push(now - last);
-                last = now;
                 const s = hook.getStats();
-                gpu.push(s.gpuMs);
+                // Real instrumented CPU frame time (SceneInstrumentation), NOT the rAF
+                // wall-clock delta — that is VSync-locked at ~16.7 ms and hides all cost.
+                if (s.frameMs > 0) frames.push(s.frameMs);
+                if (s.gpuMs > 0) gpu.push(s.gpuMs);
                 draws.push(s.drawCalls);
                 indices.push(s.activeIndices);
                 if (s.cbt.leafCount > maxLeaves) maxLeaves = s.cbt.leafCount;
@@ -205,7 +205,14 @@ async function main() {
         page = await ctx.newPage();
         await page.setViewportSize({ width: 1920, height: 1080 });
     } else {
-        browser = await chromium.launch({ headless: true });
+        // Headless Chromium has no WebGPU, so the GPU backends (cbt-gpu/cbt-ocbt) can't run
+        // there. PW_HEADLESS=0 launches a headed browser with WebGPU enabled (real GPU), the
+        // only way to bench the GPU paths. Default stays headless for CPU-only / CI runs.
+        const headless = process.env.PW_HEADLESS !== '0';
+        const gpuArgs = headless
+            ? []
+            : ['--enable-unsafe-webgpu', '--enable-features=Vulkan', '--ignore-gpu-blocklist'];
+        browser = await chromium.launch({ headless, args: gpuArgs });
         page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
     }
 
