@@ -36,9 +36,9 @@ struct FrustumParams {
 @group(0) @binding(20) var<uniform>             fp             : FrustumParams;
 
 // EvaluateLEB (f64 variant) writes 18 f32/slot: per corner [relative.xyz, dir.xyz].
-// `relative` is the camera-relative planet-local position (so |relative| = distance to
-// camera, and corner-to-corner differences are exact edge vectors). `dir` is the unit
-// surface direction (for the backside cull).
+// `relative` is the camera-relative TERRAIN-displaced position (so |relative| = distance
+// to camera, and corner-to-corner differences are exact edge vectors). `dir` is the unit
+// surface direction (smooth-sphere edge metric + backside cull).
 fn corner_rel(slot : u32, c : u32) -> vec3<f32> {
     let b = slot * 18u + c * 6u;
     return vec3<f32>(positions[b], positions[b + 1u], positions[b + 2u]);

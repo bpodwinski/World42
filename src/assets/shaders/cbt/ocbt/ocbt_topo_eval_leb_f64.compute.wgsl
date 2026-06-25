@@ -13,10 +13,10 @@
 //      it does NOT jitter adjacent vertices, so it cannot crack the mesh.
 //
 // Output layout (18 f32/slot): per corner c in 0..2 -> [relative.xyz, dir.xyz] at
-// slot*18 + c*6. relative = camera-relative planet-local position (sim units); dir =
-// the f32 unit direction (for the noise height + per-pixel normal). The vertex shader
-// does renderPos = mat3(world) * (relative + dir*height) — no big-number multiply, so
-// the precision survives to the GPU.
+// slot*18 + c*6. relative = camera-relative planet-local TERRAIN-displaced position (sim
+// units); dir = the f32 unit surface direction (render fragment recomputes the smooth
+// per-pixel normal from it; classify uses it for the edge metric + horizon cull). The
+// render VS does renderPos = mat3(world) * relative — no big-number multiply.
 //
 // Composed after: engineWgslPreamble + ocbt_u64.wgsl + ocbt_f64.wgsl + common.
 // Reuses the metric classify camera UBO (binding 17): camRadius.xyz = camLocal, .w = radius.
@@ -144,7 +144,8 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>,
     let base2 = narrow(dv_sub(dv_scale_f32(v2, radius), cam));
     // Height from the df64-DOMAIN fbm: pass the df64 unit corners (v0/v1/v2) so the noise
     // domain p*freq stays cell-precise to ~cm at depth (f32 dir banded the relief at
-    // ~1-30 m). The displacement direction + camera distance stay f32 (d0/length(base0)).
+    // ~1-30 m). dir (d0/d1/d2) is output for the render fragment's per-pixel normal (smooth
+    // — a per-vertex normal facets at coarse tessellation), and the classify metric.
     let rel0 = base0 + d0 * cbtFbmHeightAt_df64(v0.x, v0.y, v0.z, length(base0), radius);
     let rel1 = base1 + d1 * cbtFbmHeightAt_df64(v1.x, v1.y, v1.z, length(base1), radius);
     let rel2 = base2 + d2 * cbtFbmHeightAt_df64(v2.x, v2.y, v2.z, length(base2), radius);
