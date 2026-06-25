@@ -152,16 +152,16 @@ export type NoiseParams = {
  */
 export const DEFAULT_NOISE: NoiseParams = {
     seed: 1,
-    octaves: 32,
-    baseFrequency: 8,
-    baseAmplitude: 16,
-    lacunarity: 2.2,
+    octaves: 8,
+    baseFrequency: 5.5,
+    baseAmplitude: 32,
+    lacunarity: 2.07,
     persistence: 0.5,
     // Reduced from 180: craters (cbt_noise.wgsl craterField, depths up to ~18 km) are now the
     // DOMINANT relief; the fbm is the finer inter-crater roughness on top.
     globalAmplitude: 25,
-    detailOctaves: 32,
-    detailRange: 80,
+    detailOctaves: 16,
+    detailRange: 75,
 };
 
 let cachedPerm: Uint8Array | null = null;
@@ -208,6 +208,8 @@ export function fbmNoise(
 const CRATER_CLASSES = 6;
 const CRATER_SCALE = 1.0; // keep in sync with CBT_CRATER_SCALE in cbt_noise.wgsl
 const CRATER_RANGE = 60.0; // keep in sync with CBT_CRATER_RANGE in cbt_noise.wgsl
+const RIM_IRR = 0.28; // keep in sync with CBT_RIM_IRR in cbt_noise.wgsl
+const RIM_FREQ = 3.5; // keep in sync with CBT_RIM_FREQ in cbt_noise.wgsl
 
 // [cellSizeKm, crater radius (frac of cell), depthKm, density]. Mirror of craterParams (WGSL).
 const CRATER_PARAMS: ReadonlyArray<readonly [number, number, number, number]> = [
@@ -219,8 +221,9 @@ const CRATER_PARAMS: ReadonlyArray<readonly [number, number, number, number]> = 
     [2, 0.2, 0.12, 0.85],
 ];
 
-/** Radial crater profile h(rn) (height only) — mirror of craterProfile (WGSL). */
-function craterProfile(rn: number): number {
+/** Radial crater profile h(rn) (height only) — mirror of craterProfile (WGSL). `morph` adds the
+ *  complex-crater central peak for big classes. */
+function craterProfile(rn: number, morph: number): number {
     const RIM = 0.85,
         RIMH = 0.22,
         RW = 0.18,
@@ -243,6 +246,11 @@ function craterProfile(rn: number): number {
     if (Math.abs(xe) < 1) {
         const be = 1 - xe * xe;
         h += EJH * be * be;
+    }
+    if (morph > 0 && rn < 0.22) {
+        const xp = rn / 0.22;
+        const bp = 1 - xp * xp;
+        h += morph * 0.55 * bp * bp;
     }
     return h;
 }
@@ -272,6 +280,8 @@ function craterField(
         const Pix = Math.floor(Px),
             Piy = Math.floor(Py),
             Piz = Math.floor(Pz);
+        // Irregular-rim warp: ONE simplex per class (mirror of WGSL), shared by the class's craters.
+        const irr = 1 + RIM_IRR * simplex3(perm, Px * RIM_FREQ, Py * RIM_FREQ, Pz * RIM_FREQ);
         let h = 0;
         for (let dz = -1; dz <= 1; dz++) {
             for (let dy = -1; dy <= 1; dy++) {
@@ -291,10 +301,12 @@ function craterField(
                     const qx = Px - (cix + 0.15 + 0.7 * (q0 / 256));
                     const qy = Py - (ciy + 0.15 + 0.7 * (q1 / 256));
                     const qz = Pz - (ciz + 0.15 + 0.7 * (q2 / 256));
-                    const dist = Math.sqrt(qx * qx + qy * qy + qz * qz);
-                    const rn = dist / r0e;
+                    const dist = Math.sqrt(qx * qx + qy * qy + qz * qz) || 1e-9;
+                    const rEff = r0e * irr;
+                    const rn = dist / rEff;
                     if (rn >= 2) continue;
-                    h += depe * craterProfile(rn);
+                    const morph = k <= 2 ? 1 : 0;
+                    h += depe * craterProfile(rn, morph);
                 }
             }
         }

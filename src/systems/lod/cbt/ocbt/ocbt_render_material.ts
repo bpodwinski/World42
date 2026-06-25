@@ -87,7 +87,11 @@ function bakedHeader(opts: OcbtRenderOptions): string {
         `const CBT_SLOPE_HI : f32 = 0.22;`,
         `const CBT_SLOPE_DIST : f32 = 2.0;`,
         `const CBT_ALT_LO : f32 = ${f(opts.noise.globalAmplitude * 0.25)};`,
-        `const CBT_ALT_HI : f32 = ${f(opts.noise.globalAmplitude * 0.65)};`
+        `const CBT_ALT_HI : f32 = ${f(opts.noise.globalAmplitude * 0.65)};`,
+        // Smooth plains vs cratered highlands: a BROAD (continental ~400 km), SUBTLE brightness
+        // variation so the surface isn't uniform — NOT the fine blotches. dir-based (no swim).
+        `const CBT_PLAINS_FREQ : f32 = ${f(opts.radius / 400)};`,
+        `const CBT_PLAINS_AMP : f32 = 0.12;`
     ].flat().join('\n');
 }
 
@@ -265,7 +269,13 @@ function fragmentSource(opts: OcbtRenderOptions): string {
         '    let ndl = max(dot(nWorld, L), 0.0);',
         '    let lighting = CBT_AMBIENT + CBT_LIGHTCOLOR * ndl;',
         '    // Procedural albedo + slope/altitude splatting (replaces the flat CBT_ALBEDO).',
-        '    let albedo = cbtGroundAlbedo(slope01, altKm);',
+        '    var albedo = cbtGroundAlbedo(slope01, altKm);',
+        '    // Broad plains/highlands brightness variation (continental scale, subtle, no swim).',
+        '    albedo = albedo * (1.0 + CBT_PLAINS_AMP * cbtSimplex3_d(dir * CBT_PLAINS_FREQ).x);',
+        '    // Bright ejecta rays + halos of FRESH craters (the white impact traces). Higher albedo,',
+        '    // so add before lighting (still shaded). Grey -> add to all channels.',
+        '    let rays = craterRays(dir, CBT_RADIUS, camDistKm);',
+        '    albedo = albedo + vec3<f32>(rays);',
         '    fragmentOutputs.color = vec4<f32>(albedo * lighting, 1.0);',
         '    fragmentOutputs.fragDepth = log2(fragmentInputs.vFragmentDepth) * uniforms.logarithmicDepthConstant * 0.5;',
         '    return fragmentOutputs;',

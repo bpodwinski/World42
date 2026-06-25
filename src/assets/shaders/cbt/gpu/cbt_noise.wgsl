@@ -109,6 +109,8 @@ const CBT_CRATER_RANGE : f32 = 60.0; // class fades only when far enough to be s
                                      // stay visible from orbit; only truly tiny ones drop (AA).
 const CBT_CRATER_NEAR : f32 = 0.10; // NORMAL-only: skip classes much BIGGER than camDist (locally flat
                                     // wall -> negligible per-pixel shading). HEIGHT keeps all classes.
+const CBT_RIM_IRR : f32 = 0.28;     // irregular-rim amplitude (rim radius varies +-28% by direction)
+const CBT_RIM_FREQ : f32 = 3.5;     // irregular-rim lobes (low -> polygonal/lumpy, not circular)
 
 // Per size-class params: x = cell size (km, -> freq = radiusKm/cell), y = crater radius (frac of
 // cell), z = depth (km), w = density (fraction of cells that spawn a crater). Big rare -> small
@@ -127,7 +129,8 @@ fn craterParams(k : i32) -> vec4<f32> {
 
 // Radial crater profile h(rn) (rn = dist/radius) + derivative h'(rn). C1, compact support (0 and
 // 0-slope at rn>=2): flat-floored bowl (depression) + raised rim + fading ejecta, all (1-x^2)^2.
-fn craterProfile(rn : f32, hp : ptr<function, f32>, dhp : ptr<function, f32>) {
+// `morph` (0..1) adds COMPLEX-crater morphology (big craters): a central peak rising from the floor.
+fn craterProfile(rn : f32, morph : f32, hp : ptr<function, f32>, dhp : ptr<function, f32>) {
     let RIM = 0.85; let RIMH = 0.22; let RW = 0.18; let FLOOR = -1.0;
     let EJH = 0.06; let EJC = 1.1; let EJW = 0.9;
     var h = 0.0; var d = 0.0;
@@ -140,6 +143,12 @@ fn craterProfile(rn : f32, hp : ptr<function, f32>, dhp : ptr<function, f32>) {
     if (abs(x) < 1.0) { let b = 1.0 - x * x; h = h + RIMH * b * b; d = d + RIMH * (-4.0 * x * b) / RW; }
     let xe = (rn - EJC) / EJW;
     if (abs(xe) < 1.0) { let be = 1.0 - xe * xe; h = h + EJH * be * be; d = d + EJH * (-4.0 * xe * be) / EJW; }
+    // Central peak (complex craters): a bump rising from the bowl floor, fading out by rn=PW.
+    if (morph > 0.0 && rn < 0.22) {
+        let xp = rn / 0.22; let bp = 1.0 - xp * xp; let CPH = 0.55;
+        h = h + morph * CPH * bp * bp;
+        d = d + morph * CPH * (-4.0 * xp * bp) / 0.22;
+    }
     *hp = h; *dhp = d;
 }
 
@@ -162,6 +171,9 @@ fn craterField(dir : vec3<f32>, radiusKm : f32, camDistKm : f32, skipBig : bool)
         let fk = radiusKm / prm.x;
         let P = dir * fk;
         let Pi = floor(P);
+        // Irregular-rim warp field: ONE simplex sample per class (cheap), shared by the class's
+        // craters. It varies across each crater (wavelength < crater) so rims become lumpy.
+        let irr = 1.0 + CBT_RIM_IRR * cbtSimplex3_d(P * CBT_RIM_FREQ).x;
         var h = 0.0; var g = vec3<f32>(0.0);
         for (var dz = -1; dz <= 1; dz = dz + 1) {
         for (var dy = -1; dy <= 1; dy = dy + 1) {
@@ -181,12 +193,16 @@ fn craterField(dir : vec3<f32>, radiusKm : f32, camDistKm : f32, skipBig : bool)
             let depe = prm.z * CBT_CRATER_SCALE * (0.6 + 0.8 * rVar);
             let qd = P - center;
             let dist = sqrt(dot(qd, qd));
-            let rn = dist / r0e;
+            let rEff = r0e * irr;
+            let rn = dist / rEff;
             if (rn >= 2.0) { continue; }
+            // Big classes are COMPLEX craters (central peak); small ones are simple bowls.
+            var morph = 0.0;
+            if (k <= 2) { morph = 1.0; }
             var hp : f32; var dhp : f32;
-            craterProfile(rn, &hp, &dhp);
+            craterProfile(rn, morph, &hp, &dhp);
             h = h + depe * hp;
-            if (dist > 1e-6 * r0e) { g = g + (depe * dhp / r0e) * (qd / dist); }
+            if (dist > 1e-6 * rEff) { g = g + (depe * dhp / rEff) * (qd / dist); }
         }
         }
         }
@@ -314,6 +330,83 @@ fn cbtNoiseNormal(dir : vec3<f32>, radius : f32) -> vec3<f32> {
     let sc = 1.0 / radius;
     let pn = nrm - dhdt * sc * tang - dhdb * sc * bitan;
     return normalize(pn);
+}
+
+// --- CRATER RAYS + EJECTA HALOS (albedo only) ---------------------------------------------
+// The bright "white traces" of FRESH impacts (Mercury/Moon): a high-albedo halo just outside the
+// rim + radial bright RAYS. Returns an additive brightness (0 = none) the fragment adds to albedo.
+// Reuses the crater Worley but ONLY for fresh craters (a per-cell age hash) of the bigger classes
+// (the prominent ray systems). Cheap-skips non-existent / non-fresh cells before any sqrt.
+const CBT_CRATER_FRESH : f32 = 0.13; // fraction of craters that are fresh (few, like real Mercury)
+const CBT_RAY_CLASSES : i32 = 2;     // only the 2 biggest classes emit rays (prominent systems + perf)
+const CBT_RAY_N : i32 = 16;          // potential ray directions around a crater
+const CBT_RAY_REACH : f32 = 5.0;     // ray length in crater radii (rn)
+const CBT_HALO_H : f32 = 0.45;       // bright ejecta-halo strength
+const CBT_RAY_H : f32 = 0.7;         // bright ray strength
+
+// Irregular radial spokes: periodic value-noise of the azimuth (N cells around the circle, wraps
+// seamlessly), hashed per crater, thresholded to sparse bright rays.
+fn craterRayStreak(a : f32, seed : i32) -> f32 {
+    let u = a * (1.0 / 6.2831853) + 0.5;
+    let x = u * f32(CBT_RAY_N);
+    let i0 = i32(floor(x)) % CBT_RAY_N;
+    let i1 = (i0 + 1) % CBT_RAY_N;
+    let f = fract(x);
+    let h0 = f32(cbtPermAt(i0 + seed)) * (1.0 / 256.0);
+    let h1 = f32(cbtPermAt(i1 + seed)) * (1.0 / 256.0);
+    let v = mix(h0, h1, f * f * (3.0 - 2.0 * f));
+    // Soft spokes: a wide smooth ramp (no hard threshold) so the grey->white transition is gradual,
+    // then squared so the dark majority dominates and only the brightest cores feather to white.
+    let s = smoothstep(0.3, 1.0, v);
+    return s * s;
+}
+
+fn craterRays(dir : vec3<f32>, radiusKm : f32, camDistKm : f32) -> f32 {
+    let nrm = normalize(dir);
+    var t1 : vec3<f32>; var t2 : vec3<f32>;
+    cbtSphereTangents(nrm, &t1, &t2);
+    var bright = 0.0;
+    for (var k = 0; k < CBT_RAY_CLASSES; k = k + 1) {
+        let prm = craterParams(k);
+        let onKm = CBT_CRATER_RANGE * prm.x;
+        let fade = 1.0 - smoothstep(onKm, onKm * 2.0, camDistKm);
+        if (fade <= 0.0) { continue; }
+        let fk = radiusKm / prm.x;
+        let P = dir * fk;
+        let Pi = floor(P);
+        for (var dz = -1; dz <= 1; dz = dz + 1) {
+        for (var dy = -1; dy <= 1; dy = dy + 1) {
+        for (var dx = -1; dx <= 1; dx = dx + 1) {
+            let ci = Pi + vec3<f32>(f32(dx), f32(dy), f32(dz));
+            let ix = i32(ci.x) & 255; let iy = i32(ci.y) & 255; let iz = i32(ci.z) & 255;
+            let q0 = cbtPermAt(ix + cbtPermAt(iy + cbtPermAt(iz)));
+            if (f32(q0) * (1.0 / 256.0) >= prm.w) { continue; }
+            let q3 = cbtPermAt(ix + cbtPermAt(iy + cbtPermAt(iz + 1)));
+            if (f32(q3) * (1.0 / 256.0) >= CBT_CRATER_FRESH) { continue; }
+            let q1 = cbtPermAt(ix + 1 + cbtPermAt(iy + cbtPermAt(iz)));
+            let q2 = cbtPermAt(ix + cbtPermAt(iy + 1 + cbtPermAt(iz)));
+            let jitter = vec3<f32>(f32(q0), f32(q1), f32(q2)) * (1.0 / 256.0);
+            let center = ci + (vec3<f32>(0.15) + 0.7 * jitter);
+            let r0e = prm.y * (0.8 + 0.4 * (f32(q2) * (1.0 / 256.0)));
+            let qd = P - center;
+            let dist = sqrt(dot(qd, qd));
+            let rn = dist / r0e;
+            if (rn >= CBT_RAY_REACH) { continue; }
+            // Soft diffuse halo: wide smooth ring (gentle inner rise + long outer fade).
+            let halo = CBT_HALO_H * smoothstep(0.7, 1.2, rn) * (1.0 - smoothstep(1.2, 2.8, rn));
+            var rays = 0.0;
+            if (rn > 0.9) {
+                let a = atan2(dot(qd, t2), dot(qd, t1));
+                // Smooth radial falloff (squared) so rays feather out gradually, no hard ends.
+                let radial = 1.0 - smoothstep(0.9, CBT_RAY_REACH, rn);
+                rays = CBT_RAY_H * craterRayStreak(a, q0) * radial * radial;
+            }
+            bright = bright + (halo + rays) * fade;
+        }
+        }
+        }
+    }
+    return bright;
 }
 
 // Per-pixel normal that INCLUDES the faded detail octaves, so shading matches the
