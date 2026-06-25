@@ -149,13 +149,13 @@ export type NoiseParams = {
 export const DEFAULT_NOISE: NoiseParams = {
     seed: 1,
     octaves: 12,
-    baseFrequency: 6.0,
-    baseAmplitude: 16.0,
+    baseFrequency: 6,
+    baseAmplitude: 16,
     lacunarity: 2.0,
     persistence: 0.5,
-    globalAmplitude: 80.0,
-    detailOctaves: 8,
-    detailRange: 30.0,
+    globalAmplitude: 60,
+    detailOctaves: 6,
+    detailRange: 70,
 };
 
 let cachedPerm: Uint8Array | null = null;

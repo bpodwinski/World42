@@ -9,6 +9,11 @@ export type StarGlowSource = {
     intensity: number;
 };
 
+export type StarOccluder = {
+    posWorldDouble: Vector3;
+    radiusSim: number;
+};
+
 function pickNearestStar(camWorldDouble: Vector3, stars: StarGlowSource[]): StarGlowSource | null {
     if (!stars.length) return null;
     let best = stars[0];
@@ -27,7 +32,8 @@ function pickNearestStar(camWorldDouble: Vector3, stars: StarGlowSource[]): Star
 export function attachStarRayMarchingPostProcess(
     scene: Scene,
     camera: OriginCamera,
-    stars: StarGlowSource[]
+    stars: StarGlowSource[],
+    occluders?: StarOccluder[]
 ): PostProcess {
     // PostProcess name "starRayMarching" => expects key "starRayMarchingFragmentShader"
     Effect.ShadersStore["starRayMarchingFragmentShader"] = starRayMarchingFragmentShader;
@@ -44,6 +50,8 @@ export function attachStarRayMarchingPostProcess(
             "tMax",
             "starColor",
             "starIntensity",
+            "occluderCenter",
+            "occluderRadius",
             "inverseProjection",
             "inverseView",
         ],
@@ -54,6 +62,7 @@ export function attachStarRayMarchingPostProcess(
 
     // Reuse allocations
     const starCenterRender = new Vector3();
+    const occluderCenterRender = new Vector3();
     const res = new Vector2();
     const invProj = new Matrix();
     const invView = new Matrix();
@@ -93,6 +102,27 @@ export function attachStarRayMarchingPostProcess(
             effect.setFloat("tMax", 1.0);
             effect.setVector3("starColor", new Vector3(1, 1, 1));
             effect.setFloat("starIntensity", 0.0);
+        }
+
+        // Nearest planet as occluder — stops the ray-march at the planet surface.
+        let nearestOccluder: StarOccluder | null = null;
+        if (occluders && occluders.length > 0) {
+            let bestD2 = Infinity;
+            for (const occ of occluders) {
+                const d2 = Vector3.DistanceSquared(camera.doublepos, occ.posWorldDouble);
+                if (d2 < bestD2) {
+                    bestD2 = d2;
+                    nearestOccluder = occ;
+                }
+            }
+        }
+        if (nearestOccluder) {
+            camera.toRenderSpace(nearestOccluder.posWorldDouble, occluderCenterRender);
+            effect.setVector3("occluderCenter", occluderCenterRender);
+            effect.setFloat("occluderRadius", nearestOccluder.radiusSim);
+        } else {
+            effect.setVector3("occluderCenter", Vector3.ZeroReadOnly);
+            effect.setFloat("occluderRadius", -1.0);
         }
     };
 

@@ -10,7 +10,7 @@ import {
 } from '@babylonjs/core';
 import { OriginCamera } from '../core/camera/camera_manager';
 import { DisposableRegistry } from '../core/lifecycle/disposable_registry';
-import { attachStarRayMarchingPostProcess, type StarGlowSource } from '../core/render/star_raymarch_postprocess';
+import { attachStarRayMarchingPostProcess, type StarGlowSource, type StarOccluder } from '../core/render/star_raymarch_postprocess';
 import {
     createCBTForSystem,
     createCDLODForSystem,
@@ -370,7 +370,12 @@ export function setupLodAndShadows(
             });
         }
     }
-    attachStarRayMarchingPostProcess(scene, camera, stars);
+
+    const planetOccluders: StarOccluder[] = Array.from(mergedShadowPlanets.values()).map((p) => ({
+        posWorldDouble: p.entity.doublepos,
+        radiusSim: p.radiusSim,
+    }));
+    attachStarRayMarchingPostProcess(scene, camera, stars, planetOccluders);
 
     return {
         lod,

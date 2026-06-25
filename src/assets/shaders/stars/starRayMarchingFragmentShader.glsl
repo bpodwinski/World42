@@ -9,6 +9,10 @@ uniform float tMax;
 uniform vec3 starColor;
 uniform float starIntensity;
 
+// Nearest planet in render-space. occluderRadius <= 0 means no occluder.
+uniform vec3 occluderCenter;
+uniform float occluderRadius;
+
 uniform mat4 inverseProjection;
 uniform mat4 inverseView;
 uniform sampler2D textureSampler;
@@ -31,14 +35,28 @@ float sdfSphere(vec3 p, vec3 c, float r) {
     return length(p - c) - r;
 }
 
-float rayMarch(vec3 ro, vec3 rd, out float glow) {
+// Returns nearest positive t where ray (ro+t*rd) first hits sphere (c,r), -1 if none.
+float raySphereNearest(vec3 ro, vec3 rd, vec3 c, float r) {
+    vec3 oc = ro - c;
+    float b = dot(oc, rd);
+    float disc = b * b - (dot(oc, oc) - r * r);
+    if (disc < 0.0) return -1.0;
+    float sq = sqrt(disc);
+    float t1 = -b - sq;
+    if (t1 > 0.0) return t1;
+    float t2 = -b + sq;
+    if (t2 > 0.0) return t2;
+    return -1.0;
+}
+
+float rayMarch(vec3 ro, vec3 rd, float tStop, out float glow) {
     float t = 0.0;
     glow = 0.0;
     bool hit = false;
 
     const int steps = 100;
 
-  // Scale eps + threshold a bit with star size (keeps behavior reasonable)
+    // Scale eps + threshold a bit with star size (keeps behavior reasonable)
     float hitEps = max(1.0, starRadius * 0.001);
     float threshold = max(80.0, starRadius * 0.05);
 
@@ -52,10 +70,10 @@ float rayMarch(vec3 ro, vec3 rd, out float glow) {
         if(!hit && d < hitEps)
             hit = true;
 
-    // avoid tiny steps
+        // avoid tiny steps
         t += max(d, hitEps);
 
-        if(t > tMax)
+        if(t > tStop)
             break;
     }
 
@@ -73,12 +91,20 @@ void main() {
     }
 
     vec3 worldPos = worldFromUV(uv, 1.0);
-
     vec3 ro = cameraPositionRender;
     vec3 rd = normalize(worldPos - ro);
 
+    // Stop the march at the nearest planet surface so the star is occluded by the planet.
+    float tStop = tMax;
+    if (occluderRadius > 0.0) {
+        float tPlanet = raySphereNearest(ro, rd, occluderCenter, occluderRadius);
+        if (tPlanet > 0.0 && tPlanet < tStop) {
+            tStop = tPlanet;
+        }
+    }
+
     float glow;
-    float t = rayMarch(ro, rd, glow);
+    rayMarch(ro, rd, tStop, glow);
 
     vec3 add = glow * starColor * starIntensity;
     vec3 hdr = sceneColor + add;
