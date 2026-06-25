@@ -45,7 +45,7 @@ export type OcbtRenderOptions = {
 
 function bakedHeader(opts: OcbtRenderOptions): string {
     const n = opts.noise;
-    const albedo = opts.albedo ?? new Vector3(0.6, 0.55, 0.4);
+    const albedo = opts.albedo ?? new Vector3(0.5, 0.49, 0.48);
     const ambient = opts.ambient ?? new Vector3(0.03, 0.03, 0.03);
     const lightColor = opts.lightColor ?? new Vector3(1, 1, 1);
     return [

@@ -102,17 +102,26 @@ fn cbtSimplex3_d(p : vec3<f32>) -> vec4<f32> {
 // cbtNoiseNormalAt's tangent projection). Crater frequencies are low (cell >= ~20 km) so the cell
 // coords are EXACT in f32 — the df64 path reuses this verbatim on the narrowed dir. Same math is
 // mirrored in cbt_noise.ts (CPU, collision). Hash uses cbtPermAt ONLY (bit-identical f64/f32).
-const CBT_CRATER_CLASSES : i32 = 4;
+const CBT_CRATER_CLASSES : i32 = 6;
 const CBT_CRATER_SCALE : f32 = 1.0; // global crater depth multiplier (per-planet tuning hook)
+const CBT_CRATER_RANGE : f32 = 60.0; // class fades only when far enough to be sub-pixel (onKm =
+                                     // RANGE*cell, fade onKm..2*onKm). ~detailRange so big craters
+                                     // stay visible from orbit; only truly tiny ones drop (AA).
+const CBT_CRATER_NEAR : f32 = 0.10; // NORMAL-only: skip classes much BIGGER than camDist (locally flat
+                                    // wall -> negligible per-pixel shading). HEIGHT keeps all classes.
 
 // Per size-class params: x = cell size (km, -> freq = radiusKm/cell), y = crater radius (frac of
-// cell), z = depth (km), w = density (fraction of cells that spawn a crater). Big rare -> small frequent.
+// cell), z = depth (km), w = density (fraction of cells that spawn a crater). Big rare -> small
+// frequent. Classes 4-5 are SMALL (~2.4 km / ~0.8 km craters) for ground-scale detail; cells stay
+// >= 2 km so f32 cell coords remain exact (no df64 needed).
 fn craterParams(k : i32) -> vec4<f32> {
     switch (k) {
         case 0: { return vec4<f32>(750.0, 0.20, 18.0, 0.5); }
         case 1: { return vec4<f32>(220.0, 0.20, 7.0, 0.6); }
         case 2: { return vec4<f32>(70.0, 0.20, 2.5, 0.7); }
-        default: { return vec4<f32>(20.0, 0.20, 0.9, 0.8); }
+        case 3: { return vec4<f32>(20.0, 0.20, 0.9, 0.8); }
+        case 4: { return vec4<f32>(6.0, 0.20, 0.32, 0.82); }
+        default: { return vec4<f32>(2.0, 0.20, 0.12, 0.85); }
     }
 }
 
@@ -137,10 +146,19 @@ fn craterProfile(rn : f32, hp : ptr<function, f32>, dhp : ptr<function, f32>) {
 // craterField(dir, radiusKm) -> vec4(height_km, dHeight/d(dir)). Sums all craters in the 3x3x3
 // neighbourhood of each size class (overlapping bowls/ejecta superpose); support 2*r0 < 1 cell so
 // 27 neighbours suffice. Bypasses the fbm normalization (heights are already in km).
-fn craterField(dir : vec3<f32>, radiusKm : f32) -> vec4<f32> {
+fn craterField(dir : vec3<f32>, radiusKm : f32, camDistKm : f32, skipBig : bool) -> vec4<f32> {
     var H = 0.0; var G = vec3<f32>(0.0);
     for (var k = 0; k < CBT_CRATER_CLASSES; k = k + 1) {
         let prm = craterParams(k);
+        // Band-limit by camera distance: big classes (large cell) keep fade=1 always; small
+        // classes fade out when far (sub-pixel) -> recovers cost from altitude + no shimmer.
+        let onKm = CBT_CRATER_RANGE * prm.x;
+        let fade = 1.0 - smoothstep(onKm, onKm * 2.0, camDistKm);
+        if (fade <= 0.0) { continue; }
+        // skipBig (NORMAL path only): a crater much bigger than the camera distance has a far,
+        // gradual wall -> ~flat locally -> drop it from the per-pixel gradient (keeps ~3 active
+        // classes => 60 fps). The HEIGHT path passes skipBig=false so geometry/collision keep it.
+        if (skipBig && camDistKm < prm.x * CBT_CRATER_NEAR) { continue; }
         let fk = radiusKm / prm.x;
         let P = dir * fk;
         let Pi = floor(P);
@@ -172,8 +190,8 @@ fn craterField(dir : vec3<f32>, radiusKm : f32) -> vec4<f32> {
         }
         }
         }
-        H = H + h;
-        G = G + g * fk;
+        H = H + h * fade;
+        G = G + g * (fk * fade);
     }
     return vec4<f32>(H, G);
 }
@@ -225,7 +243,7 @@ fn cbtFbmHeight(dir : vec3<f32>) -> f32 {
 // macro field, so the CPU collision / other LOD backends still match. `camDistKm` is
 // per-VERTEX (length of the camera-relative position) => a shared vertex gets one fade =>
 // watertight, no cracks. f32 keeps the detail precise to ~20-30 m wavelength.
-fn cbtFbm_d_at(p : vec3<f32>, camDistKm : f32, radiusKm : f32) -> vec4<f32> {
+fn cbtFbm_d_at(p : vec3<f32>, camDistKm : f32, radiusKm : f32, craterSkipBig : bool) -> vec4<f32> {
     var sum : f32 = 0.0;
     var maxMacro : f32 = 0.0;
     var grad : vec3<f32> = vec3<f32>(0.0);
@@ -267,12 +285,13 @@ fn cbtFbm_d_at(p : vec3<f32>, camDistKm : f32, radiusKm : f32) -> vec4<f32> {
     let inv = CBT_GLOBAL_AMP / maxMacro;
     // Craters are the dominant relief (added AFTER fbm normalization; already in km). No distance
     // fade: they are macro landforms whose shape must be stable from orbit to ground.
-    let cr = craterField(p, radiusKm);
+    let cr = craterField(p, radiusKm, camDistKm, craterSkipBig);
     return vec4<f32>(sum * inv + cr.x, grad * inv + cr.yzw);
 }
 
 fn cbtFbmHeightAt(dir : vec3<f32>, camDistKm : f32, radiusKm : f32) -> f32 {
-    return cbtFbm_d_at(dir, camDistKm, radiusKm).x;
+    // HEIGHT path: keep ALL crater classes (skipBig=false) so geometry is complete.
+    return cbtFbm_d_at(dir, camDistKm, radiusKm, false).x;
 }
 
 fn cbtSphereTangents(nrm : vec3<f32>, tang : ptr<function, vec3<f32>>, bitan : ptr<function, vec3<f32>>) {
@@ -306,7 +325,8 @@ fn cbtNoiseNormalAt(dir : vec3<f32>, radius : f32, camDistKm : f32) -> vec3<f32>
     var bitan : vec3<f32>;
     cbtSphereTangents(nrm, &tang, &bitan);
 
-    let grad = cbtFbm_d_at(nrm, camDistKm, radius).yzw;
+    // NORMAL path: skipBig=true drops locally-flat huge craters from the per-pixel gradient (perf).
+    let grad = cbtFbm_d_at(nrm, camDistKm, radius, true).yzw;
     let dhdt = dot(grad, tang);
     let dhdb = dot(grad, bitan);
 

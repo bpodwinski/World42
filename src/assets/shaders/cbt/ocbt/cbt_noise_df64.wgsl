@@ -95,7 +95,7 @@ fn cbtSimplex3_df64_d(px : vec2<f32>, py : vec2<f32>, pz : vec2<f32>) -> vec4<f3
 // unit direction carried as df64 (dx, dy, dz). Same per-octave camera-distance fade and
 // maxMacro normalization as the f32 version, so the surface is identical wherever f32 did
 // not band, and finely resolved (cm) where it did.
-fn cbtFbm_d_at_df64(dx : vec2<f32>, dy : vec2<f32>, dz : vec2<f32>, camDistKm : f32, radiusKm : f32) -> vec4<f32> {
+fn cbtFbm_d_at_df64(dx : vec2<f32>, dy : vec2<f32>, dz : vec2<f32>, camDistKm : f32, radiusKm : f32, craterSkipBig : bool) -> vec4<f32> {
     var sum : f32 = 0.0;
     var maxMacro : f32 = 0.0;
     var grad : vec3<f32> = vec3<f32>(0.0);
@@ -137,12 +137,13 @@ fn cbtFbm_d_at_df64(dx : vec2<f32>, dy : vec2<f32>, dz : vec2<f32>, camDistKm : 
     // Craters (dominant relief). Crater cells are low-frequency (>= ~20 km) so f32 dir is exact at
     // crater scale — reuse the f32 craterField (from cbt_noise.wgsl, composed before this file) on
     // the narrowed unit dir. No distance fade (macro landforms). Added after fbm normalization.
-    let cr = craterField(vec3<f32>(df64_to_f32(dx), df64_to_f32(dy), df64_to_f32(dz)), radiusKm);
+    let cr = craterField(vec3<f32>(df64_to_f32(dx), df64_to_f32(dy), df64_to_f32(dz)), radiusKm, camDistKm, craterSkipBig);
     return vec4<f32>(sum * inv + cr.x, grad * inv + cr.yzw);
 }
 
 fn cbtFbmHeightAt_df64(dx : vec2<f32>, dy : vec2<f32>, dz : vec2<f32>, camDistKm : f32, radiusKm : f32) -> f32 {
-    return cbtFbm_d_at_df64(dx, dy, dz, camDistKm, radiusKm).x;
+    // HEIGHT path (geometry): keep ALL crater classes (skipBig=false) so the shape is complete.
+    return cbtFbm_d_at_df64(dx, dy, dz, camDistKm, radiusKm, false).x;
 }
 
 // Per-pixel surface normal from the df64-DOMAIN fbm gradient — the df64 twin of
@@ -157,7 +158,8 @@ fn cbtNoiseNormalAt_df64(dx : vec2<f32>, dy : vec2<f32>, dz : vec2<f32>, radius 
     var bitan : vec3<f32>;
     cbtSphereTangents(nrm, &tang, &bitan);
 
-    let grad = cbtFbm_d_at_df64(dx, dy, dz, camDistKm, radius).yzw;
+    // NORMAL path: skipBig=true drops locally-flat huge craters from the per-pixel gradient (perf).
+    let grad = cbtFbm_d_at_df64(dx, dy, dz, camDistKm, radius, true).yzw;
     let dhdt = dot(grad, tang);
     let dhdb = dot(grad, bitan);
 

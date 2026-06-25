@@ -183,7 +183,7 @@ export class CbtPlanet {
             // Phase 2 bring-up constants: a fixed pool plus a screen-space-area metric.
             // f32 vertex decode caps usable depth (~16); Phase 3 lifts it via f64.
             const OCBT_CAPACITY = 1 << 20; // 1 048 576 slots
-            const OCBT_MAX_LEVEL = 34; // u64 hard cap (depth 63); df64 cracks well before
+            const OCBT_MAX_LEVEL = 32; // u64 hard cap (depth 63); df64 cracks well before
             // Hysteresis rule: MERGE must be < SPLIT / sqrt(2) (~0.707*SPLIT). A longest-edge
             // split makes children edge = parent/sqrt(2); if MERGE >= that, the children merge
             // back the next frame -> split/merge oscillate every frame (leafCount flips,
