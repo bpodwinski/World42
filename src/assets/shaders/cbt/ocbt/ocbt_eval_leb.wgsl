@@ -33,7 +33,11 @@ fn ocbt_face_corners(face : u32) -> OcbtTri {
 
 // Decode (heap : u64) -> leaf triangle (v0, v1, v2) as unit directions. Seed
 // v0=right, v1=apex, v2=left; bit0: v0'=v2, v1'=mid(v0,v2), v2'=v1; bit1: v0'=v1,
-// v1'=mid, v2'=v0. Midpoint normalized each step (sphere). MSB-first path bits.
+// v1'=mid, v2'=v0. The split-edge midpoint is PLANAR (0.5*(v0+v2), NO per-step
+// normalize), so each corner stays an exact linear combo of the face seeds (= the
+// closed-form barycentric matrix W applied to the seed); the 3 corners are projected
+// to the sphere ONCE at return. Bit-identical to the old slerp through depth 4,
+// micro-divergent beyond. MSB-first path bits.
 fn ocbt_leb_decode(heap : vec2<u32>) -> OcbtTri {
     let depth = u64_depth(heap);
     let steps = depth - 3u;
@@ -44,7 +48,7 @@ fn ocbt_leb_decode(heap : vec2<u32>) -> OcbtTri {
     var v2 = fc.c1; // left
     for (var s : u32 = 0u; s < steps; s = s + 1u) {
         let bit = u64_bit(heap, steps - 1u - s);
-        let m = normalize(v0 + v2);
+        let m = (v0 + v2) * 0.5;
         if (bit == 0u) {
             let nv0 = v2; // v0'=v2
             v2 = v1;      // v2'=v1
@@ -58,5 +62,5 @@ fn ocbt_leb_decode(heap : vec2<u32>) -> OcbtTri {
             v2 = nv2;
         }
     }
-    return OcbtTri(v0, v1, v2);
+    return OcbtTri(normalize(v0), normalize(v1), normalize(v2));
 }

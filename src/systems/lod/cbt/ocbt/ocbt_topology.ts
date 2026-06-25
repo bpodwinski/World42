@@ -3,8 +3,8 @@
  * seed, forced-diamond conforming split, conservative diamond merge, explicit
  * neighbor maintenance. This ports the PROVEN topology of `cbt_state.ts` (which
  * already passes World42's 0-T-junction conformity tests) into the OCBT
- * representation, adding a per-slot **heapID** so the triangulation can later be
- * decoded vert-free via `ocbt_leb` (and stored as u64 on the GPU for depth ~60).
+ * representation, adding a per-slot **heapID** so the triangulation is decoded
+ * vert-free via `ocbt_eval_leb` (and stored as u64 on the GPU for depth ~60).
  *
  * Why this is the oracle and not the GPU code: the GPU runs the reference's CONCURRENT
  * batch engine (4 split patterns + atomic reservation, `update_utilities.hlsl`).
@@ -16,41 +16,22 @@
  *
  * Neighbor convention (from cbt_state.ts): neighbors = [BASE, LEFT, RIGHT] where BASE
  * is the hypotenuse / split-edge twin (the reference's "twin") and LEFT/RIGHT are the
- * two leg neighbors (the reference's Next/Prev). Vertices are kept on the UNIT sphere
- * here; the heapID<->geometry agreement is asserted in tests against `ocbt_leb`.
+ * two leg neighbors (the reference's Next/Prev). Geometry is the REFERENCE convention:
+ * every node's corners are the closed-form decode `ocbtCorners(heapID)` (planar matrix,
+ * projected once to the unit sphere) — no recursive slerp, no separate legacy decoder.
  */
-import { lebDecode } from './ocbt_leb';
+import { ocbtCorners } from './ocbt_eval_leb';
 
-// Octahedron vertices (AXIS order: +x0 -x1 +y2 -y3 +z4 -z5), mirror of cbt_state.ts.
-const VX: ReadonlyArray<readonly [number, number, number]> = [
-    [1, 0, 0],
-    [-1, 0, 0],
-    [0, 1, 0],
-    [0, -1, 0],
-    [0, 0, 1],
-    [0, 0, -1]
-];
-
-// Root triangles (apex, left, right); split edge = hypotenuse (left-right). Mirror of
-// ROOT_ALR; matches lebFaceCorners so face i seeds heapID 8+i.
-const ROOT_ALR: ReadonlyArray<readonly [number, number, number]> = [
-    [2, 0, 4],
-    [2, 4, 1],
-    [2, 1, 5],
-    [2, 5, 0],
-    [3, 0, 4],
-    [3, 4, 1],
-    [3, 1, 5],
-    [3, 5, 0]
-];
-
-// Root neighbours [base, left, right] across edges (L-R),(apex-L),(apex-R). Verified
-// symmetric (the 4 base diamonds). Mirror of ROOT_NEIGHBORS.
+// Root neighbours [base, left, right] across edges (L-R),(apex-L),(apex-R), in the
+// REFERENCE convention (mirror of ocbt_engine_buffers ROOT_NEIGHBORS_W42). Top faces
+// 0..3 have left/right swapped vs the legacy seed — consistent with GPU_FACE_CORNERS,
+// whose top faces are also l/r-swapped — so the stored geometry (ocbtCorners) and the
+// leg-neighbour pointers agree. Each node's geometry is decoded from its heap id.
 const ROOT_NEIGHBORS: ReadonlyArray<readonly [number, number, number]> = [
-    [4, 3, 1],
-    [5, 0, 2],
-    [6, 1, 3],
-    [7, 2, 0],
+    [4, 1, 3],
+    [5, 2, 0],
+    [6, 3, 1],
+    [7, 0, 2],
     [0, 7, 5],
     [1, 4, 6],
     [2, 5, 7],
@@ -93,15 +74,14 @@ export class OcbtTopology {
 
     constructor(readonly maxDepth: number) {
         this.allocArrays(INITIAL_CAPACITY);
-        for (let i = 0; i < ROOT_ALR.length; i++) {
-            const [a, l, r] = ROOT_ALR[i];
+        for (let i = 0; i < 8; i++) {
             const slot = this.allocSlot(); // roots get slots 0..7 in order
             this.level[slot] = 0;
             this.heapID[slot] = 8 + i; // face i -> heap id 8+i (depth 3)
             this.parent[slot] = -1;
             this.child0[slot] = -1;
             this.child1[slot] = -1;
-            this.writeVerts(slot, VX[a], VX[l], VX[r]);
+            this.writeFromHeap(slot, 8 + i); // geometry = ocbtCorners(8+i)
             this.setBit(this.leafBits, slot);
             this._leafCount++;
         }
@@ -297,31 +277,14 @@ export class OcbtTopology {
         if (this.neighbors[o + RIGHT] === oldT) this.neighbors[o + RIGHT] = newT;
     }
 
-    /** True if slot's 3 stored corners coincide (within tol) with the LEB triangle's. */
-    private cornerSetMatches(
-        slot: number,
-        leb: { a: readonly number[]; l: readonly number[]; r: readonly number[] }
-    ): boolean {
-        const o = slot * 9;
-        const v = this.verts;
-        const stored: number[][] = [
-            [v[o], v[o + 1], v[o + 2]],
-            [v[o + 3], v[o + 4], v[o + 5]],
-            [v[o + 6], v[o + 7], v[o + 8]]
-        ];
-        const cand = [leb.a, leb.l, leb.r];
-        const tol = 1e-6;
-        for (const s of stored) {
-            let near = false;
-            for (const c of cand) {
-                if (Math.hypot(s[0] - c[0], s[1] - c[1], s[2] - c[2]) < tol) {
-                    near = true;
-                    break;
-                }
-            }
-            if (!near) return false;
-        }
-        return true;
+    /**
+     * Write a slot's geometry from the closed-form decode of its heap id (reference
+     * convention). `ocbtCorners` returns (v0,v1,v2) = (right, apex, left); store as the
+     * node's (apex, left, right) = (v1, v2, v0).
+     */
+    private writeFromHeap(slot: number, heapID: number): void {
+        const c = ocbtCorners(heapID);
+        this.writeVerts(slot, c[1], c[2], c[0]);
     }
 
     private writeVerts(
@@ -409,9 +372,13 @@ export class OcbtTopology {
             this.setNb(t1, LEFT, -1);
             return;
         }
+        // Tolerance compare: planar corners shared across distinct triangles agree to
+        // ~f64 ULP, not bit-exact (each comes from an independent ocbtCorners decode).
         const bL = tb * 9 + 3;
         const tbLeftIsTL =
-            this.verts[bL] === tLx && this.verts[bL + 1] === tLy && this.verts[bL + 2] === tLz;
+            Math.abs(this.verts[bL] - tLx) < 1e-9 &&
+            Math.abs(this.verts[bL + 1] - tLy) < 1e-9 &&
+            Math.abs(this.verts[bL + 2] - tLz) < 1e-9;
 
         const [tb0, tb1] = this.subdivide(tb);
         if (tbLeftIsTL) {
@@ -428,41 +395,16 @@ export class OcbtTopology {
     }
 
     /**
-     * Split bintree triangle t=(A,L,R) into t0=(VC,A,L) and t1=(VC,R,A). t0 inherits
-     * the parent's LEFT leg as its base, t1 the RIGHT leg. heapIDs: t0 -> 2h (LEB
-     * child0, keeps L), t1 -> 2h+1 (LEB child1, keeps R) — matched to ocbt_leb.
+     * Split bintree triangle t into its two LEB children. In the REFERENCE convention
+     * the child labeling is the PURE INTEGER rule: t0 keeps the parent's {apex,left}
+     * (bit0 -> heap 2h), t1 keeps {apex,right} (bit1 -> heap 2h+1) — no geometry match
+     * needed (the "flip per level" was an artefact of the legacy decoder). Geometry is
+     * the closed-form ocbtCorners(childHeap), planar and projected once, NOT a slerp
+     * midpoint. t0 inherits the parent's LEFT leg as its base, t1 the RIGHT leg.
      */
     private subdivide(t: number): [number, number] {
-        // Read the parent's verts (as values) from the CURRENT array before allocating —
-        // allocSlot() can grow() and REPLACE this.verts, so any cached array reference
-        // taken before the alloc would be stale (writes would land in the orphaned old
-        // array, leaving the new slots zero/NaN). We re-fetch this.verts after the alloc.
-        const o = t * 9;
-        const pv = this.verts;
-        const ax = pv[o];
-        const ay = pv[o + 1];
-        const az = pv[o + 2];
-        const lx = pv[o + 3];
-        const ly = pv[o + 4];
-        const lz = pv[o + 5];
-        const rx = pv[o + 6];
-        const ry = pv[o + 7];
-        const rz = pv[o + 8];
-        let mx = (lx + rx) * 0.5;
-        let my = (ly + ry) * 0.5;
-        let mz = (lz + rz) * 0.5;
-        let len = Math.sqrt(mx * mx + my * my + mz * mz);
-        if (len < 1e-12) {
-            mx = lx;
-            my = ly;
-            mz = lz;
-            len = Math.sqrt(mx * mx + my * my + mz * mz);
-        }
-        const s = 1 / len;
-        mx *= s;
-        my *= s;
-        mz *= s;
-
+        // Capture parent state BEFORE allocating: allocSlot() can grow() and REPLACE the
+        // typed arrays, so every index access after the alloc must go through this.X[...].
         const lvl = this.level[t] + 1;
         const h = this.heapID[t];
         const xL = this.nb(t, LEFT);
@@ -471,45 +413,23 @@ export class OcbtTopology {
         const t0 = this.allocSlot();
         const t1 = this.allocSlot();
 
-        // Re-fetch the verts array AFTER allocation (it may have been replaced by grow()).
-        const v = this.verts;
-
-        // t0 = (apex=VC, left=A, right=L).
-        let p = t0 * 9;
-        v[p] = mx; v[p + 1] = my; v[p + 2] = mz;
-        v[p + 3] = ax; v[p + 4] = ay; v[p + 5] = az;
-        v[p + 6] = lx; v[p + 7] = ly; v[p + 8] = lz;
+        // t0 = (apex=VC, left=parentApex, right=parentLeft) = ocbtCorners(2h).
+        this.heapID[t0] = 2 * h;
         this.level[t0] = lvl;
         this.parent[t0] = t;
         this.child0[t0] = -1;
         this.child1[t0] = -1;
+        this.writeFromHeap(t0, 2 * h);
         this.setBit(this.leafBits, t0);
 
-        // t1 = (apex=VC, left=R, right=A).
-        p = t1 * 9;
-        v[p] = mx; v[p + 1] = my; v[p + 2] = mz;
-        v[p + 3] = rx; v[p + 4] = ry; v[p + 5] = rz;
-        v[p + 6] = ax; v[p + 7] = ay; v[p + 8] = az;
+        // t1 = (apex=VC, left=parentRight, right=parentApex) = ocbtCorners(2h+1).
+        this.heapID[t1] = 2 * h + 1;
         this.level[t1] = lvl;
         this.parent[t1] = t;
         this.child0[t1] = -1;
         this.child1[t1] = -1;
+        this.writeFromHeap(t1, 2 * h + 1);
         this.setBit(this.leafBits, t1);
-
-        // Assign child heap ids by matching geometry to ocbt_leb. cbt_state's
-        // (apex,left,right) labeling flips relative to the LEB bit0/bit1 at every
-        // level, so the 2h/2h+1 mapping is not constant — derive it from the decode so
-        // heapID <-> vertices stay consistent at any depth (the vert-free Phase 2 path
-        // depends on this).
-        const childDepth = lvl + 3;
-        const leb0 = lebDecode(2 * h, childDepth);
-        if (this.cornerSetMatches(t0, leb0)) {
-            this.heapID[t0] = 2 * h;
-            this.heapID[t1] = 2 * h + 1;
-        } else {
-            this.heapID[t0] = 2 * h + 1;
-            this.heapID[t1] = 2 * h;
-        }
 
         // Internal shared edge (VC,A): t0.LEFT <-> t1.RIGHT.
         this.setNb(t0, LEFT, t1);

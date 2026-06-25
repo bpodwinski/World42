@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { OcbtTopology, type BisectorView } from './ocbt_topology';
-import { lebDecode } from './ocbt_leb';
+import { ocbtCorners } from './ocbt_eval_leb';
 
 type V3 = [number, number, number];
 
@@ -48,15 +48,14 @@ function symmetryViolations(leaves: BisectorView[]): number {
 const near = (p: V3, q: readonly number[], tol = 1e-6) =>
     Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]) < tol;
 /**
- * Stored verts and the vert-free LEB decode must describe the same triangle. Matched
- * with a tolerance: both compute identical midpoints but accumulate FP differently
- * (incremental vs top-down), so exact keys diverge at depth — the geometry agrees.
+ * Stored verts and the canonical decode `ocbtCorners(heapID)` must describe the same
+ * triangle (set-matched within tolerance). The oracle now stores geometry straight from
+ * ocbtCorners, so this guards that heapID<->geometry wiring stays consistent.
  */
 function heapIdConsistencyViolations(leaves: BisectorView[]): number {
     let bad = 0;
     for (const t of leaves) {
-        const leb = lebDecode(t.heapID, t.depth);
-        const cand = [leb.a, leb.l, leb.r];
+        const cand = ocbtCorners(t.heapID);
         for (const s of [t.a, t.l, t.r]) {
             if (!cand.some((c) => near(s, c))) bad++;
         }

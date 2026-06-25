@@ -90,13 +90,16 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>,
 
     var fa : DVec3; var fl : DVec3; var fr : DVec3;
     dv_face_corners(face, &fa, &fl, &fr);
-    // Reference convention seed: v0=right, v1=apex, v2=left.
+    // Reference convention seed: v0=right, v1=apex, v2=left. PLANAR barycentric decode:
+    // the split-edge midpoint is 0.5*(v0+v2) with NO per-step normalize (closed-form
+    // matrix), so each corner stays an exact df64 linear combo of the face seeds and the
+    // ~depth chained normalizes that cracked the slerp path near level 24 are gone.
     var v0 = fr;
     var v1 = fa;
     var v2 = fl;
     for (var s : u32 = 0u; s < steps; s = s + 1u) {
         let bit = u64_bit(heap, steps - 1u - s);
-        let m = dv_normalize(dv_add(v0, v2));
+        let m = dv_scale_f32(dv_add(v0, v2), 0.5);
         if (bit == 0u) {
             let nv0 = v2; // v0'=v2
             v2 = v1;      // v2'=v1
@@ -110,6 +113,10 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>,
             v2 = nv2;
         }
     }
+    // Project the three corners to the unit sphere ONCE (the single projection).
+    v0 = dv_normalize(v0);
+    v1 = dv_normalize(v1);
+    v2 = dv_normalize(v2);
 
     let radius = ep.camRadius.w;
     let camX = df64_from_f32(ep.camRadius.x);

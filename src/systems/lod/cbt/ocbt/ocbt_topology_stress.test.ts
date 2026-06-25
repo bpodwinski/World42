@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { OcbtTopology, type BisectorView } from './ocbt_topology';
-import { lebDecode } from './ocbt_leb';
+import { ocbtCorners } from './ocbt_eval_leb';
 
 type V3 = [number, number, number];
 
@@ -48,8 +48,7 @@ const near = (p: V3, qv: readonly number[], tol = 1e-6) =>
 function heapIdViolations(leaves: BisectorView[]): number {
     let bad = 0;
     for (const t of leaves) {
-        const leb = lebDecode(t.heapID, t.depth);
-        const cand = [leb.a, leb.l, leb.r];
+        const cand = ocbtCorners(t.heapID);
         for (const s of [t.a, t.l, t.r]) if (!cand.some((c) => near(s, c))) bad++;
     }
     return bad;

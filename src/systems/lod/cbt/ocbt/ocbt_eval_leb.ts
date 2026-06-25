@@ -14,7 +14,7 @@
  * itself GPU-cross-checked against this TS.
  *
  * heapID is a JS number here (exact for depth < 53); the GPU carries it as u64
- * (`ocbt_u64`). Spherical: the split-edge midpoint is normalized every step.
+ * (`ocbt_u64`). Decode is the closed-form barycentric matrix (planar), projected once.
  */
 import { lebDepth } from './ocbt_leb';
 
@@ -23,6 +23,51 @@ export type V3 = [number, number, number];
 function norm(x: number, y: number, z: number): V3 {
     const inv = 1 / Math.sqrt(x * x + y * y + z * z);
     return [x * inv, y * inv, z * inv];
+}
+
+type Mat3 = readonly [
+    readonly [number, number, number],
+    readonly [number, number, number],
+    readonly [number, number, number]
+];
+
+const IDENTITY3: Mat3 = [
+    [1, 0, 0],
+    [0, 1, 0],
+    [0, 0, 1]
+];
+
+/**
+ * Per-bit LEB splitting matrices (reference leb.hlsl `leb__SplittingMatrix`, exact
+ * {0, 0.5, 1}). bit0 keeps the parent's {apex, left} (child 2h); bit1 keeps {apex,
+ * right} (child 2h+1) — the invariant the OCBT topology relies on for integer labeling.
+ */
+const SPLIT: readonly [Mat3, Mat3] = [
+    [
+        [0, 0, 1],
+        [0.5, 0, 0.5],
+        [0, 1, 0]
+    ],
+    [
+        [0, 1, 0],
+        [0.5, 0, 0.5],
+        [1, 0, 0]
+    ]
+];
+
+/** Standard 3x3 product a·b (row-major). */
+function mat3Mul(a: Mat3, b: Mat3): Mat3 {
+    const r: number[][] = [
+        [0, 0, 0],
+        [0, 0, 0],
+        [0, 0, 0]
+    ];
+    for (let i = 0; i < 3; i++) {
+        for (let j = 0; j < 3; j++) {
+            r[i][j] = a[i][0] * b[0][j] + a[i][1] * b[1][j] + a[i][2] * b[2][j];
+        }
+    }
+    return r as unknown as Mat3;
 }
 
 /**
@@ -50,34 +95,44 @@ export function ocbtFaceOf(heapID: number, depth: number): number {
 
 /**
  * Decode a heap id to its three unit-sphere corners (v0, v1, v2) in the REFERENCE
- * leb convention. Mirrors leb.hlsl's splitting matrix (bit0: v0'=v2, v1'=mid(v0,v2),
- * v2'=v1; bit1: v0'=v1, v1'=mid, v2'=v0) with the midpoint normalized each step.
- * CRITICAL seed: v0=right, v1=apex, v2=left over GPU_FACE_CORNERS — the orientation
- * that makes the per-bit rule consistent with the seed's neighbor lanes.
+ * leb convention, via the CLOSED-FORM barycentric matrix (Dupuy large_cbt:
+ * leb__SplittingMatrix + leb_DecodeNodeAttributeArray). Build W = product of the
+ * per-bit split matrices over the `steps = depth-3` path bits (MSB->LSB, each split
+ * left-multiplied); then each leaf corner is the barycentric combination
+ * `leaf_i = Σ_j W[i][j]·seed_j` of the face seed, normalized to the sphere EXACTLY
+ * ONCE. This is planar-then-projected, NOT recursive slerp (no per-step normalize):
+ * bit-identical to slerp through depth 4 (a single midpoint of two unit corners IS its
+ * own great-circle midpoint), micro-divergent beyond. The bounded form (matrix + one
+ * projection) is the structure the cm precision path (triple-single) attaches to —
+ * recursive slerp has no closed form.
+ *
+ * CRITICAL seed: v0=right, v1=apex, v2=left over GPU_FACE_CORNERS.
  */
 export function ocbtCorners(heapID: number): [V3, V3, V3] {
     const depth = lebDepth(heapID);
     const face = ocbtFaceOf(heapID, depth);
     const fc = GPU_FACE_CORNERS[face];
-    let v0: V3 = [...fc.r] as V3;
-    let v1: V3 = [...fc.a] as V3;
-    let v2: V3 = [...fc.l] as V3;
+    const seed: readonly [V3, V3, V3] = [fc.r, fc.a, fc.l]; // (v0,v1,v2) = (right, apex, left)
     const steps = depth - 3;
+
+    // W = Π split(bit) over the path bits, MSB first, each split left-multiplied.
+    let w: Mat3 = IDENTITY3;
     for (let s = 0; s < steps; s++) {
         const bit = Math.floor(heapID / Math.pow(2, steps - 1 - s)) % 2;
-        const m = norm(v0[0] + v2[0], v0[1] + v2[1], v0[2] + v2[2]);
-        if (bit === 0) {
-            const nv0 = v2; // v0'=v2
-            v2 = v1; // v2'=v1
-            v0 = nv0;
-            v1 = m;
-        } else {
-            const nv0 = v1; // v0'=v1
-            const nv2 = v0; // v2'=v0
-            v0 = nv0;
-            v1 = m;
-            v2 = nv2;
-        }
+        w = mat3Mul(SPLIT[bit], w);
     }
-    return [v0, v1, v2];
+
+    // leaf_i = Σ_j W[i][j]·seed_j, projected to the sphere once.
+    const out: V3[] = [];
+    for (let i = 0; i < 3; i++) {
+        const wi = w[i];
+        out.push(
+            norm(
+                wi[0] * seed[0][0] + wi[1] * seed[1][0] + wi[2] * seed[2][0],
+                wi[0] * seed[0][1] + wi[1] * seed[1][1] + wi[2] * seed[2][1],
+                wi[0] * seed[0][2] + wi[1] * seed[1][2] + wi[2] * seed[2][2]
+            )
+        );
+    }
+    return [out[0], out[1], out[2]];
 }
