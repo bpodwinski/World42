@@ -127,17 +127,22 @@ fn cbtFbmHeight(dir : vec3<f32>) -> f32 {
     return cbtFbm_d(dir).x;
 }
 
-// Continued-detail fbm with per-octave camera-distance fade. Returns vec4(height, dHeight/dp).
-// The macro band (i < CBT_OCTAVES) is identical to cbtFbm_d and normalized by the MACRO
-// maxPossible ONLY, so it never shifts when detail fades — the CPU collision / other LOD
-// backends keep matching the macro surface. CBT_DETAIL_OCTAVES extra octaves CONTINUE the
-// cascade (freq *= lacunarity, amp *= persistence) and ADD on top, each faded in by camera
-// distance: a feature of wavelength wl(km) = radiusKm / freq is only sampled once the camera
-// is within ~CBT_DETAIL_RANGE wavelengths (closer => triangles small enough to carry it, no
-// aliasing) and fully on within half that. `camDistKm` is per-VERTEX (length of the camera-
-// relative position) so a shared vertex gets one fade => watertight, no cracks. At f32 the
-// detail stays precise to ~20-30 m wavelength (dir*freq keeps enough mantissa); below that a
-// df64 local-frame decode would be needed (deliberately out of scope here).
+// Distance-band-limited fbm. Returns vec4(height, dHeight/dp).
+//
+// EVERY octave (macro AND continued-detail) is gated by a per-octave camera-distance fade:
+// a feature of wavelength wl(km) = radiusKm / freq is alive only while the camera is within
+// ~CBT_DETAIL_RANGE wavelengths of it, fading out over the next octave of distance. This is a
+// Nyquist band-limit in BOTH directions:
+//   - far away, the fine octaves switch OFF before they project to sub-pixel, so neither the
+//     height nor the analytic normal (this same gradient) carries sub-pixel ripple => no
+//     shimmer / specular-style aliasing as you pull back,
+//   - up close, the fine + detail octaves switch ON, so the ground gains relief.
+// Big octaves have a huge onKm so they stay on until extreme distance (the planet keeps its
+// shape) — only the unresolvable high end is dropped. maxMacro accumulates the UNFADED macro
+// amps, so the normalization is fixed: at the surface (fade=1) the height equals the full
+// macro field, so the CPU collision / other LOD backends still match. `camDistKm` is
+// per-VERTEX (length of the camera-relative position) => a shared vertex gets one fade =>
+// watertight, no cracks. f32 keeps the detail precise to ~20-30 m wavelength.
 fn cbtFbm_d_at(p : vec3<f32>, camDistKm : f32, radiusKm : f32) -> vec4<f32> {
     var sum : f32 = 0.0;
     var maxMacro : f32 = 0.0;
@@ -147,9 +152,13 @@ fn cbtFbm_d_at(p : vec3<f32>, camDistKm : f32, radiusKm : f32) -> vec4<f32> {
 
     for (var i : i32 = 0; i < CBT_MAX_OCTAVES; i = i + 1) {
         if (i >= CBT_OCTAVES) { break; }
+        let wlKm = radiusKm / freq;
+        let onKm = CBT_DETAIL_RANGE * wlKm;
+        let fade = 1.0 - smoothstep(onKm, onKm * 2.0, camDistKm);
         let sd = cbtSimplex3_d(p * freq);
-        sum = sum + sd.x * amp;
-        grad = grad + sd.yzw * (amp * freq);
+        sum = sum + sd.x * (amp * fade);
+        grad = grad + sd.yzw * (amp * freq * fade);
+        // maxMacro takes the UNFADED amp -> normalization fixed, full macro at the surface.
         maxMacro = maxMacro + amp;
         freq = freq * CBT_LACUNARITY;
         amp = amp * CBT_PERSISTENCE;

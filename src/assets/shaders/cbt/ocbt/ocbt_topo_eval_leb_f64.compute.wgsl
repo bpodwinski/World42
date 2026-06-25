@@ -130,8 +130,8 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>,
     // relative_c = dir_c * (radius + height(dir_c)) - camLocal. The height now includes the
     // continued-detail octaves, faded by the per-corner camera distance (length of the
     // smooth-sphere camera-relative base, in sim units = km). Same distance the render's
-    // fragment normal uses (vRel) so geometry and shading stay consistent; per-vertex so a
-    // shared corner gets one fade => watertight.
+    // fragment normal uses (vRel) so geometry and shading stay consistent, and per-vertex so
+    // a shared corner gets one fade => watertight.
     let base0 = narrow(dv_sub(dv_scale_f32(v0, radius), cam));
     let base1 = narrow(dv_sub(dv_scale_f32(v1, radius), cam));
     let base2 = narrow(dv_sub(dv_scale_f32(v2, radius), cam));

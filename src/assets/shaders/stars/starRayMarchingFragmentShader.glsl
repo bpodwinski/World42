@@ -13,6 +13,13 @@ uniform float starIntensity;
 uniform vec3 occluderCenter;
 uniform float occluderRadius;
 
+// Depth buffer for terrain occlusion.
+uniform sampler2D depthSampler;
+// Same constant used by terrain shaders: 2.0 / log2(maxZ + 1). 0 = linear fallback.
+uniform float logarithmicDepthConstant;
+uniform float cameraNear;
+uniform float cameraFar;
+
 uniform mat4 inverseProjection;
 uniform mat4 inverseView;
 uniform sampler2D textureSampler;
@@ -33,6 +40,17 @@ vec3 worldFromUV(vec2 UV, float depth01) {
 
 float sdfSphere(vec3 p, vec3 c, float r) {
     return length(p - c) - r;
+}
+
+// Decode depth buffer value to linear view-space distance.
+// Matches the logarithmic depth encoding used by terrain shaders.
+float decodeDepth(float rawDepth) {
+    if (logarithmicDepthConstant > 0.0) {
+        float halfC = logarithmicDepthConstant * 0.5;
+        return pow(2.0, rawDepth / halfC) - 1.0;
+    }
+    float range = cameraFar - cameraNear;
+    return rawDepth * range + cameraNear;
 }
 
 // Returns nearest positive t where ray (ro+t*rd) first hits sphere (c,r), -1 if none.
@@ -101,6 +119,13 @@ void main() {
         if (tPlanet > 0.0 && tPlanet < tStop) {
             tStop = tPlanet;
         }
+    }
+
+    // Also stop at scene geometry (terrain) using the depth buffer.
+    float rawDepth = texture2D(depthSampler, uv).r;
+    float sceneDistance = decodeDepth(rawDepth);
+    if (sceneDistance > 0.0 && sceneDistance < tStop) {
+        tStop = sceneDistance;
     }
 
     float glow;

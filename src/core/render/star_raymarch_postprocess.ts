@@ -1,4 +1,4 @@
-import { Effect, Matrix, PostProcess, Vector2, Vector3, Scene } from "@babylonjs/core";
+import { DepthRenderer, Effect, Matrix, PostProcess, Vector2, Vector3, Scene } from "@babylonjs/core";
 import type { OriginCamera } from "../camera/camera_manager";
 import starRayMarchingFragmentShader from "../../assets/shaders/stars/starRayMarchingFragmentShader.glsl";
 
@@ -38,6 +38,8 @@ export function attachStarRayMarchingPostProcess(
     // PostProcess name "starRayMarching" => expects key "starRayMarchingFragmentShader"
     Effect.ShadersStore["starRayMarchingFragmentShader"] = starRayMarchingFragmentShader;
 
+    const depthRenderer = scene.enableDepthRenderer(camera, false, true);
+
     const pp = new PostProcess(
         "starRayMarchingPP",
         "starRayMarching",
@@ -54,8 +56,11 @@ export function attachStarRayMarchingPostProcess(
             "occluderRadius",
             "inverseProjection",
             "inverseView",
+            "logarithmicDepthConstant",
+            "cameraNear",
+            "cameraFar",
         ],
-        null,
+        ["depthSampler"],
         1,
         camera
     );
@@ -124,6 +129,16 @@ export function attachStarRayMarchingPostProcess(
             effect.setVector3("occluderCenter", Vector3.ZeroReadOnly);
             effect.setFloat("occluderRadius", -1.0);
         }
+
+        // Depth-buffer terrain occlusion
+        const depthMap = depthRenderer.getDepthMap();
+        if (depthMap) {
+            effect.setTexture("depthSampler", depthMap);
+        }
+        const maxZ = camera.maxZ > 0 ? camera.maxZ : 1e9;
+        effect.setFloat("logarithmicDepthConstant", 2.0 / Math.log2(maxZ + 1.0));
+        effect.setFloat("cameraNear", camera.minZ);
+        effect.setFloat("cameraFar", maxZ);
     };
 
     return pp;

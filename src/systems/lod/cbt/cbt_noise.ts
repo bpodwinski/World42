@@ -127,11 +127,15 @@ export type NoiseParams = {
      */
     detailOctaves?: number;
     /**
-     * How eagerly detail octaves fade in, in "wavelengths of camera distance".
-     * Octave j (wavelength wl = radiusKm / freq_j) is fully on when the camera
-     * is within detailRange * wl and fully off beyond 2 * detailRange * wl.
-     * ~60 aligns detail-on with the LOD splitting the triangles fine enough to
-     * carry the feature (no aliasing). Optional: omitted => 60.
+     * Octave "lifetime" in wavelengths of camera distance — the Nyquist band-limit
+     * for the WHOLE cascade (macro + detail), GPU only. An octave of wavelength
+     * wl = radiusKm / freq is fully on while the camera is within detailRange * wl
+     * and fades out by 2 * detailRange * wl. This both fades detail IN up close and
+     * fades fine octaves OUT far away, before they project to sub-pixel — so the
+     * height and the analytic normal stop carrying unresolvable high frequencies
+     * and the terrain no longer shimmers/aliases as you pull back. LOWER = more
+     * aggressive anti-aliasing (smoother sooner); HIGHER = keep fine detail longer
+     * (more shimmer risk). Optional: omitted => 60.
      */
     detailRange?: number;
 };
@@ -151,11 +155,11 @@ export const DEFAULT_NOISE: NoiseParams = {
     octaves: 12,
     baseFrequency: 6,
     baseAmplitude: 16,
-    lacunarity: 2.0,
+    lacunarity: 2.2,
     persistence: 0.5,
-    globalAmplitude: 60,
-    detailOctaves: 6,
-    detailRange: 70,
+    globalAmplitude: 50,
+    detailOctaves: 16,
+    detailRange: 55,
 };
 
 let cachedPerm: Uint8Array | null = null;
