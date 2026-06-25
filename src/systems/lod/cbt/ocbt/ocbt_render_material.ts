@@ -46,7 +46,7 @@ export type OcbtRenderOptions = {
 function bakedHeader(opts: OcbtRenderOptions): string {
     const n = opts.noise;
     const albedo = opts.albedo ?? new Vector3(0.5, 0.49, 0.48);
-    const ambient = opts.ambient ?? new Vector3(0.03, 0.03, 0.03);
+    const ambient = opts.ambient ?? new Vector3(0.008, 0.008, 0.008);
     const lightColor = opts.lightColor ?? new Vector3(1, 1, 1);
     return [
         `const CBT_RADIUS : f32 = ${f(opts.radius)};`,
