@@ -27,6 +27,8 @@ import {
 } from '@babylonjs/core';
 import { buildPerm, type NoiseParams } from '../cbt_noise';
 import cbtNoiseWgsl from '../../../../assets/shaders/cbt/gpu/cbt_noise.wgsl';
+import ocbtF64Wgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_f64.wgsl';
+import cbtNoiseDf64Wgsl from '../../../../assets/shaders/cbt/ocbt/cbt_noise_df64.wgsl';
 
 /** WGSL f32 literal (always has a decimal point). */
 function f(x: number): string {
@@ -58,7 +60,15 @@ function bakedHeader(opts: OcbtRenderOptions): string {
         `const CBT_DETAIL_RANGE : f32 = ${f(n.detailRange ?? 60)};`,
         `const CBT_ALBEDO : vec3<f32> = vec3<f32>(${f(albedo.x)}, ${f(albedo.y)}, ${f(albedo.z)});`,
         `const CBT_AMBIENT : vec3<f32> = vec3<f32>(${f(ambient.x)}, ${f(ambient.y)}, ${f(ambient.z)});`,
-        `const CBT_LIGHTCOLOR : vec3<f32> = vec3<f32>(${f(lightColor.x)}, ${f(lightColor.y)}, ${f(lightColor.z)});`
+        `const CBT_LIGHTCOLOR : vec3<f32> = vec3<f32>(${f(lightColor.x)}, ${f(lightColor.y)}, ${f(lightColor.z)});`,
+        // Near-ground detail band (world-anchored df64 micro-relief). ON/OFF in km = the
+        // camera-distance fade; STRENGTH = normal-tilt amount; BASE_FREQ = first ground
+        // octave's frequency on the UNIT dir (= radius / wavelength; 1 m base wavelength).
+        `const CBT_GROUND_ON_KM : f32 = 0.05;`,
+        `const CBT_GROUND_OFF_KM : f32 = 0.15;`,
+        `const CBT_GROUND_STRENGTH : f32 = 0.03;`,
+        `const CBT_GROUND_DETAIL_OCTAVES : i32 = 4;`,
+        `const CBT_GROUND_BASE_FREQ : f32 = ${f(opts.radius * 1000)};`
     ].join('\n');
 }
 
@@ -134,10 +144,20 @@ function fragmentSource(opts: OcbtRenderOptions): string {
         bakedHeader(opts),
         'var<storage, read> cbtPerm : array<u32>;',
         cbtNoiseWgsl,
+        // df64 domain noise (cm-precise ground detail). Order matters: cbt_noise.wgsl (cbtCorner/
+        // cbtPermAt/CBT_MAX_*) and the baked CBT_* constants must precede these, then df64 prims,
+        // then the df64 noise. Same compose order as the metric eval kernel (proven to compile).
+        ocbtF64Wgsl,
+        cbtNoiseDf64Wgsl,
         'uniform world : mat4x4<f32>;',
         'uniform uLightDirection : vec3<f32>;',
         'uniform logarithmicDepthConstant : f32;',
         'uniform uDebugLod : i32;',
+        // Camera position in planet-local sim units (= the SAME f32 value the df64 eval
+        // subtracted to make `rel`). world = uCamAnchor + rel reconstructs the surface point
+        // exactly (the camera's f32 rounding cancels), giving a frame-invariant, cm-precise
+        // direction for the ground detail noise (no swim, no banding).
+        'uniform uCamAnchor : vec3<f32>;',
         'varying vDir : vec3<f32>;',
         'varying vRel : vec3<f32>;',
         'varying vFragmentDepth : f32;',
@@ -178,26 +198,29 @@ function fragmentSource(opts: OcbtRenderOptions): string {
         '    // octaves in the normal match the displaced geometry (no shading mismatch).',
         '    let camDistKm = length(rel);',
         '    var nLocal = cbtNoiseNormalAt(dir, CBT_RADIUS, camDistKm);',
-        '    // Near-ground micro-relief detail (render-only, cheap): a few f32 noise octaves',
-        '    // on the CAMERA-RELATIVE position. rel is small (<~100 m) near the surface so',
-        '    // rel*freq stays f32-precise down to ~cm — the ABSOLUTE planet-local position',
-        '    // cannot (f32 floating origin caps world-anchored detail at ~8 m). The gradient',
-        '    // perturbs the normal in its tangent plane, fading out by a few tens of metres.',
-        '    // CAVEAT: camera-anchored, so it slides slightly under fast motion (world-locked',
-        '    // sub-8 m detail would need the df64 patch-local path).',
-        '    let dFade = 1.0 - smoothstep(0.05, 0.15, camDistKm);',
+        '    // Near-ground WORLD-ANCHORED micro-relief. Reconstruct the surface direction in',
+        '    // df64: world = uCamAnchor + rel (the eval subtracted the SAME f32 uCamAnchor, so',
+        '    // its rounding error cancels and world == the true surface point to ~um). normalize',
+        '    // is radial-invariant, so dirD is the smooth-sphere unit dir the noise is defined on,',
+        '    // frame-invariant (no swim) and cm-precise (no f32 banding). Gated to the near band',
+        '    // for cost; outside it the cheaper f32 macro normal is used unchanged.',
+        '    let dFade = 1.0 - smoothstep(CBT_GROUND_ON_KM, CBT_GROUND_OFF_KM, camDistKm);',
         '    if (dFade > 0.0) {',
-        '        var dgrad = vec3<f32>(0.0, 0.0, 0.0);',
-        '        var dfreq = 5000.0;',
-        '        var damp = 1.0;',
-        '        for (var di = 0; di < 4; di = di + 1) {',
-        '            let sd = cbtSimplex3_d(rel * dfreq);',
-        '            dgrad = dgrad + sd.yzw * damp;',
-        '            dfreq = dfreq * 2.0;',
-        '            damp = damp * 0.5;',
-        '        }',
+        '        let wx = df64_add(df64_from_f32(uniforms.uCamAnchor.x), df64_from_f32(rel.x));',
+        '        let wy = df64_add(df64_from_f32(uniforms.uCamAnchor.y), df64_from_f32(rel.y));',
+        '        let wz = df64_add(df64_from_f32(uniforms.uCamAnchor.z), df64_from_f32(rel.z));',
+        '        let len2 = df64_add(df64_add(df64_mul(wx, wx), df64_mul(wy, wy)), df64_mul(wz, wz));',
+        '        let inv = df64_invsqrt(len2);',
+        '        let dxD = df64_mul(wx, inv);',
+        '        let dyD = df64_mul(wy, inv);',
+        '        let dzD = df64_mul(wz, inv);',
+        '        // Macro+detail normal in df64 (kills the ~1-30 m f32 banding), blended in by the fade.',
+        '        let nDf = cbtNoiseNormalAt_df64(dxD, dyD, dzD, CBT_RADIUS, camDistKm);',
+        '        nLocal = normalize(mix(nLocal, nDf, dFade));',
+        '        // Extra high-frequency micro-relief octaves (df64 high freq -> no banding).',
+        '        let dgrad = cbtGroundDetailGrad_df64(dxD, dyD, dzD, CBT_GROUND_BASE_FREQ, CBT_GROUND_DETAIL_OCTAVES);',
         '        let tg = dgrad - dot(dgrad, nLocal) * nLocal;',
-        '        nLocal = normalize(nLocal - (0.03 * dFade) * tg);',
+        '        nLocal = normalize(nLocal - (CBT_GROUND_STRENGTH * dFade) * tg);',
         '    }',
         '    let nWorld = normalize((uniforms.world * vec4<f32>(nLocal, 0.0)).xyz);',
         '    let L = normalize(-uniforms.uLightDirection);',
@@ -215,6 +238,7 @@ export type OcbtRenderMaterial = {
     permBuffer: StorageBufferType;
     setLightDirection(dir: Vector3): void;
     setDebugLod(on: boolean): void;
+    setCamAnchor(camLocal: Vector3): void;
     dispose(): void;
 };
 
@@ -236,7 +260,7 @@ export function buildOcbtRenderMaterial(
         {
             shaderLanguage: ShaderLanguage.WGSL,
             attributes: ['position'],
-            uniforms: ['viewProjection', 'world', 'uLightDirection', 'logarithmicDepthConstant', 'uDebugLod'],
+            uniforms: ['viewProjection', 'world', 'uLightDirection', 'logarithmicDepthConstant', 'uDebugLod', 'uCamAnchor'],
             storageBuffers: ['ocbtHeap', 'ocbtPos', 'ocbtIndices', 'cbtPerm']
         }
     );
@@ -274,6 +298,7 @@ export function buildOcbtRenderMaterial(
     material.setStorageBuffer('cbtPerm', permBuffer);
     material.setVector3('uLightDirection', new Vector3(0, -1, 0));
     material.setInt('uDebugLod', 0);
+    material.setVector3('uCamAnchor', new Vector3(0, 0, 0));
 
     return {
         material,
@@ -283,6 +308,9 @@ export function buildOcbtRenderMaterial(
         },
         setDebugLod(on: boolean): void {
             material.setInt('uDebugLod', on ? 1 : 0);
+        },
+        setCamAnchor(camLocal: Vector3): void {
+            material.setVector3('uCamAnchor', camLocal);
         },
         dispose(): void {
             material.dispose();

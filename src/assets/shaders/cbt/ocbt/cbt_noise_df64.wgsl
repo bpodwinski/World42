@@ -140,3 +140,42 @@ fn cbtFbm_d_at_df64(dx : vec2<f32>, dy : vec2<f32>, dz : vec2<f32>, camDistKm : 
 fn cbtFbmHeightAt_df64(dx : vec2<f32>, dy : vec2<f32>, dz : vec2<f32>, camDistKm : f32, radiusKm : f32) -> f32 {
     return cbtFbm_d_at_df64(dx, dy, dz, camDistKm, radiusKm).x;
 }
+
+// Per-pixel surface normal from the df64-DOMAIN fbm gradient — the df64 twin of
+// cbtNoiseNormalAt (cbt_noise.wgsl). Inputs are the WORLD-ANCHORED unit direction as
+// df64 (dx, dy, dz), so the macro+detail relief is resolved to ~cm near the ground where
+// the f32 normal banded (~1-30 m). Mirrors the f32 projection exactly: project the
+// gradient onto the sphere tangent basis and tilt the unit normal. Reuses the f32
+// cbtSphereTangents (the basis only needs the unit normal, which is well-conditioned).
+fn cbtNoiseNormalAt_df64(dx : vec2<f32>, dy : vec2<f32>, dz : vec2<f32>, radius : f32, camDistKm : f32) -> vec3<f32> {
+    let nrm = normalize(vec3<f32>(df64_to_f32(dx), df64_to_f32(dy), df64_to_f32(dz)));
+    var tang : vec3<f32>;
+    var bitan : vec3<f32>;
+    cbtSphereTangents(nrm, &tang, &bitan);
+
+    let grad = cbtFbm_d_at_df64(dx, dy, dz, camDistKm, radius).yzw;
+    let dhdt = dot(grad, tang);
+    let dhdb = dot(grad, bitan);
+
+    let sc = 1.0 / radius;
+    let pn = nrm - dhdt * sc * tang - dhdb * sc * bitan;
+    return normalize(pn);
+}
+
+// Extra high-frequency micro-relief gradient for the near-ground band (df64 domain, so
+// the very high freq on the unit dir does NOT band as it would in f32). `baseFreq` is the
+// first octave's frequency on the unit direction (= radius / wavelength); octaves double
+// the freq and halve the amplitude (persistence 0.5), matching the legacy detail hack.
+// Returns the accumulated noise gradient (domain units); the caller projects + tilts it.
+fn cbtGroundDetailGrad_df64(dx : vec2<f32>, dy : vec2<f32>, dz : vec2<f32>, baseFreq : f32, octaves : i32) -> vec3<f32> {
+    var grad : vec3<f32> = vec3<f32>(0.0);
+    var freq : f32 = baseFreq;
+    var amp : f32 = 1.0;
+    for (var i : i32 = 0; i < octaves; i = i + 1) {
+        let sd = cbtSimplex3_df64_d(df64_mul_f32(dx, freq), df64_mul_f32(dy, freq), df64_mul_f32(dz, freq));
+        grad = grad + sd.yzw * amp;
+        freq = freq * 2.0;
+        amp = amp * 0.5;
+    }
+    return grad;
+}

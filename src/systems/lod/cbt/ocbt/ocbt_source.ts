@@ -183,6 +183,12 @@ export class OcbtSource implements CbtGeometrySource {
             maxLevel: this.maxLevel
         });
 
+        // Ground-detail anchor: the render fragment reconstructs the world-anchored surface
+        // direction as world = uCamAnchor + rel. uCamAnchor MUST be the same f32 camera the
+        // df64 eval subtracts (camRadius.xyz) so the rounding cancels — pass the identical
+        // tmpCamLocal (it is f32-rounded the same way when written to either GPU buffer).
+        this.render.setCamAnchor(this.tmpCamLocal);
+
         // Frustum cull: rotate each render-space plane normal into camera-relative
         // planet-local space (R^T·n via the inverse world matrix; renderPos = R·rel, so
         // n·renderPos = (R^T·n)·rel), keep d. Lets the fixed pool concentrate on the
