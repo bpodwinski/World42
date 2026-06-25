@@ -157,7 +157,9 @@ export const DEFAULT_NOISE: NoiseParams = {
     baseAmplitude: 16,
     lacunarity: 2.2,
     persistence: 0.5,
-    globalAmplitude: 180,
+    // Reduced from 180: craters (cbt_noise.wgsl craterField, depths up to ~18 km) are now the
+    // DOMINANT relief; the fbm is the finer inter-crater roughness on top.
+    globalAmplitude: 25,
     detailOctaves: 32,
     detailRange: 100,
 };
@@ -197,6 +199,93 @@ export function fbmNoise(
     return maxPossible > 1e-12
         ? (sum / maxPossible) * params.globalAmplitude
         : 0;
+}
+
+// --- CRATER FIELD (CPU mirror of craterField in cbt_noise.wgsl) ---------------------------
+// Real geometric craters = the DOMINANT relief of an airless body. This is the collision/altitude
+// twin of the GPU crater field; it MUST match bit-for-bit at crater scale (hash via perm only).
+// Height only (no gradient — collision needs height; the GPU computes the shading normal).
+const CRATER_CLASSES = 4;
+const CRATER_SCALE = 1.0; // keep in sync with CBT_CRATER_SCALE in cbt_noise.wgsl
+
+// [cellSizeKm, crater radius (frac of cell), depthKm, density]. Mirror of craterParams (WGSL).
+const CRATER_PARAMS: ReadonlyArray<readonly [number, number, number, number]> = [
+    [750, 0.2, 18.0, 0.5],
+    [220, 0.2, 7.0, 0.6],
+    [70, 0.2, 2.5, 0.7],
+    [20, 0.2, 0.9, 0.8],
+];
+
+/** Radial crater profile h(rn) (height only) — mirror of craterProfile (WGSL). */
+function craterProfile(rn: number): number {
+    const RIM = 0.85,
+        RIMH = 0.22,
+        RW = 0.18,
+        FLOOR = -1.0,
+        EJH = 0.06,
+        EJC = 1.1,
+        EJW = 0.9;
+    let h = 0;
+    if (rn < RIM) {
+        const u = rn / RIM;
+        const s = u * u * (3 - 2 * u);
+        h += FLOOR * (1 - s);
+    }
+    const x = (rn - RIM) / RW;
+    if (Math.abs(x) < 1) {
+        const b = 1 - x * x;
+        h += RIMH * b * b;
+    }
+    const xe = (rn - EJC) / EJW;
+    if (Math.abs(xe) < 1) {
+        const be = 1 - xe * xe;
+        h += EJH * be * be;
+    }
+    return h;
+}
+
+/** Crater height (km) at a unit direction — mirror of craterField (WGSL), height component. */
+function craterField(x: number, y: number, z: number, perm: Uint8Array, radiusKm: number): number {
+    const pa = (i: number) => perm[i & 255];
+    let H = 0;
+    for (let k = 0; k < CRATER_CLASSES; k++) {
+        const [cell, r0, depth, density] = CRATER_PARAMS[k];
+        const fk = radiusKm / cell;
+        const Px = x * fk,
+            Py = y * fk,
+            Pz = z * fk;
+        const Pix = Math.floor(Px),
+            Piy = Math.floor(Py),
+            Piz = Math.floor(Pz);
+        let h = 0;
+        for (let dz = -1; dz <= 1; dz++) {
+            for (let dy = -1; dy <= 1; dy++) {
+                for (let dx = -1; dx <= 1; dx++) {
+                    const cix = Pix + dx,
+                        ciy = Piy + dy,
+                        ciz = Piz + dz;
+                    const ix = cix & 255,
+                        iy = ciy & 255,
+                        iz = ciz & 255;
+                    const q0 = pa(ix + pa(iy + pa(iz)));
+                    if (q0 / 256 >= density) continue;
+                    const q1 = pa(ix + 1 + pa(iy + pa(iz)));
+                    const q2 = pa(ix + pa(iy + 1 + pa(iz)));
+                    const r0e = r0 * (0.8 + 0.4 * (q2 / 256));
+                    const depe = depth * CRATER_SCALE * (0.6 + 0.8 * (q1 / 256));
+                    const qx = Px - (cix + 0.15 + 0.7 * (q0 / 256));
+                    const qy = Py - (ciy + 0.15 + 0.7 * (q1 / 256));
+                    const qz = Pz - (ciz + 0.15 + 0.7 * (q2 / 256));
+                    const dist = Math.sqrt(qx * qx + qy * qy + qz * qz);
+                    const rn = dist / r0e;
+                    if (rn >= 2) continue;
+                    h += depe * craterProfile(rn);
+                }
+            }
+        }
+        H += h;
+    }
+    return H;
 }
 
 /** WGSL smoothstep: 0 below e0, 1 above e1, smooth cubic in between. */
@@ -253,5 +342,8 @@ export function fbmGroundHeight(
         amp *= params.persistence;
     }
 
-    return (sum / maxMacro) * params.globalAmplitude;
+    // Craters are the dominant relief: added (in km) on top of the reduced fbm, no distance fade
+    // (macro landforms). MUST match the GPU df64 eval (cbtFbm_d_at_df64) so the camera collides with
+    // the rendered crater floors/rims, not a crater-less surface.
+    return (sum / maxMacro) * params.globalAmplitude + craterField(x, y, z, perm, radiusKm);
 }

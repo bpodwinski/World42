@@ -96,6 +96,88 @@ fn cbtSimplex3_d(p : vec3<f32>) -> vec4<f32> {
     return vec4<f32>(32.0 * n, 32.0 * grad);
 }
 
+// --- CRATER FIELD (Worley cellular + radial profile, analytic gradient) -------------------
+// Real geometric craters: the DOMINANT relief of an airless body. Added to the fbm height AND
+// gradient so crater walls displace the geometry AND shade correctly (the gradient flows through
+// cbtNoiseNormalAt's tangent projection). Crater frequencies are low (cell >= ~20 km) so the cell
+// coords are EXACT in f32 — the df64 path reuses this verbatim on the narrowed dir. Same math is
+// mirrored in cbt_noise.ts (CPU, collision). Hash uses cbtPermAt ONLY (bit-identical f64/f32).
+const CBT_CRATER_CLASSES : i32 = 4;
+const CBT_CRATER_SCALE : f32 = 1.0; // global crater depth multiplier (per-planet tuning hook)
+
+// Per size-class params: x = cell size (km, -> freq = radiusKm/cell), y = crater radius (frac of
+// cell), z = depth (km), w = density (fraction of cells that spawn a crater). Big rare -> small frequent.
+fn craterParams(k : i32) -> vec4<f32> {
+    switch (k) {
+        case 0: { return vec4<f32>(750.0, 0.20, 18.0, 0.5); }
+        case 1: { return vec4<f32>(220.0, 0.20, 7.0, 0.6); }
+        case 2: { return vec4<f32>(70.0, 0.20, 2.5, 0.7); }
+        default: { return vec4<f32>(20.0, 0.20, 0.9, 0.8); }
+    }
+}
+
+// Radial crater profile h(rn) (rn = dist/radius) + derivative h'(rn). C1, compact support (0 and
+// 0-slope at rn>=2): flat-floored bowl (depression) + raised rim + fading ejecta, all (1-x^2)^2.
+fn craterProfile(rn : f32, hp : ptr<function, f32>, dhp : ptr<function, f32>) {
+    let RIM = 0.85; let RIMH = 0.22; let RW = 0.18; let FLOOR = -1.0;
+    let EJH = 0.06; let EJC = 1.1; let EJW = 0.9;
+    var h = 0.0; var d = 0.0;
+    if (rn < RIM) {
+        let u = rn / RIM; let s = u * u * (3.0 - 2.0 * u);
+        h = h + FLOOR * (1.0 - s);
+        d = d + FLOOR * (-(6.0 * u - 6.0 * u * u)) / RIM;
+    }
+    let x = (rn - RIM) / RW;
+    if (abs(x) < 1.0) { let b = 1.0 - x * x; h = h + RIMH * b * b; d = d + RIMH * (-4.0 * x * b) / RW; }
+    let xe = (rn - EJC) / EJW;
+    if (abs(xe) < 1.0) { let be = 1.0 - xe * xe; h = h + EJH * be * be; d = d + EJH * (-4.0 * xe * be) / EJW; }
+    *hp = h; *dhp = d;
+}
+
+// craterField(dir, radiusKm) -> vec4(height_km, dHeight/d(dir)). Sums all craters in the 3x3x3
+// neighbourhood of each size class (overlapping bowls/ejecta superpose); support 2*r0 < 1 cell so
+// 27 neighbours suffice. Bypasses the fbm normalization (heights are already in km).
+fn craterField(dir : vec3<f32>, radiusKm : f32) -> vec4<f32> {
+    var H = 0.0; var G = vec3<f32>(0.0);
+    for (var k = 0; k < CBT_CRATER_CLASSES; k = k + 1) {
+        let prm = craterParams(k);
+        let fk = radiusKm / prm.x;
+        let P = dir * fk;
+        let Pi = floor(P);
+        var h = 0.0; var g = vec3<f32>(0.0);
+        for (var dz = -1; dz <= 1; dz = dz + 1) {
+        for (var dy = -1; dy <= 1; dy = dy + 1) {
+        for (var dx = -1; dx <= 1; dx = dx + 1) {
+            let ci = Pi + vec3<f32>(f32(dx), f32(dy), f32(dz));
+            let ix = i32(ci.x) & 255; let iy = i32(ci.y) & 255; let iz = i32(ci.z) & 255;
+            let q0 = cbtPermAt(ix + cbtPermAt(iy + cbtPermAt(iz)));
+            let rExist = f32(q0) * (1.0 / 256.0);
+            if (rExist >= prm.w) { continue; }
+            let q1 = cbtPermAt(ix + 1 + cbtPermAt(iy + cbtPermAt(iz)));
+            let q2 = cbtPermAt(ix + cbtPermAt(iy + 1 + cbtPermAt(iz)));
+            let jitter = vec3<f32>(f32(q0), f32(q1), f32(q2)) * (1.0 / 256.0);
+            let rVar = f32(q1) * (1.0 / 256.0);
+            let rSize = f32(q2) * (1.0 / 256.0);
+            let center = ci + (vec3<f32>(0.15) + 0.7 * jitter);
+            let r0e = prm.y * (0.8 + 0.4 * rSize);
+            let depe = prm.z * CBT_CRATER_SCALE * (0.6 + 0.8 * rVar);
+            let qd = P - center;
+            let dist = sqrt(dot(qd, qd));
+            let rn = dist / r0e;
+            if (rn >= 2.0) { continue; }
+            var hp : f32; var dhp : f32;
+            craterProfile(rn, &hp, &dhp);
+            h = h + depe * hp;
+            if (dist > 1e-6 * r0e) { g = g + (depe * dhp / r0e) * (qd / dist); }
+        }
+        }
+        }
+        H = H + h;
+        G = G + g * fk;
+    }
+    return vec4<f32>(H, G);
+}
+
 // fbm with analytic gradient. Returns vec4(height, dHeight/dp.xyz).
 fn cbtFbm_d(p : vec3<f32>) -> vec4<f32> {
     var sum : f32 = 0.0;
@@ -183,7 +265,10 @@ fn cbtFbm_d_at(p : vec3<f32>, camDistKm : f32, radiusKm : f32) -> vec4<f32> {
     }
 
     let inv = CBT_GLOBAL_AMP / maxMacro;
-    return vec4<f32>(sum * inv, grad * inv);
+    // Craters are the dominant relief (added AFTER fbm normalization; already in km). No distance
+    // fade: they are macro landforms whose shape must be stable from orbit to ground.
+    let cr = craterField(p, radiusKm);
+    return vec4<f32>(sum * inv + cr.x, grad * inv + cr.yzw);
 }
 
 fn cbtFbmHeightAt(dir : vec3<f32>, camDistKm : f32, radiusKm : f32) -> f32 {

@@ -2,4 +2,4 @@
 
 exports[`CBT golden master > produces a stable tree topology 1`] = `"c377937b"`;
 
-exports[`CBT golden master > produces stable emitted geometry 1`] = `"322b985a"`;
+exports[`CBT golden master > produces stable emitted geometry 1`] = `"a44976c2"`;
