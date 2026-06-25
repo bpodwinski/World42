@@ -141,7 +141,7 @@ export function setupRuntime({
     // Analytic hard-floor ground collision: keep the camera above the CBT/OCBT
     // surface (the GPU terrain has no CPU mesh, so Babylon collision can't see it).
     // Runs after the steering controller's per-frame move (registered earlier).
-    const GROUND_CLEARANCE_SIM = ScaleManager.toSimulationUnits(0.1); // ~100 m floor
+    const GROUND_CLEARANCE_SIM = ScaleManager.toSimulationUnits(0.015); // ~15 m floor
     const groundObserver = scene.onBeforeRenderObservable.add(() => {
         lod.resolveGroundCollision(GROUND_CLEARANCE_SIM);
     });

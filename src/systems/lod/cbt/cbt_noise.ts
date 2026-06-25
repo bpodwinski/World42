@@ -198,3 +198,60 @@ export function fbmNoise(
         ? (sum / maxPossible) * params.globalAmplitude
         : 0;
 }
+
+/** WGSL smoothstep: 0 below e0, 1 above e1, smooth cubic in between. */
+function smoothstep01(e0: number, e1: number, x: number): number {
+    if (e0 === e1) return x < e0 ? 0 : 1;
+    const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
+    return t * t * (3 - 2 * t);
+}
+
+/**
+ * Ground height as the OCBT shader ACTUALLY renders it near the camera: the macro
+ * fbm PLUS the continued-detail octaves, each band-limited by camera distance with
+ * the SAME per-octave fade as cbtFbm_d_at (cbt_noise.wgsl). Use this for collision /
+ * altitude so the camera sits on the VISIBLE surface (macro + relief), not the
+ * macro-only field — otherwise it floats over detail troughs / clips detail bumps.
+ *
+ * fbmNoise stays the macro-only canonical field (golden + Rust parity + far LOD).
+ * Octave caps mirror the shader (CBT_MAX_OCTAVES = CBT_MAX_DETAIL = 12) so the CPU
+ * floor equals the GPU vertex height. camDistKm/radiusKm are in the shader's units
+ * (sim units = km here): camDistKm is the camera's distance to that ground point.
+ */
+export function fbmGroundHeight(
+    x: number, y: number, z: number,
+    params: NoiseParams,
+    camDistKm: number,
+    radiusKm: number
+): number {
+    const perm = getPerm(params.seed);
+    const range = params.detailRange ?? 60;
+    let sum = 0;
+    let maxMacro = 0;
+    let freq = params.baseFrequency;
+    let amp = params.baseAmplitude;
+
+    // Macro octaves (shader caps at CBT_MAX_OCTAVES = 12), band-limited by distance.
+    const macroN = Math.min(params.octaves, 12);
+    for (let i = 0; i < macroN; i++) {
+        const onKm = range * (radiusKm / freq);
+        const fade = 1 - smoothstep01(onKm, onKm * 2, camDistKm);
+        sum += simplex3(perm, x * freq, y * freq, z * freq) * amp * fade;
+        maxMacro += amp; // unfaded -> normalization fixed, full macro at the surface
+        freq *= params.lacunarity;
+        amp *= params.persistence;
+    }
+    if (maxMacro <= 1e-12) return 0;
+
+    // Continued-detail octaves (shader caps at CBT_MAX_DETAIL = 12).
+    const detailN = Math.min(params.detailOctaves ?? 0, 12);
+    for (let j = 0; j < detailN; j++) {
+        const onKm = range * (radiusKm / freq);
+        const fade = 1 - smoothstep01(onKm, onKm * 2, camDistKm);
+        if (fade > 0) sum += simplex3(perm, x * freq, y * freq, z * freq) * amp * fade;
+        freq *= params.lacunarity;
+        amp *= params.persistence;
+    }
+
+    return (sum / maxMacro) * params.globalAmplitude;
+}

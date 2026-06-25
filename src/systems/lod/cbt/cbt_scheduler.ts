@@ -25,7 +25,7 @@ import {
     type CbtSourceStats,
     type LocalCbtSourceOptions,
 } from './cbt_geometry_source';
-import { DEFAULT_NOISE, fbmNoise, type NoiseParams } from './cbt_noise';
+import { DEFAULT_NOISE, fbmNoise, fbmGroundHeight, type NoiseParams } from './cbt_noise';
 import { createCbtTerrainMaterial } from './cbt_terrain_shader';
 import { getGlobalCbtKernelClient } from './workers/cbt_kernel_client';
 import { WorkerCbtSource } from './workers/cbt_worker_source';
@@ -183,7 +183,7 @@ export class CbtPlanet {
             // Phase 2 bring-up constants: a fixed pool plus a screen-space-area metric.
             // f32 vertex decode caps usable depth (~16); Phase 3 lifts it via f64.
             const OCBT_CAPACITY = 1 << 20; // 1 048 576 slots
-            const OCBT_MAX_LEVEL = 42; // u64 hard cap (depth 63); df64 cracks well before
+            const OCBT_MAX_LEVEL = 32; // u64 hard cap (depth 63); df64 cracks well before
             // Hysteresis rule: MERGE must be < SPLIT / sqrt(2) (~0.707*SPLIT). A longest-edge
             // split makes children edge = parent/sqrt(2); if MERGE >= that, the children merge
             // back the next frame -> split/merge oscillate every frame (leafCount flips,
@@ -336,8 +336,19 @@ export class CbtPlanet {
      */
     resolveGroundCollision(clearanceSim: number): boolean {
         const center = this.entity.doublepos;
-        const cam = this.camera.doublepos;
-        this.tmpCollOffset.copyFrom(cam).subtractInPlace(center);
+        // The OriginCamera integrates `doublepos += position` LATER this frame (on
+        // onBeforeActiveMeshesEvaluation), AFTER this onBeforeRender callback. So the
+        // steering move still sits in camera.position (render-space) and is NOT yet in
+        // doublepos. Test the EFFECTIVE post-integration position (doublepos + position) or
+        // we clamp a stale point and the camera tunnels THROUGH the surface for one frame at
+        // high speed, then pops back. render-space origin == camera doublepos, so adding the
+        // render-space offset to doublepos yields the upcoming absolute position.
+        const camPos = this.camera.position;
+        this.tmpCollOffset.set(
+            this.camera.doublepos.x + camPos.x - center.x,
+            this.camera.doublepos.y + camPos.y - center.y,
+            this.camera.doublepos.z + camPos.z - center.z
+        );
         const dist = this.tmpCollOffset.length();
         if (dist < 1e-6) return false;
         // Above the highest possible ground + clearance: nothing to do.
@@ -349,19 +360,30 @@ export class CbtPlanet {
         this.renderParent.getWorldMatrix().invertToRef(this.tmpCollInv);
         Vector3.TransformNormalToRef(this.tmpCollOffset, this.tmpCollInv, this.tmpCollDir);
         this.tmpCollDir.normalize();
+        // Match the VISIBLE OCBT surface (macro + distance-faded detail), not the macro-only
+        // field — else the camera floats over detail troughs. camDist = camera->ground point
+        // (radially, dist - radius) so the per-octave fade matches the shader's vertex fade.
+        const camDistKm = Math.max(dist - this.radiusSim, 0);
         const groundR =
             this.radiusSim +
-            fbmNoise(this.tmpCollDir.x, this.tmpCollDir.y, this.tmpCollDir.z, this.noise);
+            fbmGroundHeight(
+                this.tmpCollDir.x, this.tmpCollDir.y, this.tmpCollDir.z,
+                this.noise, camDistKm, this.radiusSim
+            );
         const minDist = groundR + clearanceSim;
         if (dist >= minDist) return false;
-        // Push the camera radially out (world frame) to the floor; length is
-        // preserved by the rigid local<->world transform, so this lands at minDist.
+        // Push radially out to the floor, and CONSUME the pending render move: write the
+        // clamped absolute into doublepos and zero camera.position so the later integration
+        // (doublepos += position) lands exactly here THIS frame — no tunnel, no one-frame
+        // dip. Zeroing also kills the inward velocity (doublepos stops advancing into the
+        // ground), so the camera doesn't keep ramming / jittering at the floor.
         const scale = minDist / dist;
         this.camera.doublepos.set(
             center.x + this.tmpCollOffset.x * scale,
             center.y + this.tmpCollOffset.y * scale,
             center.z + this.tmpCollOffset.z * scale
         );
+        camPos.set(0, 0, 0);
         return true;
     }
 
@@ -383,9 +405,14 @@ export class CbtPlanet {
         this.renderParent.getWorldMatrix().invertToRef(this.tmpCollInv);
         Vector3.TransformNormalToRef(this.tmpCollOffset, this.tmpCollInv, this.tmpCollDir);
         this.tmpCollDir.normalize();
+        // Same VISIBLE-surface height as the collision so the HUD altitude matches the floor.
+        const camDistKm = Math.max(dist - this.radiusSim, 0);
         const groundR =
             this.radiusSim +
-            fbmNoise(this.tmpCollDir.x, this.tmpCollDir.y, this.tmpCollDir.z, this.noise);
+            fbmGroundHeight(
+                this.tmpCollDir.x, this.tmpCollDir.y, this.tmpCollDir.z,
+                this.noise, camDistKm, this.radiusSim
+            );
         return { distSim: dist, groundRSim: groundR };
     }
 
