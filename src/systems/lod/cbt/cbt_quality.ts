@@ -29,8 +29,7 @@ export const CBT_QUALITY_PRESETS: Record<CbtQualityLevel, CbtQualitySettings> = 
 /**
  * Noise params for a planet. Relief is now a PLANET property, not a quality knob:
  * we return the canonical {@link DEFAULT_NOISE} unchanged so the topology is
- * identical across quality levels AND across LOD backends (CDLOD/CBT/OCBT all
- * share this exact field). Quality only governs tessellation (splitThresholdPx2,
+ * identical across quality levels (CBT/OCBT share this exact field). Quality only governs tessellation (splitThresholdPx2,
  * maxDepth) — not the terrain shape. The `octaves` field on the preset is kept for
  * reference but no longer alters the relief.
  */

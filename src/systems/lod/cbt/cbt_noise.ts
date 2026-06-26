@@ -122,7 +122,7 @@ export type NoiseParams = {
      * approach — the fix for "no detail below ~1.2 km" (the macro cascade's
      * frequency floor). They ADD on top of the macro band (which stays
      * normalized by itself), so the macro surface is unchanged whatever the
-     * fade — the CPU collision / CDLOD field still match the macro topology.
+     * fade — the CPU collision field still matches the macro topology.
      * Optional: omitted => 0 (no detail, legacy behaviour).
      */
     detailOctaves?: number;
@@ -141,11 +141,8 @@ export type NoiseParams = {
 };
 
 /**
- * Canonical terrain noise — the SINGLE source of truth shared by every LOD
- * backend so a planet has the same topology under CDLOD, CBT and OCBT:
+ * Canonical terrain noise — the SINGLE source of truth shared by CBT and OCBT:
  *  - the CBT/OCBT GPU shaders bake these via the material header,
- *  - the CDLOD worker (terrain/src/lib.rs) ports the identical simplex + uses
- *    these params (fed through chunk_forge.ts),
  *  - the analytic ground collision (fbmNoise) reproduces the same surface.
  * octaves is capped at 12 (the CBT shader's CBT_MAX_OCTAVES); beyond ~12 the
  * contribution is sub-millimetre at this persistence, so it is imperceptible.

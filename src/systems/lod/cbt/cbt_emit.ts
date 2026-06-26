@@ -1,5 +1,12 @@
-import type { ChunkMeshDataTyped } from '../cdlod/workers/worker_protocol';
 import type { CbtNode } from './cbt_state';
+
+type ChunkMeshDataTyped = {
+    positions: Float32Array;
+    normals: Float32Array;
+    morphDeltas: Float32Array;
+    uvs: Float32Array;
+    indices: Uint16Array | Uint32Array;
+};
 import { fbmNoise, type NoiseParams, DEFAULT_NOISE } from './cbt_noise';
 
 /** Finite-difference step for surface gradient normals (in unit-sphere space). */

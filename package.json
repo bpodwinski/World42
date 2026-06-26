@@ -32,6 +32,7 @@
     "@rspack/core": "^1.5.8",
     "@types/node": "^24.9.2",
     "@vitest/coverage-v8": "^4.0.5",
+    "@webgpu/types": "^0.1.71",
     "dotenv-webpack": "^8.1.1",
     "gh-pages": "^6.3.0",
     "html-webpack-plugin": "^5.6.4",
@@ -41,12 +42,12 @@
     "vitest": "^4.0.5"
   },
   "dependencies": {
-    "@babylonjs/core": "^8.51.1",
-    "@babylonjs/gui": "^8.51.1",
-    "@babylonjs/inspector": "^8.51.1",
-    "@babylonjs/ktx2decoder": "^8.51.1",
-    "@babylonjs/loaders": "^8.51.1",
-    "@babylonjs/materials": "^8.51.1",
+    "@babylonjs/core": "^9.14.0",
+    "@babylonjs/gui": "^9.14.0",
+    "@babylonjs/inspector": "^9.14.0",
+    "@babylonjs/ktx2decoder": "^9.14.0",
+    "@babylonjs/loaders": "^9.14.0",
+    "@babylonjs/materials": "^9.14.0",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3"
   }

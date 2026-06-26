@@ -145,7 +145,7 @@
         },
         "BenchWorld": {
           "type": "planet",
-          "lod_algorithm": "cdlod",
+          "lod_algorithm": "cbt-ocbt",
           "position_km": [149600000, 0, 0],
           "diameter_km": 12742,
           "rotation_period_days": 1

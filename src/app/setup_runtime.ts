@@ -166,7 +166,7 @@ export function setupRuntime({
             (globalThis as unknown as { __ocbtPerfMask?: number }).__ocbtPerfMask = mask | 0;
         },
         getStats: () => sampleStats(),
-        getPlanets: () => [...lod.getCbtPlanetInfo(), ...lod.getCdlodPlanetInfo()],
+        getPlanets: () => lod.getCbtPlanetInfo(),
         setCameraDoublePos: (x: number, y: number, z: number) => {
             camera.doublepos.set(x, y, z);
             lod.resetNow();
@@ -224,7 +224,7 @@ export function setupRuntime({
     // in km and as a multiple of its radius (the unit the perf bench waypoints use).
     const tmpPlanetCenter = new Vector3();
     const formatAltitude = (): string => {
-        const infos = [...lod.getCbtPlanetInfo(), ...lod.getCdlodPlanetInfo()];
+        const infos = lod.getCbtPlanetInfo();
         let bestKey = '';
         let bestDist = Infinity;
         let bestRadius = 1;
@@ -238,9 +238,8 @@ export function setupRuntime({
             }
         }
         if (!bestKey) return '';
-        // Altitude above the ACTUAL terrain, not sea level: for a CBT/OCBT planet the nearest
-        // ground info gives the analytic fbm height under the camera (same field the shader
-        // renders). CDLOD planets fall back to sea level (their height field is worker-side).
+        // Altitude above the ACTUAL terrain, not sea level: the nearest ground info gives the
+        // analytic fbm height under the camera (same field the shader renders).
         let groundRadius = bestRadius;
         const cbtGround = lod.getCbtGroundInfo();
         if (cbtGround && cbtGround.key === bestKey) groundRadius = cbtGround.groundRSim;

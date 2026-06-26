@@ -14,7 +14,7 @@
 
 | Composant | Technologie | Version |
 |-----------|-------------|---------|
-| Rendu 3D | BabylonJS | 8.51.1 |
+| Rendu 3D | BabylonJS | 9.14.0 |
 | Langage principal | TypeScript (strict) | ESNext |
 | Terrain procédural | Rust + wasm-bindgen | edition 2024 |
 | Bruit de terrain | `noise` crate (Perlin/Simplex) | 0.9 |

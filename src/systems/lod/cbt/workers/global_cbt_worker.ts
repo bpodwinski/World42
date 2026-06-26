@@ -1,8 +1,7 @@
 /**
  * Lazily-created singleton Web Worker that runs the off-thread CBT kernels.
- * Separate from the CDLOD `globalWorkerPool` — the CBT worker is STATEFUL (it owns
- * every planet's tree), so there is exactly one of it (round-robin happens inside,
- * via the per-frame message stream). Rspack bundles the worker from this URL.
+ * STATEFUL: owns every planet's tree, so there is exactly one instance
+ * (round-robin happens inside via the per-frame message stream).
  */
 let worker: Worker | null = null;
 

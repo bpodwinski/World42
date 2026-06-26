@@ -1,8 +1,7 @@
 /**
  * `cbt-kernel/1` — message protocol for the off-thread CBT terrain worker.
  *
- * Mirrors the CDLOD `mesh-kernel/1` protocol (see worker_protocol.ts) but is
- * STATEFUL: the worker owns each planet's CBT tree (typed-array pool + emit
+ * STATEFUL protocol: the worker owns each planet's CBT tree (typed-array pool + emit
  * cache). The main thread sends only camera parameters per frame (tiny) and
  * receives emitted geometry back via transferables (the only large payload).
  *

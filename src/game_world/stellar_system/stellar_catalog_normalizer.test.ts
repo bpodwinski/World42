@@ -18,7 +18,7 @@ describe('stellar_catalog_normalizer', () => {
         expect(Object.keys(catalog.systems)).toEqual(['Sol']);
         expect(catalog.default).toBe('Sol');
         expect(catalog.systems.Sol.bodies.Earth.position_km).toEqual([1, 2, 3]);
-        expect(catalog.systems.Sol.bodies.Earth.lod_algorithm).toBe('cdlod');
+        expect(catalog.systems.Sol.bodies.Earth.lod_algorithm).toBe('cbt-ocbt');
     });
 
     it('normalizes multi-system payloads with optional metadata', () => {
@@ -70,7 +70,7 @@ describe('stellar_catalog_normalizer', () => {
         expect(system.Broken.position_km).toEqual([0, 0, 0]);
         expect(system.Broken.diameter_km).toBe(0);
         expect(system.Broken.rotation_period_days).toBeNull();
-        expect(system.Broken.lod_algorithm).toBe('cdlod');
+        expect(system.Broken.lod_algorithm).toBe('cbt-ocbt');
         expect(system.Broken.star).toEqual({
             temperature_k: undefined,
             intensity: undefined,

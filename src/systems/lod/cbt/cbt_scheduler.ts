@@ -336,8 +336,7 @@ export class CbtPlanet {
      *
      * When the camera is below ground + clearance, it is pushed radially out to
      * the floor. Returns true if it moved. Cheap early-rejects for far planets.
-     * Exact at any LOD depth — no GPU readback. (CDLOD planets use a different,
-     * worker-side height field and are not handled here.)
+     * Exact at any LOD depth — no GPU readback.
      */
     resolveGroundCollision(clearanceSim: number): boolean {
         const center = this.entity.doublepos;

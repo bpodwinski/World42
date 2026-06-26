@@ -12,10 +12,10 @@ function canonicalType(typeRaw: unknown): string {
 }
 
 function canonicalLodAlgorithm(value: unknown): LodAlgorithm {
-    if (typeof value !== 'string') return 'cdlod';
+    if (typeof value !== 'string') return 'cbt-ocbt';
     const v = value.toLowerCase().trim() as LodAlgorithm;
-    const valid: LodAlgorithm[] = ['cdlod', 'cbt-cpu', 'cbt-gpu', 'cbt-ocbt'];
-    return valid.includes(v) ? v : 'cdlod';
+    const valid: LodAlgorithm[] = ['cbt-cpu', 'cbt-gpu', 'cbt-ocbt'];
+    return valid.includes(v) ? v : 'cbt-ocbt';
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

@@ -2,8 +2,7 @@
 /**
  * Off-thread CBT terrain worker (`cbt-kernel/1`). Owns one Rust/WASM `CbtKernel`
  * per planet; runs classify + split/merge + emit and returns emitted geometry to
- * the main thread via transferables. Mirrors terrain_mesh_worker.ts (lazy WASM init,
- * typed protocol) but is stateful: the trees live here, only camera params come in.
+ * the main thread via transferables. Stateful: trees live here, only camera params come in.
  */
 import initWasm, {
     CbtKernel,

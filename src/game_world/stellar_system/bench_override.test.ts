@@ -9,7 +9,7 @@ import type { LoadedBody, LoadedSystem } from './stellar_catalog_loader';
 
 function fakeBody(name: string, bodyType: string): LoadedBody {
     // Only the fields the override touches matter; cast the rest.
-    return { name, bodyType, lodAlgorithm: 'cdlod' } as unknown as LoadedBody;
+    return { name, bodyType, lodAlgorithm: 'cbt-ocbt' } as unknown as LoadedBody;
 }
 
 function fakeSystems(): Map<string, LoadedSystem> {
@@ -42,7 +42,6 @@ describe('parseBenchAlgorithm', () => {
     });
 
     it('parses each valid backend', () => {
-        expect(parseBenchAlgorithm('?bench=cdlod')).toBe('cdlod');
         expect(parseBenchAlgorithm('?bench=cbt-cpu')).toBe('cbt-cpu');
         expect(parseBenchAlgorithm('?bench=cbt-gpu')).toBe('cbt-gpu');
         expect(parseBenchAlgorithm('?bench=CBT-OCBT')).toBe('cbt-ocbt'); // case-insensitive
@@ -73,7 +72,7 @@ describe('applyBenchOverride', () => {
     it('is a no-op when algo is null', () => {
         const systems = fakeSystems();
         applyBenchOverride(systems, null);
-        expect(systems.get(BENCH_SYSTEM_ID)!.bodies.get('BenchWorld')!.lodAlgorithm).toBe('cdlod');
+        expect(systems.get(BENCH_SYSTEM_ID)!.bodies.get('BenchWorld')!.lodAlgorithm).toBe('cbt-ocbt');
     });
 
     it('forces every non-star body onto the algo and leaves stars untouched', () => {

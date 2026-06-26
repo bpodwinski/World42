@@ -15,7 +15,7 @@ import type { LoadedSystem, LodAlgorithm } from './stellar_catalog_loader';
 /** Dedicated benchmark system id (see data.json). */
 export const BENCH_SYSTEM_ID = 'Benchmark';
 
-const VALID: readonly LodAlgorithm[] = ['cdlod', 'cbt-cpu', 'cbt-gpu', 'cbt-ocbt'];
+const VALID: readonly LodAlgorithm[] = ['cbt-cpu', 'cbt-gpu', 'cbt-ocbt'];
 
 /**
  * Parse `?bench=<algo>` from a `location.search` string.
