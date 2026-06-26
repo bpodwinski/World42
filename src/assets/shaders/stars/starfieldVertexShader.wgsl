@@ -149,15 +149,37 @@ fn main(input : VertexInputs) -> FragmentInputs {
     let MAX_IRRADIANCE = 6.0;
     var clippedBr = MAX_IRRADIANCE * brightness / (brightness + MAX_IRRADIANCE);
 
-    // Atmospheric scintillation: modulate brightness with band-limited turbulence noise.
-    // Amplitude scales with airmass (more turbulence near horizon) and atmosphereFactor
-    // (0 in space / airless body → no scintillation; 1 at surface → full effect).
+    // Atmospheric scintillation + extinction (both disabled in space / airless bodies).
+    // Per-channel transmission (R, G, B) — default = 1 (no extinction).
+    var extRgb = vec3<f32>(1.0, 1.0, 1.0);
     if (uniforms.atmosphereFactor > 0.001) {
-        let sinElev  = clamp(dot(dir, uniforms.worldUp), 0.05, 1.0);
-        let airmass  = 1.0 / sinElev;           // 1 at zenith, ~20 at 3° elevation
-        let amplitude = clamp(uniforms.atmosphereFactor * airmass * 0.08, 0.0, 0.4);
-        let noise    = scintillate(vertexInputs.instanceIndex, uniforms.time);
-        clippedBr    = clippedBr * max(0.05, 1.0 + amplitude * noise);
+        let sinElev = dot(dir, uniforms.worldUp);
+
+        if (sinElev <= 0.0) {
+            // Star is below the local horizon: occluded by the planet body.
+            clippedBr = 0.0;
+        } else {
+            let airmass = 1.0 / max(sinElev, 0.05);  // geometric airmass, capped at ~20
+
+            // Scintillation: band-limited brightness turbulence, amplitude ∝ airmass.
+            let amplitude = clamp(uniforms.atmosphereFactor * airmass * 0.08, 0.0, 0.4);
+            let noise = scintillate(vertexInputs.instanceIndex, uniforms.time);
+            clippedBr = clippedBr * max(0.05, 1.0 + amplitude * noise);
+
+            // Atmospheric extinction — Bouguer–Lambert law, per spectral channel.
+            // Standard sea-level zenith extinction coefficients (mag per airmass):
+            //   R ≈ 0.20  (mostly aerosol)
+            //   V ≈ 0.30  (V-band, used as brightness reference)
+            //   B ≈ 0.45  (Rayleigh-dominated → most reddening)
+            // Factor 0.921 = 0.4 * ln(10) converts magnitudes to flux via Pogson's law.
+            let ext = uniforms.atmosphereFactor * airmass;
+            let tR = exp(-0.921 * 0.20 * ext);
+            let tG = exp(-0.921 * 0.30 * ext);  // V-band transmission
+            let tB = exp(-0.921 * 0.45 * ext);
+            // Overall brightness follows V-band; reddening is the per-channel ratio vs. green.
+            clippedBr = clippedBr * tG;
+            extRgb = vec3<f32>(tR / tG, 1.0, tB / tG);
+        }
     }
 
     // Billboard radius: for bright stars, extend to the eye PSF bloom boundary so the
@@ -183,7 +205,11 @@ fn main(input : VertexInputs) -> FragmentInputs {
     pos.y = -pos.y;
     vertexOutputs.position = pos;
 
-    vertexOutputs.vColor       = bvToLinearRgb(bv);
+    // Apply reddening to the physical hue and re-normalise (brightness stays in vBrightness).
+    let baseHue = bvToLinearRgb(bv);
+    let reddenedHue = baseHue * extRgb;
+    let huePeak = max(max(reddenedHue.r, reddenedHue.g), reddenedHue.b);
+    vertexOutputs.vColor       = reddenedHue / max(huePeak, 1.0e-5);
     vertexOutputs.vBrightness  = clippedBr;
     vertexOutputs.vOffset      = corner;
     vertexOutputs.vBaseRadius  = baseRadius;
