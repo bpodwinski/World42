@@ -1,34 +1,71 @@
-// Starfield billboard fragment shader (BJS WGSL flavor).
+// Starfield billboard fragment shader — bounded human-eye PSF.
 //
-// Applies a Gaussian PSF (Point Spread Function) approximating the human eye's
-// response to a point light source. The billboards are rendered with ALPHA_ADD
-// blending so star contributions accumulate on the black cleared background;
-// tone-mapping is applied later by the image-processing task (ACES).
+// Implements a two-tier approximation of the photopic PSF by Spencer et al. (1995),
+// as used in CelestiaStarRenderer (Askaniy/CelestiaStarRenderer on GitHub):
 //
-// The PSF is a simple isotropic Gaussian. A bounded human-eye PSF with diffraction
-// spikes and chromatic fringes is planned for Sprint 2 (issue #16).
+//   Tier 1 — Point core  [dist ≤ baseRadius]:
+//     Linear cone: max(0, 1 − dist/R) × min(br, 1)
+//     Faint stars never leave this region.
+//
+//   Tier 2 — Eye PSF bloom  [all dist, additive, only when br > 1]:
+//     ((br^0.4 / max(dist, 0.1) − a) × b)^2.5,  clamped to [0, br]
+//     where a = OPTIMIZATION / baseRadius, b = 1 / (π / baseRadius − a).
+//     The bloom naturally falls to 0 at dist = bloomRadius = br^0.4 / a,
+//     which is exactly the billboard edge for bright stars.
+//
+// Rendering setup:
+//   ALPHA_ADD blending — star contributions accumulate on the cleared black background.
+//   No depth write; NDC z = 0.9999 passes for sky, fails for terrain.
+//   ACES tone mapping (later pass) compresses the HDR bloom values.
+//
+// Brightness reference: mag 1.5 → clippedBr = 1.0 (bloom onset, ~25 brightest stars).
+// Vega (mag 0) → clippedBr ≈ 2.4; Sirius (mag −1.46) → clippedBr ≈ 4.3 (soft-capped at 6).
 
-varying vColor      : vec3<f32>;
-varying vBrightness : f32;
-varying vOffset     : vec2<f32>;  // corner offset in [-0.5, +0.5]
+varying vColor       : vec3<f32>;
+varying vBrightness  : f32;
+varying vOffset      : vec2<f32>;
+varying vBaseRadius  : f32;
+varying vPixelRadius : f32;
+
+const OPTIMIZATION : f32 = 0.1;
+const PI           : f32 = 3.14159265;
 
 @fragment
 fn main(input : FragmentInputs) -> FragmentOutputs {
-    let d = length(fragmentInputs.vOffset);
+    let d = length(fragmentInputs.vOffset);  // [0, 0.5] normalized billboard distance
 
-    // Discard corners to produce a circular billboard.
-    if (d > 0.5) {
+    // Discard outside the circular billboard.
+    if (d >= 0.5) {
         discard;
     }
 
-    // Isotropic Gaussian PSF.
-    // sigma = 0.18 concentrates most energy in the core (~1/3 of the billboard radius)
-    // while leaving a soft halo that bloom will amplify for bright stars.
-    let sigma = 0.18;
-    let g = exp(-d * d / (2.0 * sigma * sigma));
+    let dist_px  = 2.0 * fragmentInputs.vPixelRadius * d;  // pixel distance from star center
+    let base_px  = fragmentInputs.vBaseRadius;
+    let br       = fragmentInputs.vBrightness;
 
-    // Linear HDR output: color × magnitude-brightness × Gaussian falloff.
-    // ALPHA_ADD blending: output = src + dest (stars accumulate on the black background).
-    fragmentOutputs.color = vec4<f32>(fragmentInputs.vColor * fragmentInputs.vBrightness * g, 1.0);
+    // PSF coefficients (CelestiaStarRenderer / Spencer 1995 approximation).
+    let a = OPTIMIZATION / base_px;
+    let b = 1.0 / (PI / base_px - a);
+
+    // Tier 1 — linear cone core (all stars, capped at 1.0 for faint stars).
+    let core = max(0.0, 1.0 - dist_px / base_px) * min(br, 1.0);
+
+    // Tier 2 — power-law bloom (additive, only computed for bright stars).
+    var bloom = 0.0;
+    if (br > 1.0) {
+        let raw = (pow(br, 0.4) / max(dist_px, 0.1) - a) * b;
+        if (raw > 0.0) {
+            bloom = clamp(pow(raw, 2.5), 0.0, br);
+        }
+    }
+
+    let value = core + bloom;
+
+    // Discard near-zero pixels to avoid ALPHA_ADD accumulating invisible overdraw.
+    if (value < 0.001) {
+        discard;
+    }
+
+    fragmentOutputs.color = vec4<f32>(fragmentInputs.vColor * value, 1.0);
     return fragmentOutputs;
 }

@@ -22,12 +22,17 @@
 
 var<storage, read> starData : array<vec4<f32>>;
 
-uniform viewProjection : mat4x4<f32>;
-uniform viewport       : vec2<f32>;   // canvas size in pixels (width, height)
+uniform viewProjection   : mat4x4<f32>;
+uniform viewport         : vec2<f32>;    // canvas size in pixels (width, height)
+uniform time             : f32;          // seconds (performance.now() / 1000)
+uniform worldUp          : vec3<f32>;    // surface normal at camera (planet centre → camera)
+uniform atmosphereFactor : f32;          // 0 = space / airless body, 1 = at planet surface
 
-varying vColor      : vec3<f32>;
-varying vBrightness : f32;
-varying vOffset     : vec2<f32>;  // corner offset in [-0.5, +0.5] for PSF in fragment
+varying vColor       : vec3<f32>;
+varying vBrightness  : f32;   // soft-clipped irradiance (mag 1.5 → 1.0; >1 triggers bloom PSF)
+varying vOffset      : vec2<f32>;  // corner offset in [-0.5, +0.5]
+varying vBaseRadius  : f32;   // point_radius in pixels — PSF core boundary
+varying vPixelRadius : f32;   // total billboard radius in pixels (≥ vBaseRadius)
 
 attribute position : vec3<f32>;   // dummy — positions are computed from star data
 
@@ -90,6 +95,18 @@ fn bvToLinearRgb(bv : f32) -> vec3<f32> {
     return rgb / max(peak, 1.0e-5);
 }
 
+// Atmospheric scintillation noise for a given star instance.
+// Returns a value in roughly [-1, 1] built from four sine waves at frequencies
+// matching real atmospheric scintillation (~2–25 Hz). The golden-ratio seed spreads
+// phase uniformly across instances so no two stars blink in sync.
+fn scintillate(instanceIdx : u32, t : f32) -> f32 {
+    let s = f32(instanceIdx) * 0.6180339887;
+    return  0.50 * sin(t *  2.3 + s)
+          + 0.30 * sin(t *  7.1 + s * 1.6180)
+          + 0.15 * sin(t * 15.3 + s * 2.7183)
+          + 0.05 * sin(t * 24.7 + s * 3.1416);
+}
+
 @vertex
 fn main(input : VertexInputs) -> FragmentInputs {
     let star = starData[vertexInputs.instanceIndex];
@@ -118,16 +135,40 @@ fn main(input : VertexInputs) -> FragmentInputs {
     // NDC center of the star (perspective divide).
     let ndcCenter = clip.xy / clip.w;
 
-    // Billboard pixel radius from apparent magnitude.
-    // Physical model: apparent flux ∝ 10^(-0.4 × mag).
-    // Radius scales as flux^0.31 so that:
-    //   mag 8 → ~0.7 px (sub-pixel point source)
-    //   mag 6 → ~1.0 px (naked-eye limit)
-    //   mag 0 → ~7.0 px (Vega-class, bloom carries the halo)
-    //   mag −2 → clamped to 12 px
-    // Keeping faint stars sub-pixel prevents ALPHA_ADD overdraw from dominating the frame.
+    // Apparent flux and base point radius.
+    // Radius scales as flux^0.31: mag 8 → ~0.7 px, mag 6 → ~1.0 px, mag 0 → ~7.0 px.
+    // Faint stars stay sub-pixel to avoid ALPHA_ADD overdraw dominating the frame.
     let flux = pow(10.0, -0.4 * mag);
-    let pixelRadius = clamp(7.0 * pow(flux, 0.31), 0.6, 12.0);
+    let baseRadius = clamp(7.0 * pow(flux, 0.31), 0.6, 12.0);
+
+    // Irradiance-scaled brightness: mag 1.5 → 1.0 (bloom onset at the ~25 brightest stars).
+    let brightness = pow(10.0, -0.4 * (mag - 1.5));
+
+    // Soft-clip: asymptotic cap so bloom radius stays bounded for Sirius/Canopus.
+    // lim(br → ∞) → MAX_IRRADIANCE = 6.0. Leaves faint stars (br << 6) nearly untouched.
+    let MAX_IRRADIANCE = 6.0;
+    var clippedBr = MAX_IRRADIANCE * brightness / (brightness + MAX_IRRADIANCE);
+
+    // Atmospheric scintillation: modulate brightness with band-limited turbulence noise.
+    // Amplitude scales with airmass (more turbulence near horizon) and atmosphereFactor
+    // (0 in space / airless body → no scintillation; 1 at surface → full effect).
+    if (uniforms.atmosphereFactor > 0.001) {
+        let sinElev  = clamp(dot(dir, uniforms.worldUp), 0.05, 1.0);
+        let airmass  = 1.0 / sinElev;           // 1 at zenith, ~20 at 3° elevation
+        let amplitude = clamp(uniforms.atmosphereFactor * airmass * 0.08, 0.0, 0.4);
+        let noise    = scintillate(vertexInputs.instanceIndex, uniforms.time);
+        clippedBr    = clippedBr * max(0.05, 1.0 + amplitude * noise);
+    }
+
+    // Billboard radius: for bright stars, extend to the eye PSF bloom boundary so the
+    // fragment shader can evaluate the full halo. bloomR = clippedBr^0.4 / (OPT / baseR).
+    let OPTIMIZATION = 0.1;
+    var pixelRadius = baseRadius;
+    if (clippedBr > 1.0) {
+        let bloomR = pow(clippedBr, 0.4) * baseRadius / OPTIMIZATION;
+        pixelRadius = min(bloomR, 60.0);
+    }
+    pixelRadius = max(pixelRadius, baseRadius);
 
     // NDC extent: convert pixel radius to NDC half-extent (NDC spans 2 units = viewport width).
     let ndcExtent = pixelRadius * 2.0 / uniforms.viewport;
@@ -142,12 +183,10 @@ fn main(input : VertexInputs) -> FragmentInputs {
     pos.y = -pos.y;
     vertexOutputs.position = pos;
 
-    // Linear HDR brightness from apparent magnitude.
-    // Vega (mag 0) → ~0.8 linear units (pre-bloom). Faint limit (mag 8) → ~0.0005.
-    let brightness = 0.8 * pow(10.0, -0.4 * mag);
-
-    vertexOutputs.vColor      = bvToLinearRgb(bv);
-    vertexOutputs.vBrightness = brightness;
-    vertexOutputs.vOffset     = corner;  // passed to fragment for Gaussian PSF distance
+    vertexOutputs.vColor       = bvToLinearRgb(bv);
+    vertexOutputs.vBrightness  = clippedBr;
+    vertexOutputs.vOffset      = corner;
+    vertexOutputs.vBaseRadius  = baseRadius;
+    vertexOutputs.vPixelRadius = pixelRadius;
     return vertexOutputs;
 }

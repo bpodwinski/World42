@@ -22,6 +22,7 @@ import {
     ShaderMaterial,
     StorageBuffer,
     Vector2,
+    Vector3,
     VertexData,
     type Scene,
     type WebGPUEngine
@@ -32,6 +33,12 @@ import starfieldFragmentShader from '../../assets/shaders/stars/starfieldFragmen
 
 export type StarfieldHandle = {
     dispose: () => void;
+    /**
+     * Update atmospheric scintillation state each frame.
+     * @param factor  0 = space / airless body (no scintillation), 1 = at surface.
+     * @param worldUp Normalised direction from planet centre to camera (surface normal).
+     */
+    setAtmosphereState: (factor: number, worldUp: Vector3) => void;
 };
 
 /**
@@ -76,7 +83,7 @@ export function createStarfieldRenderer(
         {
             shaderLanguage: ShaderLanguage.WGSL,
             attributes: ['position'],
-            uniforms: ['viewProjection', 'viewport'],
+            uniforms: ['viewProjection', 'viewport', 'time', 'worldUp', 'atmosphereFactor'],
             storageBuffers: ['starData']
         }
     );
@@ -88,11 +95,18 @@ export function createStarfieldRenderer(
 
     material.setStorageBuffer('starData', starBuffer);
 
-    // Update viewport size each frame (handles canvas resize gracefully).
+    // Mutable atmosphere state updated by the caller via setAtmosphereState().
+    const _worldUp = new Vector3(0, 1, 0);
+    let _atmosphereFactor = 0;
+
+    // Update per-frame uniforms (viewport size, time, atmosphere state).
     const _viewport = new Vector2();
     material.onBindObservable.add(() => {
         _viewport.set(engine.getRenderWidth(), engine.getRenderHeight());
         material.setVector2('viewport', _viewport);
+        material.setFloat('time', performance.now() / 1000);
+        material.setVector3('worldUp', _worldUp);
+        material.setFloat('atmosphereFactor', _atmosphereFactor);
     });
 
     mesh.material = material;
@@ -102,6 +116,10 @@ export function createStarfieldRenderer(
             mesh.dispose();
             material.dispose();
             starBuffer.dispose();
+        },
+        setAtmosphereState(factor: number, worldUp: Vector3): void {
+            _atmosphereFactor = Math.max(0, Math.min(1, factor));
+            _worldUp.copyFrom(worldUp);
         }
     };
 }
