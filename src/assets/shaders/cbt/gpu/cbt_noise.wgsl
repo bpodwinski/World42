@@ -353,8 +353,9 @@ const CBT_CRATER_FRESH : f32 = 0.13; // fraction of craters that are fresh (few,
 const CBT_RAY_CLASSES : i32 = 2;     // only the 2 biggest classes emit rays (prominent systems + perf)
 const CBT_RAY_N : i32 = 16;          // potential ray directions around a crater
 const CBT_RAY_REACH : f32 = 5.0;     // ray length in crater radii (rn)
-const CBT_HALO_H : f32 = 0.45;       // bright ejecta-halo strength
-const CBT_RAY_H : f32 = 0.7;         // bright ray strength
+const CBT_HALO_H : f32 = 0.22;       // bright ejecta-halo strength
+const CBT_RAY_H : f32 = 0.30;        // bright ray strength (kept low: on the dark Mercury albedo
+                                     // a high value reads as hard white streaks)
 
 // Irregular radial spokes: periodic value-noise of the azimuth (N cells around the circle, wraps
 // seamlessly), hashed per crater, thresholded to sparse bright rays.
@@ -367,10 +368,10 @@ fn craterRayStreak(a : f32, seed : i32) -> f32 {
     let h0 = f32(cbtPermAt(i0 + seed)) * (1.0 / 256.0);
     let h1 = f32(cbtPermAt(i1 + seed)) * (1.0 / 256.0);
     let v = mix(h0, h1, f * f * (3.0 - 2.0 * f));
-    // Soft spokes: a wide smooth ramp (no hard threshold) so the grey->white transition is gradual,
-    // then squared so the dark majority dominates and only the brightest cores feather to white.
-    let s = smoothstep(0.3, 1.0, v);
-    return s * s;
+    // Soft, feathered spokes: a WIDE smooth ramp and NO squaring. Squaring concentrated the streak
+    // into a hard bright core (a crisp white edge against the dark surface); a plain ramp keeps the
+    // grey->white transition a gentle gradient across the whole spoke.
+    return smoothstep(0.2, 1.0, v);
 }
 
 fn craterRays(dir : vec3<f32>, radiusKm : f32, camDistKm : f32) -> f32 {
@@ -409,9 +410,11 @@ fn craterRays(dir : vec3<f32>, radiusKm : f32, camDistKm : f32) -> f32 {
             var rays = 0.0;
             if (rn > 0.9) {
                 let a = atan2(dot(qd, t2), dot(qd, t1));
-                // Smooth radial falloff (squared) so rays feather out gradually, no hard ends.
+                // Gradual ramp-IN from the rim (no hard inner edge at rn=0.9) AND squared outer
+                // falloff -> the ray feathers in near the rim and out toward the tip, both soft.
+                let rampIn = smoothstep(0.9, 1.7, rn);
                 let radial = 1.0 - smoothstep(0.9, CBT_RAY_REACH, rn);
-                rays = CBT_RAY_H * craterRayStreak(a, q0) * radial * radial;
+                rays = CBT_RAY_H * craterRayStreak(a, q0) * rampIn * radial * radial;
             }
             bright = bright + (halo + rays) * fade;
         }
