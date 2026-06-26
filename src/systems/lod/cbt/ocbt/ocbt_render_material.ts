@@ -42,6 +42,8 @@ export type OcbtRenderOptions = {
     ambient?: Vector3;
     lightColor?: Vector3;
     lightIntensity?: number;
+    atmoDensity?: number;
+    atmoColor?: Vector3;
 };
 
 function bakedHeader(opts: OcbtRenderOptions): string {
@@ -101,11 +103,11 @@ function bakedHeader(opts: OcbtRenderOptions): string {
         // Curvature AO: ambient occlusion from deviation of terrain normal vs radial direction.
         // Applied to ambient only. Computed from nSlope (smooth normal) for macro-scale AO.
         `const CBT_AO_STRENGTH : f32 = 0.35;`,
-        // GGX micro-facette specular. Slope-driven roughness (flat=smoother, steep=matte).
-        // CBT_SPEC_STRENGTH is low (0.03) for lunar regolith; raise for icy/silica-rich planets.
+        // Cook-Torrance specular. Slope-driven roughness (flat=smoother, steep=matte).
+        // CBT_F0 is Fresnel at normal incidence (~0.04 for dielectric rock/regolith).
         `const CBT_ROUGH_LO : f32 = 0.3;`,
         `const CBT_ROUGH_HI : f32 = 0.85;`,
-        `const CBT_SPEC_STRENGTH : f32 = 0.03;`
+        `const CBT_F0 : f32 = 0.04;`
     ].flat().join('\n');
 }
 
@@ -204,6 +206,11 @@ function fragmentSource(opts: OcbtRenderOptions): string {
         // material rebuild.
         'uniform uAmbient : vec3<f32>;',
         'uniform uLightIntensity : f32;',
+        // Aerial perspective (optional). uAtmoDensity = 0 disables the fog completely.
+        // Used for airless bodies with thin dust/gas hazes (NOT for full-atmosphere planets
+        // that already have the atmospheric scattering post-process applied).
+        'uniform uAtmoDensity : f32;',
+        'uniform uAtmoColor   : vec3<f32>;',
         'varying vDir : vec3<f32>;',
         'varying vRel : vec3<f32>;',
         'varying vFragmentDepth : f32;',
@@ -311,17 +318,27 @@ function fragmentSource(opts: OcbtRenderOptions): string {
         '    // Opposition surge: a gentle hotspot when the Sun is near the camera back (low phase).',
         '    let cosPhase = clamp(dot(V, L), -1.0, 1.0);',
         '    refl = refl * (1.0 + CBT_OPP_AMP * smoothstep(CBT_OPP_COS, 1.0, cosPhase));',
-        '    // GGX micro-facette specular. H = half-vector. Slope-driven roughness: flat terrain',
+        '    // Cook-Torrance specular (D·F·G). H = half-vector. Slope-driven roughness: flat terrain',
         '    // is smoother (lower roughness) than steep slopes. NdL gate zeroes spec in shadow.',
         '    var spec = 0.0;',
         '    if ((uniforms.uPerfMask & 16) == 0) {',
-        '        let H = normalize(L + V);',
-        '        let NdH = max(dot(nWorld, H), 0.0);',
+        '        let H       = normalize(L + V);',
+        '        let NdH     = max(dot(nWorld, H), 0.0);',
+        '        let VdH     = max(dot(V, H), 0.0);',
         '        let roughness = mix(CBT_ROUGH_LO, CBT_ROUGH_HI, slope01);',
-        '        let alpha = roughness * roughness;',
-        '        let denom = NdH * NdH * (alpha * alpha - 1.0) + 1.0;',
-        '        let D = (alpha * alpha) / (3.14159 * denom * denom);',
-        '        spec = D * CBT_SPEC_STRENGTH * NdL;',
+        '        let alpha   = roughness * roughness;',
+        '        let alpha2  = alpha * alpha;',
+        '        // GGX NDF',
+        '        let denom = NdH * NdH * (alpha2 - 1.0) + 1.0;',
+        '        let D = alpha2 / (3.14159 * denom * denom);',
+        '        // Schlick Fresnel',
+        '        let F = CBT_F0 + (1.0 - CBT_F0) * pow(1.0 - VdH, 5.0);',
+        '        // Smith-GGX geometry (k = alpha/2, IBL approx)',
+        '        let k   = alpha * 0.5;',
+        '        let g1L = NdL / (NdL * (1.0 - k) + k);',
+        '        let g1V = NdV / (NdV * (1.0 - k) + k);',
+        '        let G   = g1L * g1V;',
+        '        spec = (D * F * G) / (4.0 * NdL * NdV + 1e-4) * NdL;',
         '    }',
         '    let lighting = uniforms.uAmbient * ao + CBT_LIGHTCOLOR * (uniforms.uLightIntensity * refl);',
         '    // Procedural albedo + slope/altitude splatting (replaces the flat CBT_ALBEDO).',
@@ -333,7 +350,14 @@ function fragmentSource(opts: OcbtRenderOptions): string {
         '    var rays = 0.0;',
         '    if ((uniforms.uPerfMask & 4) == 0) { rays = craterRays(dir, CBT_RADIUS, camDistKm); }',
         '    albedo = albedo + vec3<f32>(rays);',
-        '    fragmentOutputs.color = vec4<f32>(albedo * lighting + CBT_LIGHTCOLOR * (uniforms.uLightIntensity * spec), 1.0);',
+        '    var finalColor = albedo * lighting + CBT_LIGHTCOLOR * (uniforms.uLightIntensity * spec);',
+        '    if (uniforms.uAtmoDensity > 0.0) {',
+        '        // Altitude-weighted exponential fog: dense near surface, zero above ~1% of radius.',
+        '        let altFactor = clamp(1.0 - altKm / (CBT_RADIUS * 0.01), 0.0, 1.0);',
+        '        let fogFactor = exp(-uniforms.uAtmoDensity * camDistKm * altFactor);',
+        '        finalColor = mix(uniforms.uAtmoColor, finalColor, fogFactor);',
+        '    }',
+        '    fragmentOutputs.color = vec4<f32>(finalColor, 1.0);',
         '    fragmentOutputs.fragDepth = log2(fragmentInputs.vFragmentDepth) * uniforms.logarithmicDepthConstant * 0.5;',
         '    return fragmentOutputs;',
         '}'
@@ -349,6 +373,8 @@ export type OcbtRenderMaterial = {
     setCamAnchor(camLocal: Vector3): void;
     setAmbient(ambient: Vector3): void;
     setLightIntensity(intensity: number): void;
+    setAtmoDensity(density: number): void;
+    setAtmoColor(color: Vector3): void;
     dispose(): void;
 };
 
@@ -370,7 +396,7 @@ export function buildOcbtRenderMaterial(
         {
             shaderLanguage: ShaderLanguage.WGSL,
             attributes: ['position'],
-            uniforms: ['viewProjection', 'world', 'uLightDirection', 'logarithmicDepthConstant', 'uDebugLod', 'uPerfMask', 'uCamAnchor', 'uAmbient', 'uLightIntensity'],
+            uniforms: ['viewProjection', 'world', 'uLightDirection', 'logarithmicDepthConstant', 'uDebugLod', 'uPerfMask', 'uCamAnchor', 'uAmbient', 'uLightIntensity', 'uAtmoDensity', 'uAtmoColor'],
             storageBuffers: ['ocbtHeap', 'ocbtPos', 'ocbtIndices', 'cbtPerm']
         }
     );
@@ -412,6 +438,8 @@ export function buildOcbtRenderMaterial(
     material.setVector3('uCamAnchor', new Vector3(0, 0, 0));
     material.setVector3('uAmbient', opts.ambient ?? new Vector3(0.008, 0.008, 0.008));
     material.setFloat('uLightIntensity', opts.lightIntensity ?? 1.0);
+    material.setFloat('uAtmoDensity', opts.atmoDensity ?? 0);
+    material.setVector3('uAtmoColor', opts.atmoColor ?? new Vector3(0, 0, 0));
 
     return {
         material,
@@ -433,6 +461,12 @@ export function buildOcbtRenderMaterial(
         },
         setLightIntensity(intensity: number): void {
             material.setFloat('uLightIntensity', intensity);
+        },
+        setAtmoDensity(density: number): void {
+            material.setFloat('uAtmoDensity', density);
+        },
+        setAtmoColor(color: Vector3): void {
+            material.setVector3('uAtmoColor', color);
         },
         dispose(): void {
             material.dispose();

@@ -57,10 +57,16 @@ export class OcbtSource implements CbtGeometrySource {
      *  the frustum test is exact (no smooth-sphere vs displaced mismatch). */
     private readonly heightMargin: number;
     private frame = 0;
+    /** Skip-when-still: last camera position in PLANET-LOCAL space (NaN until the first frame).
+     *  Planet-local also captures planet spin, so a spinning planet never counts as static. */
+    private readonly lastCamLocal = new Vector3(NaN, NaN, NaN);
+    /** Frames since the view last moved. Past SETTLE_FRAMES the topology/eval/compact are frozen. */
+    private framesSinceMove = 1 << 30;
     private readonly tmpDir = new Vector3();
     private readonly tmpInv = new Matrix();
     private readonly tmpCamLocal = new Vector3();
     private readonly tmpNormal = new Vector3();
+    private readonly tmpLightLocal = new Vector3();
     /** 6 frustum planes packed as (nx,ny,nz,d) in camera-relative planet-local space. */
     private readonly frustumF32 = new Float32Array(24);
     /** Anti-pop guard band, in leaf-edge multiples (off-screen kept fine within this band). */
@@ -68,6 +74,11 @@ export class OcbtSource implements CbtGeometrySource {
     /** forcedInstanceCount = min(capacity, liveCount*SAFETY + FLOOR) — absorbs readback lag. */
     private static readonly INSTANCE_SAFETY = 2;
     private static readonly INSTANCE_FLOOR = 8192;
+    /** Planet-local movement (sim units = km) below which the view counts as static (~1 mm). */
+    private static readonly STILL_EPS = 1e-6;
+    /** Frames to keep refining AFTER the last motion before freezing, so the concurrent topology
+     *  (bounded work/frame) fully converges for the new view before its passes are skipped. */
+    private static readonly SETTLE_FRAMES = 90;
 
     private ready = false;
     private disposed = false;
@@ -176,15 +187,32 @@ export class OcbtSource implements CbtGeometrySource {
         Vector3.TransformCoordinatesToRef(Vector3.ZeroReadOnly, this.tmpInv, this.tmpCamLocal);
         const focalPx = frame.viewportHeightPx / (2 * Math.tan(frame.cameraFovRadians * 0.5));
 
-        this.kernel.setCameraParams({
-            camLocal: [this.tmpCamLocal.x, this.tmpCamLocal.y, this.tmpCamLocal.z],
-            radius: this.radius,
-            focalPx,
-            splitThresholdPx: this.splitThresholdPx,
-            mergeThresholdPx: this.mergeThresholdPx,
-            cullMinDot: this.horizonCullMinDot(),
-            maxLevel: this.maxLevel
-        });
+        // --- Skip-when-still gate ------------------------------------------------------------
+        // The topology + EvaluateLEB + compact passes are ~33 GPU compute passes/frame and ran
+        // UNCONDITIONALLY — wasted once the view is static (nothing to refine, and the camera-relative
+        // vertex positions are unchanged). Detect a static view (camera unmoved in PLANET-LOCAL space,
+        // which also catches planet spin) and, after a short settle window that lets the concurrent
+        // topology converge post-motion, skip those passes. The draw still runs every frame from the
+        // existing buffers, so the image is identical at ~zero GPU cost while static.
+        const moved =
+            !isFinite(this.lastCamLocal.x) ||
+            Vector3.Distance(this.tmpCamLocal, this.lastCamLocal) > OcbtSource.STILL_EPS;
+        this.lastCamLocal.copyFrom(this.tmpCamLocal);
+        if (moved) this.framesSinceMove = 0;
+        else this.framesSinceMove++;
+        const topoActive = this.framesSinceMove < OcbtSource.SETTLE_FRAMES;
+
+        if (topoActive) {
+            this.kernel.setCameraParams({
+                camLocal: [this.tmpCamLocal.x, this.tmpCamLocal.y, this.tmpCamLocal.z],
+                radius: this.radius,
+                focalPx,
+                splitThresholdPx: this.splitThresholdPx,
+                mergeThresholdPx: this.mergeThresholdPx,
+                cullMinDot: this.horizonCullMinDot(),
+                maxLevel: this.maxLevel
+            });
+        }
 
         // Ground-detail anchor: the render fragment reconstructs the world-anchored surface
         // direction as world = uCamAnchor + rel. uCamAnchor MUST be the same f32 camera the
@@ -199,48 +227,53 @@ export class OcbtSource implements CbtGeometrySource {
         );
         this.render.setLightIntensity(this.starIntensity);
 
-        // Frustum cull: rotate each render-space plane normal into camera-relative
-        // planet-local space (R^T·n via the inverse world matrix; renderPos = R·rel, so
-        // n·renderPos = (R^T·n)·rel), keep d. Lets the fixed pool concentrate on the
-        // visible cone instead of saturating on the whole hemisphere.
-        const planes = frame.frustumPlanes;
-        if (planes && planes.length >= 6) {
-            for (let i = 0; i < 6; i++) {
-                const pl = planes[i];
-                Vector3.TransformNormalToRef(pl.normal, this.tmpInv, this.tmpNormal);
-                this.frustumF32[i * 4 + 0] = this.tmpNormal.x;
-                this.frustumF32[i * 4 + 1] = this.tmpNormal.y;
-                this.frustumF32[i * 4 + 2] = this.tmpNormal.z;
-                this.frustumF32[i * 4 + 3] = pl.d;
+        if (topoActive) {
+            // Frustum cull: rotate each render-space plane normal into camera-relative
+            // planet-local space (R^T·n via the inverse world matrix; renderPos = R·rel, so
+            // n·renderPos = (R^T·n)·rel), keep d. Lets the fixed pool concentrate on the
+            // visible cone instead of saturating on the whole hemisphere.
+            const planes = frame.frustumPlanes;
+            if (planes && planes.length >= 6) {
+                for (let i = 0; i < 6; i++) {
+                    const pl = planes[i];
+                    Vector3.TransformNormalToRef(pl.normal, this.tmpInv, this.tmpNormal);
+                    this.frustumF32[i * 4 + 0] = this.tmpNormal.x;
+                    this.frustumF32[i * 4 + 1] = this.tmpNormal.y;
+                    this.frustumF32[i * 4 + 2] = this.tmpNormal.z;
+                    this.frustumF32[i * 4 + 3] = pl.d;
+                }
+                // heightMargin = 0: positions are terrain-displaced now, so the frustum is exact.
+                this.kernel.setFrustum(this.frustumF32, OcbtSource.FRUSTUM_GUARD, true, 0);
+            } else {
+                this.kernel.setFrustum(this.frustumF32, OcbtSource.FRUSTUM_GUARD, false, 0);
             }
-            // heightMargin = 0: positions are terrain-displaced now, so the frustum is exact.
-            this.kernel.setFrustum(this.frustumF32, OcbtSource.FRUSTUM_GUARD, true, 0);
-        } else {
-            this.kernel.setFrustum(this.frustumF32, OcbtSource.FRUSTUM_GUARD, false, 0);
-        }
 
-        // Alternate split (even) / merge (odd) frames so the two halves never race on the
-        // same neighbor buffer. The split/merge limit cycle that used to flicker the mesh is
-        // broken in PrepareSimplify (conformity guard: a leaf with a finer neighbor is not
-        // merged, so the split pass can't re-create it).
-        if ((this.frame++ & 1) === 0) {
-            this.kernel.runFrame();
-        } else {
-            this.kernel.runMergeFrame();
+            // Alternate split (even) / merge (odd) frames so the two halves never race on the
+            // same neighbor buffer. The split/merge limit cycle that used to flicker the mesh is
+            // broken in PrepareSimplify (conformity guard: a leaf with a finer neighbor is not
+            // merged, so the split pass can't re-create it).
+            if ((this.frame++ & 1) === 0) {
+                this.kernel.runFrame();
+            } else {
+                this.kernel.runMergeFrame();
+            }
+            // Decode the live slots to vertex corners for this frame's draw (and next
+            // frame's classify, which reads the positions buffer).
+            this.kernel.runEvalLeb();
+            // Compact the live slots into the draw-index list so the draw issues liveCount
+            // instances (not CAPACITY) — the per-vertex fbm noise makes that the big win.
+            this.kernel.runCompact();
         }
-        // Decode the live slots to vertex corners for this frame's draw (and next
-        // frame's classify, which reads the positions buffer).
-        this.kernel.runEvalLeb();
-        // Compact the live slots into the draw-index list so the draw issues liveCount
-        // instances (not CAPACITY) — the per-vertex fbm noise makes that the big win.
-        this.kernel.runCompact();
 
         // lightDirection convention: planetCenter - starPos (star→planet), shader negates to get L toward star.
         if (this.starPos) {
             this.tmpDir.copyFrom(frame.planetCenterWorldDouble).subtractInPlace(this.starPos);
             if (this.tmpDir.lengthSquared() > 1e-12) {
                 this.tmpDir.normalize();
-                this.render.setLightDirection(this.tmpDir);
+                // Transform to planet-local so it matches the FBM normals (TransformNormal
+                // ignores translation — no-op without rotation, correct when rotation is wired).
+                Vector3.TransformNormalToRef(this.tmpDir, this.tmpInv, this.tmpLightLocal);
+                this.render.setLightDirection(this.tmpLightLocal);
             }
         }
 
