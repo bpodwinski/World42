@@ -1,7 +1,7 @@
-import { Matrix, Vector2, Vector3, type Scene } from '@babylonjs/core';
+import { Matrix, Vector3, type Scene } from '@babylonjs/core';
 import type { OriginCamera } from '../camera/camera_manager';
 import type { ResolvedAtmosphere } from '../../game_world/stellar_system/planet_lighting';
-import atmosphereFragmentShader from '../../assets/shaders/atmosphere/atmosphereFragmentShader.glsl';
+import atmosphereFragmentShader from '../../assets/shaders/atmosphere/atmosphereFragmentShader.wgsl';
 
 /** A planet that has an atmosphere, with everything the ray-march pass needs. */
 export type AtmosphereSource = {
@@ -17,7 +17,6 @@ export type AtmosphereSource = {
 
 /** Uniform names the atmosphere effect needs (shared by the Frame Graph task). */
 export const ATMO_PP_UNIFORMS = [
-    'resolution',
     'inverseProjection',
     'inverseView',
     'cameraPositionRender',
@@ -57,7 +56,6 @@ export function pickNearestAtmosphere(
     return best;
 }
 
-const _res = new Vector2();
 const _invProj = new Matrix();
 const _invView = new Matrix();
 const _centerRender = new Vector3();
@@ -72,19 +70,14 @@ const _sunDir = new Vector3();
  */
 export function setAtmosphereUniforms(
     effect: {
-        setVector2: (n: string, v: Vector2) => void;
         setFloat: (n: string, v: number) => void;
         setVector3: (n: string, v: Vector3) => void;
         setMatrix: (n: string, v: Matrix) => void;
     },
-    scene: Scene,
+    _scene: Scene,
     camera: OriginCamera,
     sources: AtmosphereSource[]
 ): void {
-    const engine = scene.getEngine();
-    _res.set(engine.getRenderWidth(), engine.getRenderHeight());
-    effect.setVector2('resolution', _res);
-
     camera.getProjectionMatrix().invertToRef(_invProj);
     camera.getViewMatrix().invertToRef(_invView);
     effect.setMatrix('inverseProjection', _invProj);

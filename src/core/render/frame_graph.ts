@@ -68,7 +68,7 @@ class FrameGraphStarTask extends FrameGraphPostProcessTask {
             useShaderStore: false,
             uniformNames: [...STAR_PP_UNIFORMS],
             samplerNames: [...STAR_PP_SAMPLERS],
-            shaderLanguage: ShaderLanguage.GLSL,
+            shaderLanguage: ShaderLanguage.WGSL,
         });
         super(name, frameGraph, pp);
         pp.onBindObservable.add((effect: Effect) => {
@@ -119,7 +119,7 @@ class FrameGraphAtmosphereTask extends FrameGraphPostProcessTask {
             useShaderStore: false,
             uniformNames: [...ATMO_PP_UNIFORMS],
             samplerNames: [...ATMO_PP_SAMPLERS],
-            shaderLanguage: ShaderLanguage.GLSL,
+            shaderLanguage: ShaderLanguage.WGSL,
         });
         super(name, frameGraph, pp);
         pp.onBindObservable.add((effect: Effect) => {

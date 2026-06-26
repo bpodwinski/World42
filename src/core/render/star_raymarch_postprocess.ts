@@ -1,6 +1,6 @@
-import { DepthRenderer, Effect, Matrix, PostProcess, Vector2, Vector3, Scene } from "@babylonjs/core";
+import { Matrix, Vector3, Scene } from "@babylonjs/core";
 import type { OriginCamera } from "../camera/camera_manager";
-import starRayMarchingFragmentShader from "../../assets/shaders/stars/starRayMarchingFragmentShader.glsl";
+import starRayMarchingFragmentShader from "../../assets/shaders/stars/starRayMarchingFragmentShader.wgsl";
 
 export type StarGlowSource = {
     posWorldDouble: Vector3;
@@ -16,7 +16,6 @@ export type StarOccluder = {
 
 /** Uniform names the star ray-march effect needs (shared by the legacy PostProcess and the Frame Graph task). */
 export const STAR_PP_UNIFORMS = [
-    "resolution",
     "time",
     "cameraPositionRender",
     "starCenterRender",
@@ -42,7 +41,6 @@ export const STAR_PP_FRAGMENT = starRayMarchingFragmentShader;
 // Reused allocations for the per-frame uniform computation (shared helper).
 const _starCenterRender = new Vector3();
 const _occluderCenterRender = new Vector3();
-const _res = new Vector2();
 const _invProj = new Matrix();
 const _invView = new Matrix();
 
@@ -52,15 +50,12 @@ const _invView = new Matrix();
  * the Frame Graph task binds a graph texture handle). Allocation-free.
  */
 export function setStarUniforms(
-    effect: { setVector2: (n: string, v: Vector2) => void; setFloat: (n: string, v: number) => void; setVector3: (n: string, v: Vector3) => void; setMatrix: (n: string, v: Matrix) => void },
-    scene: Scene,
+    effect: { setFloat: (n: string, v: number) => void; setVector3: (n: string, v: Vector3) => void; setMatrix: (n: string, v: Matrix) => void },
+    _scene: Scene,
     camera: OriginCamera,
     stars: StarGlowSource[],
     occluders: StarOccluder[] | undefined
 ): void {
-    const engine = scene.getEngine();
-    _res.set(engine.getRenderWidth(), engine.getRenderHeight());
-    effect.setVector2("resolution", _res);
     effect.setFloat("time", performance.now() * 0.001);
 
     camera.getProjectionMatrix().invertToRef(_invProj);
@@ -127,52 +122,4 @@ function pickNearestStar(camWorldDouble: Vector3, stars: StarGlowSource[]): Star
         }
     }
     return best;
-}
-
-export function attachStarRayMarchingPostProcess(
-    scene: Scene,
-    camera: OriginCamera,
-    stars: StarGlowSource[],
-    occluders?: StarOccluder[]
-): PostProcess {
-    // PostProcess name "starRayMarching" => expects key "starRayMarchingFragmentShader"
-    Effect.ShadersStore["starRayMarchingFragmentShader"] = starRayMarchingFragmentShader;
-
-    const depthRenderer = scene.enableDepthRenderer(camera, false, true);
-
-    const pp = new PostProcess(
-        "starRayMarchingPP",
-        "starRayMarching",
-        [
-            "resolution",
-            "time",
-            "cameraPositionRender",
-            "starCenterRender",
-            "starRadius",
-            "tMax",
-            "starColor",
-            "starIntensity",
-            "occluderCenter",
-            "occluderRadius",
-            "inverseProjection",
-            "inverseView",
-            "logarithmicDepthConstant",
-            "cameraNear",
-            "cameraFar",
-        ],
-        ["depthSampler"],
-        1,
-        camera
-    );
-
-    pp.onApply = (effect) => {
-        setStarUniforms(effect, scene, camera, stars, occluders);
-        // Depth-buffer terrain occlusion (legacy path uses the scene DepthRenderer map).
-        const depthMap = depthRenderer.getDepthMap();
-        if (depthMap) {
-            effect.setTexture("depthSampler", depthMap);
-        }
-    };
-
-    return pp;
 }
