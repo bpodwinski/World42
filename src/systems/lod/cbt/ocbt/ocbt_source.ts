@@ -17,6 +17,7 @@
 import { Matrix, Vector3, type Mesh, type Scene, type TransformNode, type WebGPUEngine } from '@babylonjs/core';
 import type { CbtFrameParams, CbtGeometryListener, CbtGeometrySource } from '../cbt_geometry_source';
 import type { NoiseParams } from '../cbt_noise';
+import type { ResolvedLighting } from '../../../../game_world/stellar_system/planet_lighting';
 import { OcbtTopologyKernel } from './ocbt_topology_kernel';
 import { buildOcbtRenderMaterial, createOcbtTemplateMesh, type OcbtRenderMaterial } from './ocbt_render_material';
 
@@ -38,6 +39,8 @@ export type OcbtSourceOptions = {
     cullMinDot?: number;
     /** Max subdivision LEVEL (depth - 3). f32 positions cap this in Phase 2 (~16). */
     maxLevel: number;
+    /** Per-planet resolved lighting params forwarded to the render material. */
+    lighting?: ResolvedLighting;
 };
 
 export class OcbtSource implements CbtGeometrySource {
@@ -111,7 +114,22 @@ export class OcbtSource implements CbtGeometrySource {
         this.render = buildOcbtRenderMaterial(
             scene,
             opts.key,
-            { radius: opts.radiusSim, noise: opts.noise, lightColor: opts.starColor },
+            {
+                radius: opts.radiusSim,
+                noise: opts.noise,
+                lightColor: opts.starColor,
+                albedo: opts.lighting
+                    ? new Vector3(opts.lighting.albedo[0], opts.lighting.albedo[1], opts.lighting.albedo[2])
+                    : undefined,
+                ambient: opts.lighting
+                    ? new Vector3(opts.lighting.ambient[0], opts.lighting.ambient[1], opts.lighting.ambient[2])
+                    : undefined,
+                atmoDensity: opts.lighting?.atmoDensity,
+                atmoColor: opts.lighting
+                    ? new Vector3(opts.lighting.atmoColor[0], opts.lighting.atmoColor[1], opts.lighting.atmoColor[2])
+                    : undefined,
+                lighting: opts.lighting
+            },
             this.kernel.heapBuffer,
             this.kernel.positionsBuffer,
             this.kernel.indicesBuffer

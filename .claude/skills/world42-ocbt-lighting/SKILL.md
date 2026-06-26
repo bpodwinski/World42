@@ -42,13 +42,15 @@ Post-processing layered on top (all output **linear HDR** — tone-mapping appli
 |------|------|
 | `src/systems/lod/cbt/ocbt/ocbt_render_material.ts` | **Central file**: shader source, baked constants, uniform bindings, `OcbtRenderOptions` |
 | `src/systems/lod/cbt/ocbt/ocbt_source.ts` | Per-frame uniform updates (light dir, cam anchor, perf mask, intensity) |
-| `src/systems/lod/cbt/cbt_scheduler.ts` | `CbtPlanetOptions` type — source of `starIntensity`, `starColor`, `starPosWorldDouble` |
+| `src/systems/lod/cbt/cbt_scheduler.ts` | `CbtPlanetOptions` type — source of `starIntensity`, `starColor`, `starPosWorldDouble`, `lighting` |
 | `src/assets/shaders/cbt/ocbt/cbt_noise_df64.wgsl` | df64 noise + gradients (near-ground detail) |
 | `src/assets/shaders/cbt/gpu/cbt_noise.wgsl` | f32 FBM/simplex used by both vertex and fragment |
 | `src/assets/shaders/atmosphericScatteringFragmentShader.glsl` | Atmosphere post-process (linear HDR out) |
 | `src/assets/shaders/stars/starRayMarchingFragmentShader.glsl` | Star glow post-process (linear HDR out) |
 | `src/core/render/postprocess_manager.ts` | Babylon pipeline (ACES, bloom weight=0.25, FXAA) |
-| `src/game_world/stellar_system/data.json` | Star catalogue: `intensity`, `color_rgb`, `temperature_k` |
+| `src/game_world/stellar_system/data.json` | Star + planet catalogue — per-planet `lighting` overrides live here |
+| `src/game_world/stellar_system/planet_lighting.json` | Global lighting `_defaults` (no per-planet blocks) |
+| `src/game_world/stellar_system/planet_lighting.ts` | Types (`PlanetLightingParams`, `ResolvedLighting`), `DEFAULT_LIGHTING`, `resolveLighting()` |
 
 ## Uniform contract
 
@@ -70,18 +72,87 @@ Runtime uniforms (set per-frame via `OcbtRenderMaterial` interface):
 
 Baked constants (compiled into shader via `bakedHeader()` — changing requires material rebuild):
 
-| Constant | Source | Default |
-|----------|--------|---------|
+| Constant | Config field | Default |
+|----------|-------------|---------|
 | `CBT_LIGHTCOLOR` | `OcbtRenderOptions.lightColor` | (1, 1, 1) |
-| `CBT_ALBEDO` / `CBT_REGOLITH` / `CBT_ROCK` | `OcbtRenderOptions.albedo` | (0.15, 0.14, 0.13) |
-| `CBT_LUNAR_LS` | hardcoded | 0.7 |
-| `CBT_OPP_AMP` | hardcoded | 0.15 |
-| `CBT_OPP_COS` | hardcoded | 0.93 |
-| `CBT_AO_STRENGTH` | hardcoded | 0.35 |
-| `CBT_ROUGH_LO` / `CBT_ROUGH_HI` | hardcoded | 0.3 / 0.85 |
-| `CBT_F0` | hardcoded | 0.04 (dielectric rock) |
+| `CBT_ALBEDO` / `CBT_REGOLITH` / `CBT_ROCK` | `lighting.albedo` | (0.15, 0.14, 0.13) |
+| `CBT_GROUND_ON_KM` / `CBT_GROUND_OFF_KM` | `lighting.ground.onKm` / `offKm` | 0.05 / 0.15 |
+| `CBT_GROUND_STRENGTH` | `lighting.ground.strength` | 0.03 |
+| `CBT_GROUND_DETAIL_OCTAVES` | `lighting.ground.octaves` | 4 |
+| `CBT_HIGHLAND_TINT` | `lighting.terrain.highlandTint` | (1.12, 1.12, 1.16) |
+| `CBT_SLOPE_LO` / `CBT_SLOPE_HI` / `CBT_SLOPE_DIST` | `lighting.terrain.slope*` | 0.03 / 0.22 / 2.0 |
+| `CBT_PLAINS_AMP` | `lighting.terrain.plainsAmp` | 0.12 |
+| `CBT_LUNAR_LS` | `lighting.brdf.lunarLs` | 0.7 |
+| `CBT_OPP_AMP` / `CBT_OPP_COS` | `lighting.brdf.oppAmp` / `oppCos` | 0.15 / 0.93 |
+| `CBT_AO_STRENGTH` | `lighting.brdf.aoStrength` | 0.35 |
+| `CBT_ROUGH_LO` / `CBT_ROUGH_HI` | `lighting.brdf.roughLo` / `roughHi` | 0.6 / 0.9 |
+| `CBT_F0` | `lighting.brdf.f0` | 0.04 (dielectric rock) |
+| `CBT_SPEC_AA` / `CBT_SPEC_MAX` | `lighting.brdf.specAa` / `specMax` | 0.5 / 4.0 |
+| `CBT_AA_FOOTPRINT_KM` | hardcoded (physical) | 0.03 |
+| `CBT_GROUND_BASE_FREQ` | `opts.radius * 1000` (physical, not aesthetic) | — |
 
 **Note**: `CBT_AMBIENT` no longer exists — ambient is the runtime uniform `uAmbient`.
+
+## Per-planet lighting config
+
+All 18 baked constants (except `CBT_AA_FOOTPRINT_KM` and `CBT_GROUND_BASE_FREQ`) are read from a three-tier merge at material build time:
+
+```
+per-planet override  (data.json "lighting" block)
+        ↓ ??
+_defaults block      (planet_lighting.json)
+        ↓ ??
+DEFAULT_LIGHTING     (planet_lighting.ts — code fallback)
+```
+
+### How to tune a planet
+
+Add or edit the `"lighting"` block in `data.json` under the planet entry. Only include what differs — all other fields fall back to `_defaults` → `DEFAULT_LIGHTING`:
+
+```json
+"Mars": {
+  "type": "planet",
+  "position_km": [...],
+  "lighting": {
+    "albedo":  [0.18, 0.09, 0.05],
+    "terrain": { "slopeLo": 0.05 },
+    "brdf":    { "lunarLs": 0.35, "roughLo": 0.65 }
+  }
+}
+```
+
+### How to change global defaults
+
+Edit the `"_defaults"` block in `planet_lighting.json`. Applies to all planets without an override for that field.
+
+### Data flow
+
+```
+data.json  body.lighting
+     │
+     ▼
+loadStellarSystemFromCatalog()   → LoadedBody.lighting
+     │
+     ▼
+createCBTForSystem()
+  resolveLighting(LIGHTING_JSON, body.lighting)  → ResolvedLighting
+     │
+     ▼
+CbtPlanet → OcbtSource → buildOcbtRenderMaterial()
+  bakedHeader(opts)  reads opts.lighting for all 18 constants
+```
+
+### Types (planet_lighting.ts)
+
+- `PlanetLightingParams` — all optional, for JSON overrides
+- `ResolvedLighting` — all required (`Required<...>` deep), passed to `bakedHeader()`
+- `DEFAULT_LIGHTING: ResolvedLighting` — code-level fallback (identical to previous hardcoded values)
+- `resolveLighting(json, override?)` — merges `override ?? _defaults ?? DEFAULT_LIGHTING` per field
+
+Valid range reminders:
+- `brdf.f0`: [0.02, 0.07] — silicate 0.04, water-ice 0.022, sulfur 0.055
+- `brdf.lunarLs`: 0 = Lambert, 1 = pure Lommel-Seeliger (airless disc)
+- `terrain.highlandTint`: values > 1 brighten that RGB channel at altitude
 
 ## Coordinate space contract
 
@@ -147,9 +218,15 @@ finalColor = mix(uAtmoColor, finalColor, fogFactor);
 4. Verify the dev server received the change: `curl -s http://localhost:19000/index.js | grep -c "<your-marker>"`.
 5. Run `npm test` — the noise/df64 tests catch regressions in the normal computation.
 
+### When tuning per-planet appearance
+
+Edit the `"lighting"` block in `data.json` for that planet. The material is rebuilt once at scene load, so changing the JSON and reloading the page is enough — no code change needed.
+
+To add a new planet config, just add a `"lighting": {}` block under the planet entry in `data.json`. Omitted fields fall back to `planet_lighting.json` `_defaults`.
+
 ### When tuning baked vs uniform
 
-- **Baked constants** are zero-cost at runtime but require a full `ShaderMaterial` rebuild to change. Use for per-planet parameters set once at scene load.
+- **Baked constants** are zero-cost at runtime but require a full `ShaderMaterial` rebuild to change. Use for per-planet parameters set once at scene load. All 18 configurable constants are now driven by the `lighting` config system.
 - **Uniforms** can be changed per-frame. Use for anything that changes at runtime (light direction, camera anchor, debug flags, fog density).
 - Convert a baked constant to a uniform when: the parameter must animate per-frame OR must differ between planets without a material rebuild.
 
@@ -164,7 +241,7 @@ finalColor = mix(uAtmoColor, finalColor, fogFactor);
 ## Validation
 
 ```bash
-npm test               # 149 CPU tests (noise + df64 + topology) — must all pass
+npm test               # 156 CPU tests (noise + df64 + topology + planet_lighting) — must all pass
 npm run serve          # dev server → http://localhost:19000
 ```
 

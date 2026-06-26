@@ -1,4 +1,4 @@
-import type { Engine, Scene, WebGPUEngine } from '@babylonjs/core';
+import type { Scene, WebGPUEngine } from '@babylonjs/core';
 import { DisposableRegistry } from '../core/lifecycle/disposable_registry';
 import { bootstrapScene } from './bootstrap_scene';
 import { setupLodAndShadows } from './setup_lod_and_shadows';
@@ -12,7 +12,7 @@ import { setupRuntime } from './setup_runtime';
  * - Planet-local (sim units): mesh/shader space centered on each planet.
  */
 export async function createFloatingCameraScene(
-    engine: Engine | WebGPUEngine,
+    engine: WebGPUEngine,
     canvas: HTMLCanvasElement
 ): Promise<Scene> {
     const disposables = new DisposableRegistry();

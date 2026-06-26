@@ -1,6 +1,5 @@
 import {
     CubeTexture,
-    Engine,
     EngineInstrumentation,
     MeshBuilder,
     Scene,
@@ -15,13 +14,14 @@ import { teleportToEntity } from '../core/camera/teleport_entity';
 import { GuiManager } from '../core/gui/gui_manager';
 import { DisposableRegistry } from '../core/lifecycle/disposable_registry';
 import { PostProcess } from '../core/render/postprocess_manager';
+import { attachTaaPipeline } from '../core/render/taa_postprocess';
 import { ScaleManager } from '../core/scale/scale_manager';
 import type { LoadedBody, LoadedSystem } from '../game_world/stellar_system/stellar_catalog_loader';
 import type { LodController } from './setup_lod_and_shadows';
 
 export type RuntimeSetupOptions = {
     scene: Scene;
-    engine: Engine | WebGPUEngine;
+    engine: WebGPUEngine;
     camera: OriginCamera;
     gui: GuiManager;
     spawnBody: LoadedBody;
@@ -107,11 +107,9 @@ export function setupRuntime({
     const sampleStats = () => {
         const cbt = lod.getCbtStats();
         const frameMs = sceneInstr.frameTimeCounter.lastSecAverage;
-        // WebGPU reports real GPU time on engine.gpuTimeInFrameForMainPass (a WebGPUPerfCounter, in
-        // ns) once enableGPUTimingMeasurements is armed (see engine_manager). The legacy
-        // EngineInstrumentation.gpuFrameTimeCounter is the WebGL2 GLQuery path and stays 0 under
-        // WebGPU — so prefer the WebGPU counter, fall back to the instrumentation for WebGL2. NOTE:
-        // this is the MAIN (canvas) pass only — the terrain draw + post, NOT the OCBT compute passes.
+        // engine.gpuTimeInFrameForMainPass is a WebGPUPerfCounter (ns) armed by
+        // enableGPUTimingMeasurements in EngineManager. Main (canvas) pass only —
+        // terrain draw + post, NOT the OCBT compute passes.
         const wgpuMain = (
             engine as unknown as {
                 gpuTimeInFrameForMainPass?: { counter: { lastSecAverage: number } };
@@ -187,6 +185,10 @@ export function setupRuntime({
     disposables.add(() => {
         delete (window as unknown as { __world42Perf?: typeof perfHook }).__world42Perf;
     });
+
+    // TAA MUST be created before the DefaultRenderingPipeline (Babylon requires it
+    // to be first in the camera's post-process chain). See attachTaaPipeline.
+    attachTaaPipeline(scene, camera);
 
     new PostProcess('Pipeline', scene, camera);
 

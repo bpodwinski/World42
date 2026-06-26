@@ -1,5 +1,4 @@
 import {
-    Engine,
     Matrix,
     MeshBuilder,
     Quaternion,
@@ -52,7 +51,7 @@ function pickSpawnBody(loadedSystems: Map<string, LoadedSystem>): LoadedBody {
 }
 
 export async function bootstrapScene(
-    engine: Engine | WebGPUEngine,
+    engine: WebGPUEngine,
     canvas: HTMLCanvasElement,
     disposables: DisposableRegistry
 ): Promise<SceneBootstrapResult> {

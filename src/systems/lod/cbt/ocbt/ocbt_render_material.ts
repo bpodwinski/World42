@@ -26,6 +26,7 @@ import {
     type WebGPUEngine
 } from '@babylonjs/core';
 import { buildPerm, type NoiseParams } from '../cbt_noise';
+import { DEFAULT_LIGHTING, type ResolvedLighting } from '../../../../game_world/stellar_system/planet_lighting';
 import cbtNoiseWgsl from '../../../../assets/shaders/cbt/gpu/cbt_noise.wgsl';
 import ocbtF64Wgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_f64.wgsl';
 import cbtNoiseDf64Wgsl from '../../../../assets/shaders/cbt/ocbt/cbt_noise_df64.wgsl';
@@ -44,11 +45,17 @@ export type OcbtRenderOptions = {
     lightIntensity?: number;
     atmoDensity?: number;
     atmoColor?: Vector3;
+    /** Per-planet resolved lighting params. When absent, bakedHeader uses DEFAULT_LIGHTING. */
+    lighting?: ResolvedLighting;
 };
 
 function bakedHeader(opts: OcbtRenderOptions): string {
     const n = opts.noise;
-    const albedo = opts.albedo ?? new Vector3(0.15, 0.14, 0.13);
+    const L = opts.lighting ?? DEFAULT_LIGHTING;
+    const g = L.ground;
+    const t = L.terrain;
+    const b = L.brdf;
+    const albedo = opts.albedo ?? new Vector3(L.albedo[0], L.albedo[1], L.albedo[2]);
     const lightColor = opts.lightColor ?? new Vector3(1, 1, 1);
     return [
         `const CBT_RADIUS : f32 = ${f(opts.radius)};`,
@@ -65,10 +72,10 @@ function bakedHeader(opts: OcbtRenderOptions): string {
         // Near-ground detail band (world-anchored df64 micro-relief). ON/OFF in km = the
         // camera-distance fade; STRENGTH = normal-tilt amount; BASE_FREQ = first ground
         // octave's frequency on the UNIT dir (= radius / wavelength; 1 m base wavelength).
-        `const CBT_GROUND_ON_KM : f32 = 0.05;`,
-        `const CBT_GROUND_OFF_KM : f32 = 0.15;`,
-        `const CBT_GROUND_STRENGTH : f32 = 0.03;`,
-        `const CBT_GROUND_DETAIL_OCTAVES : i32 = 4;`,
+        `const CBT_GROUND_ON_KM : f32 = ${f(g.onKm)};`,
+        `const CBT_GROUND_OFF_KM : f32 = ${f(g.offKm)};`,
+        `const CBT_GROUND_STRENGTH : f32 = ${f(g.strength)};`,
+        `const CBT_GROUND_DETAIL_OCTAVES : i32 = ${Math.max(0, Math.floor(g.octaves))};`,
         `const CBT_GROUND_BASE_FREQ : f32 = ${f(opts.radius * 1000)};`,
         // Procedural albedo splatting driven by SLOPE + ALTITUDE (physically meaningful, not
         // random color blotches): REGOLITH on flats, darker greyer ROCK on slopes, HIGHLAND
@@ -76,38 +83,50 @@ function bakedHeader(opts: OcbtRenderOptions): string {
         // fades the cm micro-relief out so rock follows 30m+ hills/crater walls, not per-pixel
         // bumps). SLOPE_* are in slope units = 1 - dot(landformNormal, up); 0 = flat.
         ...(() => {
-            const g = (albedo.x + albedo.y + albedo.z) / 3;
-            const rk = (c: number) => 0.45 * (0.5 * c + 0.5 * g); // darker + desaturated
+            const gv = (albedo.x + albedo.y + albedo.z) / 3;
+            const rk = (c: number) => 0.45 * (0.5 * c + 0.5 * gv); // darker + desaturated
             return [
                 `const CBT_REGOLITH : vec3<f32> = vec3<f32>(${f(albedo.x)}, ${f(albedo.y)}, ${f(albedo.z)});`,
                 `const CBT_ROCK : vec3<f32> = vec3<f32>(${f(rk(albedo.x))}, ${f(rk(albedo.y))}, ${f(rk(albedo.z))});`
             ];
         })(),
-        `const CBT_HIGHLAND_TINT : vec3<f32> = vec3<f32>(1.12, 1.12, 1.16);`,
-        `const CBT_SLOPE_LO : f32 = 0.03;`,
-        `const CBT_SLOPE_HI : f32 = 0.22;`,
-        `const CBT_SLOPE_DIST : f32 = 2.0;`,
+        `const CBT_HIGHLAND_TINT : vec3<f32> = vec3<f32>(${f(t.highlandTint[0])}, ${f(t.highlandTint[1])}, ${f(t.highlandTint[2])});`,
+        `const CBT_SLOPE_LO : f32 = ${f(t.slopeLo)};`,
+        `const CBT_SLOPE_HI : f32 = ${f(t.slopeHi)};`,
+        `const CBT_SLOPE_DIST : f32 = ${f(t.slopeDist)};`,
         `const CBT_ALT_LO : f32 = ${f(opts.noise.globalAmplitude * 0.25)};`,
         `const CBT_ALT_HI : f32 = ${f(opts.noise.globalAmplitude * 0.65)};`,
         // Smooth plains vs cratered highlands: a BROAD (continental ~400 km), SUBTLE brightness
         // variation so the surface isn't uniform — NOT the fine blotches. dir-based (no swim).
         `const CBT_PLAINS_FREQ : f32 = ${f(opts.radius / 400)};`,
-        `const CBT_PLAINS_AMP : f32 = 0.12;`,
+        `const CBT_PLAINS_AMP : f32 = ${f(t.plainsAmp)};`,
         // Lunar (airless-regolith) BRDF. CBT_LUNAR_LS blends Lambert (0) <-> Lommel-Seeliger (1):
         // the regolith reflects flat, with NO limb darkening (a full Moon looks like a uniform
         // disc, not a shaded sphere) and slight limb BRIGHTENING. CBT_OPP_* is the opposition
         // surge (hotspot when the Sun is at the camera's back, low phase angle).
-        `const CBT_LUNAR_LS : f32 = 0.7;`,
-        `const CBT_OPP_AMP : f32 = 0.15;`,
-        `const CBT_OPP_COS : f32 = 0.93;`,
+        `const CBT_LUNAR_LS : f32 = ${f(b.lunarLs)};`,
+        `const CBT_OPP_AMP : f32 = ${f(b.oppAmp)};`,
+        `const CBT_OPP_COS : f32 = ${f(b.oppCos)};`,
         // Curvature AO: ambient occlusion from deviation of terrain normal vs radial direction.
         // Applied to ambient only. Computed from nSlope (smooth normal) for macro-scale AO.
-        `const CBT_AO_STRENGTH : f32 = 0.35;`,
+        `const CBT_AO_STRENGTH : f32 = ${f(b.aoStrength)};`,
         // Cook-Torrance specular. Slope-driven roughness (flat=smoother, steep=matte).
         // CBT_F0 is Fresnel at normal incidence (~0.04 for dielectric rock/regolith).
-        `const CBT_ROUGH_LO : f32 = 0.3;`,
-        `const CBT_ROUGH_HI : f32 = 0.85;`,
-        `const CBT_F0 : f32 = 0.04;`
+        // Regolith is MATTE (Moon/Mercury) — a high roughness floor gives a broad, dim sheen
+        // instead of a sharp glossy lobe that blotches/sparkles on every micro-bump toward the Sun.
+        `const CBT_ROUGH_LO : f32 = ${f(b.roughLo)};`,
+        `const CBT_ROUGH_HI : f32 = ${f(b.roughHi)};`,
+        `const CBT_F0 : f32 = ${f(b.f0)};`,
+        // Geometric specular antialiasing: scales the screen-space normal variance added to
+        // roughness^2. Higher = more de-sparkle (softer highlight under micro-relief / at grazing).
+        `const CBT_SPEC_AA : f32 = ${f(b.specAa)};`,
+        // Firefly clamp on the specular term (caps blown-out grazing pixels).
+        `const CBT_SPEC_MAX : f32 = ${f(b.specMax)};`,
+        // Diffuse normal antialiasing: where the per-pixel shading normal varies faster than the
+        // pixel can resolve (fine foreground micro-relief), blend toward the smooth landform normal
+        // so the diffuse ndl stops aliasing into grain. Variance-based (dpdx of the normal) so it
+        // targets sub-pixel detail without over-flattening the far field. Higher = smoother sooner.
+        `const CBT_NORMAL_AA : f32 = 12.0;`
     ].flat().join('\n');
 }
 
@@ -295,6 +314,12 @@ function fragmentSource(opts: OcbtRenderOptions): string {
         '        let tg = dgrad - dot(dgrad, nLocal) * nLocal;',
         '        nLocal = normalize(nLocal - (CBT_GROUND_STRENGTH * dFade) * tg);',
         '    }',
+        '    // Diffuse normal AA: where nLocal varies fast across a pixel (sub-pixel foreground',
+        '    // micro-relief), blend it toward the smooth landform normal (nSlope) so the diffuse ndl',
+        '    // stops aliasing into grain. Variance-based so macro relief (slow per-pixel change) is',
+        '    // preserved and the far field is not over-flattened (which exposes geometric sparkle).',
+        '    let nVar = dot(dpdx(nLocal), dpdx(nLocal)) + dot(dpdy(nLocal), dpdy(nLocal));',
+        '    nLocal = normalize(mix(nSlope, nLocal, 1.0 / (1.0 + CBT_NORMAL_AA * nVar)));',
         '    let nWorld = normalize((uniforms.world * vec4<f32>(nLocal, 0.0)).xyz);',
         '    // Curvature-based ambient occlusion: deviation of the SMOOTH landform normal from',
         '    // the radial direction. nSlope is at CBT_SLOPE_DIST km so micro-bumps are faded out,',
@@ -327,18 +352,26 @@ function fragmentSource(opts: OcbtRenderOptions): string {
         '        let VdH     = max(dot(V, H), 0.0);',
         '        let roughness = mix(CBT_ROUGH_LO, CBT_ROUGH_HI, slope01);',
         '        let alpha   = roughness * roughness;',
-        '        let alpha2  = alpha * alpha;',
+        '        // Geometric specular AA (Kaplanyan): where the shading normal varies fast across a',
+        '        // pixel (per-pixel micro-relief, worst at grazing toward the light) widen the GGX',
+        '        // lobe by the screen-space normal variance so its sharp peak cannot alias into',
+        '        // sparkle/fireflies. On smooth flats the variance ~0 so the highlight is preserved.',
+        '        let dNx = dpdx(nWorld);',
+        '        let dNy = dpdy(nWorld);',
+        '        let varBump = CBT_SPEC_AA * (dot(dNx, dNx) + dot(dNy, dNy));',
+        '        let alpha2  = clamp(alpha * alpha + varBump, 0.0, 1.0);',
         '        // GGX NDF',
         '        let denom = NdH * NdH * (alpha2 - 1.0) + 1.0;',
         '        let D = alpha2 / (3.14159 * denom * denom);',
         '        // Schlick Fresnel',
         '        let F = CBT_F0 + (1.0 - CBT_F0) * pow(1.0 - VdH, 5.0);',
-        '        // Smith-GGX geometry (k = alpha/2, IBL approx)',
+        '        // Smith-GGX geometry (k = alpha/2, IBL approx) on the BASE roughness.',
         '        let k   = alpha * 0.5;',
         '        let g1L = NdL / (NdL * (1.0 - k) + k);',
         '        let g1V = NdV / (NdV * (1.0 - k) + k);',
         '        let G   = g1L * g1V;',
-        '        spec = (D * F * G) / (4.0 * NdL * NdV + 1e-4) * NdL;',
+        '        // Firefly clamp caps any residual grazing blow-up of the (1/(4·NdL·NdV)) term.',
+        '        spec = min((D * F * G) / (4.0 * NdL * NdV + 1e-4) * NdL, CBT_SPEC_MAX);',
         '    }',
         '    let lighting = uniforms.uAmbient * ao + CBT_LIGHTCOLOR * (uniforms.uLightIntensity * refl);',
         '    // Procedural albedo + slope/altitude splatting (replaces the flat CBT_ALBEDO).',

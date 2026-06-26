@@ -20,7 +20,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     const disposables = new DisposableRegistry();
 
     // Create engine
-    const engine = await EngineManager.CreateAuto(canvas);
+    const engine = await EngineManager.Create(canvas);
 
     // Create scene (await, sinon c'est une Promise<Scene>)
     const scene = await FloatingCameraScene.CreateScene(engine, canvas);

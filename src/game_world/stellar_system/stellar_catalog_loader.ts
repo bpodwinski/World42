@@ -1,5 +1,4 @@
 import {
-    Engine,
     Scene,
     Vector3,
     MeshBuilder,
@@ -20,6 +19,10 @@ import {
     normalizeCatalogJSON as normalizeCatalogJSONFromSource,
     normalizeSystemJSON,
 } from "./stellar_catalog_normalizer";
+import lightingJsonRaw from "./planet_lighting.json";
+import { resolveLighting, type PlanetLightingJSON, type PlanetLightingParams } from "./planet_lighting";
+
+const LIGHTING_JSON = lightingJsonRaw as unknown as PlanetLightingJSON;
 
 /** ---------- Types JSON (catalogue) ---------- */
 export type StarJSON = {
@@ -36,7 +39,9 @@ export type BodyJSON = {
     diameter_km: number;
     rotation_period_days: number | null;
     lod_algorithm?: LodAlgorithm;
-    star?: StarJSON; // ✅ NEW
+    star?: StarJSON;
+    /** Per-planet lighting overrides — merged with planet_lighting.json `_defaults`. */
+    lighting?: PlanetLightingParams;
 };
 
 export type SystemJSON = Record<string, BodyJSON>;
@@ -94,6 +99,9 @@ export type LoadedBody = {
         color: Vector3;      // (r,g,b) linéaire
         intensity: number;   // scalaire
     };
+
+    /** Lighting overrides from data.json, forwarded to resolveLighting(). */
+    lighting?: PlanetLightingParams;
 };
 
 export type LoadedSystem = {
@@ -135,8 +143,7 @@ export type CBTOptions = {
     splitHysteresis?: number;
     /** Noise field (CPU displacement + per-pixel shader); default DEFAULT_NOISE. */
     noise?: NoiseParams;
-    /** Engine reference — needed to check WebGPU availability for gpu/ocbt backends. */
-    engine?: Engine | WebGPUEngine;
+    engine?: WebGPUEngine;
     skip?: (name: string, body: LoadedBody) => boolean;
 };
 
@@ -246,6 +253,7 @@ export async function loadStellarSystemFromCatalog(
             radiusSim: diameterSim * 0.5,
             rotationPeriodDays: data.rotation_period_days,
             starLight,
+            lighting: data.lighting,
         });
     }
 
@@ -367,8 +375,6 @@ export function createCBTForSystem(
                 body.lodAlgorithm !== "cbt-ocbt"),
     } = opts;
 
-    const isWebGPU = engine?.isWebGPU ?? false;
-
     for (const [name, body] of loaded.bodies) {
         if (!body.entity) {
             const ent = new FloatingEntity(`ent_${loaded.systemId}_${name}`, scene);
@@ -400,21 +406,17 @@ export function createCBTForSystem(
                 offThreadCbt = true;
                 break;
             case "cbt-gpu":
-                gpuCbt = isWebGPU;
-                offThreadCbt = !isWebGPU;
+                gpuCbt = true;
                 break;
             case "cbt-ocbt":
-                if (isWebGPU) {
-                    cbtType = "gpu-ocbt";
-                } else {
-                    offThreadCbt = true;
-                }
+                cbtType = "gpu-ocbt";
                 break;
         }
 
         const ent = body.entity!;
+        const planetKey = `${loaded.systemId}:${name}`;
         const runtime = new CbtPlanet(scene, camera, {
-            key: `${loaded.systemId}:${name}`,
+            key: planetKey,
             entity: ent,
             renderParent: body.node,
             radiusSim: body.radiusSim,
@@ -430,10 +432,11 @@ export function createCBTForSystem(
             starPosWorldDouble,
             starColor,
             starIntensity,
+            lighting: resolveLighting(LIGHTING_JSON, body.lighting),
         });
 
         console.log(
-            `[light][cbt] ${loaded.systemId}:${name} -> ${starName} color=${starColor.toString()} I=${starIntensity}`
+            `[light][cbt] ${planetKey} -> ${starName} color=${starColor.toString()} I=${starIntensity}`
         );
 
         out.set(name, {

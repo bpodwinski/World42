@@ -32,6 +32,7 @@ import { WorkerCbtSource } from './workers/cbt_worker_source';
 import { GpuCbtSource } from './gpu/gpu_cbt_source';
 import { OcbtSource } from './ocbt/ocbt_source';
 import type { WebGPUEngine } from '@babylonjs/core';
+import type { ResolvedLighting } from '../../../game_world/stellar_system/planet_lighting';
 
 /** Geometry backend for a CBT planet. */
 export type CbtType = 'cpu' | 'gpu-implicit' | 'gpu-ocbt';
@@ -87,6 +88,8 @@ export type CbtPlanetOptions = {
      * 'gpu-implicit' : 'cpu'. WebGPU required for both GPU paths.
      */
     cbtType?: CbtType;
+    /** Per-planet resolved lighting params (from planet_lighting.json). */
+    lighting?: ResolvedLighting;
 };
 
 /** Per-planet telemetry, refreshed on each {@link CbtPlanet.update}. */
@@ -179,7 +182,7 @@ export class CbtPlanet {
         // OCBT path (WebGPU only): the pool-CBT concurrent engine (HPG 2024). Cost is
         // decoupled from subdivision depth (fixed pool capacity). Owns its own
         // mesh/material; the listener is telemetry-only.
-        if (cbtType === 'gpu-ocbt' && (engine as WebGPUEngine).isWebGPU) {
+        if (cbtType === 'gpu-ocbt') {
             // Phase 2 bring-up constants: a fixed pool plus a screen-space-area metric.
             // f32 vertex decode caps usable depth (~16); Phase 3 lifts it via f64.
             const OCBT_CAPACITY = 1 << 20; // 1 048 576 slots
@@ -204,7 +207,8 @@ export class CbtPlanet {
                     capacity: OCBT_CAPACITY,
                     splitThresholdPx: OCBT_SPLIT_PX,
                     mergeThresholdPx: OCBT_MERGE_PX,
-                    maxLevel: OCBT_MAX_LEVEL
+                    maxLevel: OCBT_MAX_LEVEL,
+                    lighting: opts.lighting
                 },
                 this.onSourceUpdate
             );
@@ -213,7 +217,7 @@ export class CbtPlanet {
         // GPU CBT path (WebGPU only): a fully GPU-resident concurrent binary tree
         // rendered as an implicit mesh. Owns its own mesh/material; the listener is
         // called for telemetry only. Supersedes the worker/sync path when enabled.
-        if (cbtType === 'gpu-implicit' && (engine as WebGPUEngine).isWebGPU) {
+        if (cbtType === 'gpu-implicit') {
             // The update is now dispatched INDIRECTLY (workgroups = ceil(liveLeaves/256))
             // and the draw is bounded via forcedInstanceCount, so per-frame cost scales
             // with the LIVE leaf count, not 2^maxDepth. The residual O(2^maxDepth) term

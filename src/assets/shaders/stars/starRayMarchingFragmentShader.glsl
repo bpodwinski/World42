@@ -72,7 +72,10 @@ float rayMarch(vec3 ro, vec3 rd, float tStop, out float glow) {
     glow = 0.0;
     bool hit = false;
 
-    const int steps = 100;
+    // Ray-march step count (per-pixel, always-on post-processing cost). 100 was overkill for an
+    // SDF sphere with a smooth glow; 48 halves the loop with no visible change. Raise if the star
+    // edge/glow shows banding or stepping artifacts.
+    const int steps = 48;
 
     // Scale eps + threshold a bit with star size (keeps behavior reasonable)
     float hitEps = max(1.0, starRadius * 0.001);

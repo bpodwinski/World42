@@ -72,6 +72,38 @@ Setters : `setAtmoDensity()` / `setAtmoColor()` sur `OcbtRenderMaterial`.
 
 ---
 
+## Round 3 — ✅ IMPLÉMENTÉ
+
+### Axe — Système de config lighting per-planet ✅
+
+Les 18 constantes bakées dans `bakedHeader()` (précédemment hardcodées) sont désormais configurables via un système JSON à trois niveaux :
+
+**Merge order :** `data.json "lighting"` → `planet_lighting.json "_defaults"` → `DEFAULT_LIGHTING` (code)
+
+**Architecture :**
+- `planet_lighting.json` : contient uniquement `_defaults` — valeurs globales partagées par toutes les planètes
+- `data.json` : chaque planète peut avoir un bloc `"lighting": {...}` avec ses overrides (Mercury, Mars configurés)
+- `planet_lighting.ts` : types (`PlanetLightingParams`, `ResolvedLighting`), `DEFAULT_LIGHTING`, `resolveLighting(json, override?)`
+- `stellar_catalog_loader.ts` : lit `body.lighting` depuis `BodyJSON`, passe à `resolveLighting()`, propage via `LoadedBody` → `CbtPlanet` → `OcbtSource` → `buildOcbtRenderMaterial()`
+
+**Constantes désormais configurables :** `albedo`, `ground.*` (onKm, offKm, strength, octaves), `terrain.*` (highlandTint, slopeLo/Hi/Dist, plainsAmp), `brdf.*` (lunarLs, oppAmp/Cos, aoStrength, roughLo/Hi, f0, specAa, specMax)
+
+**Non configurables (intentionnel) :** `CBT_AA_FOOTPRINT_KM = 0.03` (réglage d'antialiasing), `CBT_GROUND_BASE_FREQ = radius * 1000` (fréquence physique, 1 m de base)
+
+**Tests :** 7 nouveaux tests unitaires dans `planet_lighting.test.ts` (total : 156 tests)
+
+**Fichiers créés/modifiés :**
+- `src/game_world/stellar_system/planet_lighting.ts` — types + merge logic
+- `src/game_world/stellar_system/planet_lighting.json` — `_defaults` globaux
+- `src/game_world/stellar_system/planet_lighting.test.ts` — 7 tests unitaires
+- `src/game_world/stellar_system/data.json` — blocs `lighting` Mercury + Mars
+- `src/game_world/stellar_system/stellar_catalog_loader.ts` — `BodyJSON.lighting`, `LoadedBody.lighting`, propagation
+- `src/systems/lod/cbt/ocbt/ocbt_render_material.ts` — `bakedHeader()` lit depuis `opts.lighting`
+- `src/systems/lod/cbt/ocbt/ocbt_source.ts` — `OcbtSourceOptions.lighting`, extraction albedo/ambient/atmo
+- `src/systems/lod/cbt/cbt_scheduler.ts` — `CbtPlanetOptions.lighting`, transmission vers `OcbtSource`
+
+---
+
 ## Axes futurs (non implémentés)
 
 ### Axe — Shadow pass GPU pour OCBT

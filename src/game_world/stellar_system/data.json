@@ -16,7 +16,13 @@
           "lod_algorithm": "cbt-ocbt",
           "position_km": [57910000, 0, 0],
           "diameter_km": 4879,
-          "rotation_period_days": 58.6
+          "rotation_period_days": 58.6,
+          "lighting": {
+            "albedo":  [0.07, 0.07, 0.07],
+            "ambient": [0.004, 0.004, 0.004],
+            "terrain": { "highlandTint": [1.05, 1.05, 1.05], "plainsAmp": 0.08 },
+            "brdf":    { "lunarLs": 0.8, "oppAmp": 0.22, "aoStrength": 0.45 }
+          }
         },
         "Venus": {
           "type": "planet",
@@ -34,7 +40,13 @@
           "type": "planet",
           "position_km": [227900000, 0, 0],
           "diameter_km": 6779,
-          "rotation_period_days": 1.025
+          "rotation_period_days": 1.025,
+          "lighting": {
+            "albedo":  [0.18, 0.09, 0.05],
+            "ambient": [0.012, 0.008, 0.006],
+            "terrain": { "highlandTint": [1.15, 1.08, 1.04], "slopeLo": 0.05, "slopeHi": 0.28, "plainsAmp": 0.18 },
+            "brdf":    { "lunarLs": 0.35, "oppAmp": 0.05, "aoStrength": 0.42, "roughLo": 0.65, "roughHi": 0.92 }
+          }
         },
         "Jupiter": {
           "type": "planet",

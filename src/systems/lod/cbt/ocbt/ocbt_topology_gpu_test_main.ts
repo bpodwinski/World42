@@ -340,7 +340,7 @@ async function main(): Promise<void> {
 
     let engine: WebGPUEngine;
     try {
-        engine = await EngineManager.CreateWebGPU(canvas);
+        engine = await EngineManager.Create(canvas);
     } catch (e) {
         const error = `WebGPU unavailable: ${String(e)}`;
         window.__OCBT_TOPO_RESULT__ = { pass: false, cases, error };

@@ -1,0 +1,32 @@
+{
+  "_defaults": {
+    "albedo":      [0.15, 0.14, 0.13],
+    "ambient":     [0.008, 0.008, 0.008],
+    "atmoDensity": 0.0,
+    "atmoColor":   [0.0, 0.0, 0.0],
+    "ground": {
+      "onKm":     0.05,
+      "offKm":    0.15,
+      "strength": 0.03,
+      "octaves":  4
+    },
+    "terrain": {
+      "highlandTint": [1.12, 1.12, 1.16],
+      "slopeLo":      0.03,
+      "slopeHi":      0.22,
+      "slopeDist":    2.0,
+      "plainsAmp":    0.12
+    },
+    "brdf": {
+      "lunarLs":    0.7,
+      "oppAmp":     0.15,
+      "oppCos":     0.93,
+      "aoStrength": 0.35,
+      "roughLo":    0.6,
+      "roughHi":    0.9,
+      "f0":         0.04,
+      "specAa":     0.5,
+      "specMax":    4.0
+    }
+  }
+}

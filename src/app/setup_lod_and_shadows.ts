@@ -1,6 +1,5 @@
 import {
     DirectionalLight,
-    Engine,
     Matrix,
     Scene,
     ShadowGenerator,
@@ -69,7 +68,7 @@ type PlanetShadowSource = {
 
 export function setupLodAndShadows(
     scene: Scene,
-    engine: Engine | WebGPUEngine,
+    engine: WebGPUEngine,
     camera: OriginCamera,
     loadedSystems: Map<string, LoadedSystem>,
     disposables: DisposableRegistry
