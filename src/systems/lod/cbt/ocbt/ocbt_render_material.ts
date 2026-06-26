@@ -183,6 +183,10 @@ function fragmentSource(opts: OcbtRenderOptions): string {
         'uniform uLightDirection : vec3<f32>;',
         'uniform logarithmicDepthConstant : f32;',
         'uniform uDebugLod : i32;',
+        // Fragment perf-profiling mask (debug): skip heavy blocks to measure each one s GPU cost
+        // via the P-HUD gpuMs. bit0 = skip the slope normal (a full extra cbtNoiseNormalAt incl.
+        // craters); bit1 = skip the df64 near-ground detail block; bit2 = skip the crater rays.
+        'uniform uPerfMask : i32;',
         // Camera position in planet-local sim units (= the SAME f32 value the df64 eval
         // subtracted to make `rel`). world = uCamAnchor + rel reconstructs the surface point
         // exactly (the camera's f32 rounding cancels), giving a frame-invariant, cm-precise
@@ -245,7 +249,8 @@ function fragmentSource(opts: OcbtRenderOptions): string {
         '    // Landform slope for material splatting: a SMOOTH normal at a medium camera distance',
         '    // (CBT_SLOPE_DIST) so the cm micro-relief is faded out and rock follows 30m+ hills /',
         '    // crater walls instead of speckling every per-pixel bump.',
-        '    let nSlope = cbtNoiseNormalAt(dir, CBT_RADIUS, CBT_SLOPE_DIST);',
+        '    var nSlope = dir;',
+        '    if ((uniforms.uPerfMask & 1) == 0) { nSlope = cbtNoiseNormalAt(dir, CBT_RADIUS, CBT_SLOPE_DIST); }',
         '    let slope01 = clamp(1.0 - dot(nSlope, dir), 0.0, 1.0);',
         '    // Near-ground WORLD-ANCHORED micro-relief. Reconstruct the surface direction in',
         '    // df64: world = uCamAnchor + rel (the eval subtracted the SAME f32 uCamAnchor, so',
@@ -254,7 +259,7 @@ function fragmentSource(opts: OcbtRenderOptions): string {
         '    // frame-invariant (no swim) and cm-precise (no f32 banding). Gated to the near band',
         '    // for cost; outside it the cheaper f32 macro normal is used unchanged.',
         '    let dFade = 1.0 - smoothstep(CBT_GROUND_ON_KM, CBT_GROUND_OFF_KM, camDistKm);',
-        '    if (dFade > 0.0) {',
+        '    if (dFade > 0.0 && (uniforms.uPerfMask & 2) == 0) {',
         '        let wx = df64_add(df64_from_f32(uniforms.uCamAnchor.x), df64_from_f32(rel.x));',
         '        let wy = df64_add(df64_from_f32(uniforms.uCamAnchor.y), df64_from_f32(rel.y));',
         '        let wz = df64_add(df64_from_f32(uniforms.uCamAnchor.z), df64_from_f32(rel.z));',
@@ -293,7 +298,8 @@ function fragmentSource(opts: OcbtRenderOptions): string {
         '    albedo = albedo * (1.0 + CBT_PLAINS_AMP * cbtSimplex3_d(dir * CBT_PLAINS_FREQ).x);',
         '    // Bright ejecta rays + halos of FRESH craters (the white impact traces). Higher albedo,',
         '    // so add before lighting (still shaded). Grey -> add to all channels.',
-        '    let rays = craterRays(dir, CBT_RADIUS, camDistKm);',
+        '    var rays = 0.0;',
+        '    if ((uniforms.uPerfMask & 4) == 0) { rays = craterRays(dir, CBT_RADIUS, camDistKm); }',
         '    albedo = albedo + vec3<f32>(rays);',
         '    fragmentOutputs.color = vec4<f32>(albedo * lighting, 1.0);',
         '    fragmentOutputs.fragDepth = log2(fragmentInputs.vFragmentDepth) * uniforms.logarithmicDepthConstant * 0.5;',
@@ -307,6 +313,7 @@ export type OcbtRenderMaterial = {
     permBuffer: StorageBufferType;
     setLightDirection(dir: Vector3): void;
     setDebugLod(on: boolean): void;
+    setPerfMask(mask: number): void;
     setCamAnchor(camLocal: Vector3): void;
     dispose(): void;
 };
@@ -329,7 +336,7 @@ export function buildOcbtRenderMaterial(
         {
             shaderLanguage: ShaderLanguage.WGSL,
             attributes: ['position'],
-            uniforms: ['viewProjection', 'world', 'uLightDirection', 'logarithmicDepthConstant', 'uDebugLod', 'uCamAnchor'],
+            uniforms: ['viewProjection', 'world', 'uLightDirection', 'logarithmicDepthConstant', 'uDebugLod', 'uPerfMask', 'uCamAnchor'],
             storageBuffers: ['ocbtHeap', 'ocbtPos', 'ocbtIndices', 'cbtPerm']
         }
     );
@@ -367,6 +374,7 @@ export function buildOcbtRenderMaterial(
     material.setStorageBuffer('cbtPerm', permBuffer);
     material.setVector3('uLightDirection', new Vector3(0, -1, 0));
     material.setInt('uDebugLod', 0);
+    material.setInt('uPerfMask', 0);
     material.setVector3('uCamAnchor', new Vector3(0, 0, 0));
 
     return {
@@ -377,6 +385,9 @@ export function buildOcbtRenderMaterial(
         },
         setDebugLod(on: boolean): void {
             material.setInt('uDebugLod', on ? 1 : 0);
+        },
+        setPerfMask(mask: number): void {
+            material.setInt('uPerfMask', mask | 0);
         },
         setCamAnchor(camLocal: Vector3): void {
             material.setVector3('uCamAnchor', camLocal);

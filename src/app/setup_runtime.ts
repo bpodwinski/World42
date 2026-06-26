@@ -67,16 +67,25 @@ export function setupRuntime({
         engineInstr.captureGPUFrameTime = on;
     };
 
+    // JS heap (Chromium only). usedJSHeapSize is the live retained JS memory; a rising
+    // trend across a stationary scene is the signal for a leak (e.g. node churn / no pooling).
+    type PerfMemory = { usedJSHeapSize: number; totalJSHeapSize: number; jsHeapSizeLimit: number };
+    const perfMemory = (): PerfMemory | undefined =>
+        (performance as unknown as { memory?: PerfMemory }).memory;
+
     const sampleStats = () => {
         const cbt = lod.getCbtStats();
         const frameMs = sceneInstr.frameTimeCounter.lastSecAverage;
         const gpuMs = engineInstr.gpuFrameTimeCounter.lastSecAverage / 1e6; // ns → ms
+        const mem = perfMemory();
         return {
             fps: engine.getFps(),
             frameMs,
             gpuMs,
             drawCalls: sceneInstr.drawCallsCounter.current,
             activeIndices: scene.getActiveIndices(),
+            // RAM: live JS heap in MB (-1 where the browser does not expose performance.memory).
+            jsHeapMB: mem ? mem.usedJSHeapSize / 1048576 : -1,
             cbt,
         };
     };
@@ -86,7 +95,7 @@ export function setupRuntime({
         return [
             `FPS ${Math.round(s.fps)}  frame ${f(s.frameMs)}ms`,
             `gpu ${f(s.gpuMs)}ms  draws ${s.drawCalls}`,
-            `idx ${(s.activeIndices / 1000).toFixed(0)}k`,
+            `ram ${s.jsHeapMB < 0 ? 'n/a' : f(s.jsHeapMB, 0) + 'MB'}  idx ${(s.activeIndices / 1000).toFixed(0)}k`,
             `cbt leaves ${s.cbt.leafCount}  verts ${s.cbt.vertexCount}`,
             `split/f ${s.cbt.splitsThisFrame}  merge/f ${s.cbt.mergesThisFrame}`,
             `classify ${f(s.cbt.classifyMs, 2)}ms  rebuild ${f(s.cbt.rebuildMs, 2)}ms`,
@@ -103,6 +112,11 @@ export function setupRuntime({
     const tmpRenderTarget = new Vector3();
     const perfHook = {
         enableCapture: (on: boolean) => setCaptureEnabled(on),
+        // Debug fragment perf-profiling mask read by OcbtSource each frame: bit0 skip slope normal,
+        // bit1 skip df64 ground detail, bit2 skip crater rays. Toggle blocks, watch gpuMs.
+        setPerfMask: (mask: number) => {
+            (globalThis as unknown as { __ocbtPerfMask?: number }).__ocbtPerfMask = mask | 0;
+        },
         getStats: () => sampleStats(),
         getPlanets: () => [...lod.getCbtPlanetInfo(), ...lod.getCdlodPlanetInfo()],
         setCameraDoublePos: (x: number, y: number, z: number) => {

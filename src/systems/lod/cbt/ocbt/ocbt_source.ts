@@ -189,6 +189,12 @@ export class OcbtSource implements CbtGeometrySource {
         // tmpCamLocal (it is f32-rounded the same way when written to either GPU buffer).
         this.render.setCamAnchor(this.tmpCamLocal);
 
+        // Debug fragment perf-profiling mask (set via __world42Perf.setPerfMask): bit0 skip slope
+        // normal, bit1 skip df64 ground detail, bit2 skip crater rays — to A/B each block's GPU cost.
+        this.render.setPerfMask(
+            (globalThis as unknown as { __ocbtPerfMask?: number }).__ocbtPerfMask ?? 0
+        );
+
         // Frustum cull: rotate each render-space plane normal into camera-relative
         // planet-local space (R^T·n via the inverse world matrix; renderPos = R·rel, so
         // n·renderPos = (R^T·n)·rel), keep d. Lets the fixed pool concentrate on the
