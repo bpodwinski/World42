@@ -11,7 +11,10 @@ import { GuiManager } from '../core/gui/gui_manager';
 import { DisposableRegistry } from '../core/lifecycle/disposable_registry';
 import { attachFrameGraph } from '../core/render/frame_graph';
 import type { StarGlowSource, StarOccluder } from '../core/render/star_raymarch_postprocess';
-import type { AtmosphereSource } from '../core/render/atmosphere_postprocess';
+import {
+    pickNearestAtmosphere,
+    type AtmosphereSource
+} from '../core/render/atmosphere_postprocess';
 import { loadStarCatalog } from '../core/io/star_catalog';
 import { createStarfieldRenderer } from '../core/render/starfield_renderer';
 import { ScaleManager } from '../core/scale/scale_manager';
@@ -201,6 +204,27 @@ export function setupRuntime({
         .then((catalog) => {
             const starfield = createStarfieldRenderer(scene, catalog);
             disposables.add(() => starfield.dispose());
+
+            // Drive atmospheric scintillation each frame.
+            // atmosphereFactor = 0 for airless bodies (Moon) and in space; 1 at the surface
+            // of a planet with an atmosphere. worldUp = normalised direction from planet
+            // centre to camera, used to compute per-star airmass (horizon = more turbulence).
+            const _worldUp = new Vector3();
+            const _fallbackUp = new Vector3(0, 1, 0);
+            const scintObserver = scene.onBeforeRenderObservable.add(() => {
+                const nearest = pickNearestAtmosphere(camera.doublepos, atmospheres);
+                if (!nearest) {
+                    starfield.setAtmosphereState(0, _fallbackUp);
+                    return;
+                }
+                camera.doublepos.subtractToRef(nearest.centerWorldDouble, _worldUp);
+                const distKm = _worldUp.length();
+                _worldUp.scaleInPlace(1 / distKm);  // normalise in-place
+                const altKm = distKm - nearest.radiusKm;
+                const factor = Math.max(0, 1 - altKm / nearest.params.heightKm);
+                starfield.setAtmosphereState(factor, _worldUp);
+            });
+            disposables.addBabylonObserver(scene.onBeforeRenderObservable, scintObserver);
         })
         .catch((err: unknown) => {
             console.warn(
