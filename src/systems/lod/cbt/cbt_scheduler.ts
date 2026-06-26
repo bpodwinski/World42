@@ -112,8 +112,8 @@ export class CbtPlanet {
         const OCBT_CAPACITY = 1 << 20; // 1 048 576 slots
         const OCBT_MAX_LEVEL = 32; // u64 hard cap; df64 cracks well before
         // Hysteresis: MERGE < SPLIT/sqrt(2). 8/4 keeps a safe gap (4 < 5.66).
-        const OCBT_SPLIT_PX = 8;
-        const OCBT_MERGE_PX = 4;
+        const OCBT_SPLIT_PX = 16;
+        const OCBT_MERGE_PX = 8;
         return new OcbtSource(
             engine as WebGPUEngine,
             this.scene,
