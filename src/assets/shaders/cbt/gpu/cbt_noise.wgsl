@@ -271,7 +271,16 @@ fn cbtFbmHeight(dir : vec3<f32>) -> f32 {
 // macro field, so the CPU collision / other LOD backends still match. `camDistKm` is
 // per-VERTEX (length of the camera-relative position) => a shared vertex gets one fade =>
 // watertight, no cracks. f32 keeps the detail precise to ~20-30 m wavelength.
-fn cbtFbm_d_at(p : vec3<f32>, camDistKm : f32, radiusKm : f32, craterSkipBig : bool) -> vec4<f32> {
+// NORMAL-only Nyquist footprint band-limit (kills grazing-sun normal grain at the source).
+// An fBm octave of wavelength wlKm contributes to the SHADING GRADIENT only while wlKm stays above
+// the pixel's world footprint: below ~2x footprint it cannot be sampled without aliasing, so it is
+// faded OUT of the gradient (not the height). At grazing the footprint along the view is huge, so the
+// fine octaves vanish from the normal there — exactly where the grain was. footprintKm <= 0 disables
+// it (height / collision callers pass 0, so geometry is never affected).
+const CBT_NORMAL_FP_LO : f32 = 2.0; // wl < 2*footprint -> octave fully dropped from the normal
+const CBT_NORMAL_FP_HI : f32 = 4.0; // wl > 4*footprint -> octave fully kept
+
+fn cbtFbm_d_at(p : vec3<f32>, camDistKm : f32, radiusKm : f32, craterSkipBig : bool, footprintKm : f32) -> vec4<f32> {
     var sum : f32 = 0.0;
     var maxMacro : f32 = 0.0;
     var grad : vec3<f32> = vec3<f32>(0.0);
@@ -283,9 +292,10 @@ fn cbtFbm_d_at(p : vec3<f32>, camDistKm : f32, radiusKm : f32, craterSkipBig : b
         let wlKm = radiusKm / freq;
         let onKm = CBT_DETAIL_RANGE * wlKm;
         let fade = 1.0 - smoothstep(onKm, onKm * 2.0, camDistKm);
+        let fpFade = select(1.0, smoothstep(footprintKm * CBT_NORMAL_FP_LO, footprintKm * CBT_NORMAL_FP_HI, wlKm), footprintKm > 0.0);
         let sd = cbtSimplex3_d(p * freq);
         sum = sum + sd.x * (amp * fade);
-        grad = grad + sd.yzw * (amp * freq * fade);
+        grad = grad + sd.yzw * (amp * freq * fade * fpFade);
         // maxMacro takes the UNFADED amp -> normalization fixed, full macro at the surface.
         maxMacro = maxMacro + amp;
         freq = freq * CBT_LACUNARITY;
@@ -302,9 +312,10 @@ fn cbtFbm_d_at(p : vec3<f32>, camDistKm : f32, radiusKm : f32, craterSkipBig : b
         let onKm = CBT_DETAIL_RANGE * wlKm;
         let fade = 1.0 - smoothstep(onKm, onKm * 2.0, camDistKm);
         if (fade > 0.0) {
+            let fpFade = select(1.0, smoothstep(footprintKm * CBT_NORMAL_FP_LO, footprintKm * CBT_NORMAL_FP_HI, wlKm), footprintKm > 0.0);
             let sd = cbtSimplex3_d(p * freq);
             sum = sum + sd.x * (amp * fade);
-            grad = grad + sd.yzw * (amp * freq * fade);
+            grad = grad + sd.yzw * (amp * freq * fade * fpFade);
         }
         freq = freq * CBT_LACUNARITY;
         amp = amp * CBT_PERSISTENCE;
@@ -319,7 +330,7 @@ fn cbtFbm_d_at(p : vec3<f32>, camDistKm : f32, radiusKm : f32, craterSkipBig : b
 
 fn cbtFbmHeightAt(dir : vec3<f32>, camDistKm : f32, radiusKm : f32) -> f32 {
     // HEIGHT path: keep ALL crater classes (skipBig=false) so geometry is complete.
-    return cbtFbm_d_at(dir, camDistKm, radiusKm, false).x;
+    return cbtFbm_d_at(dir, camDistKm, radiusKm, false, 0.0).x;
 }
 
 fn cbtSphereTangents(nrm : vec3<f32>, tang : ptr<function, vec3<f32>>, bitan : ptr<function, vec3<f32>>) {
@@ -427,14 +438,15 @@ fn craterRays(dir : vec3<f32>, radiusKm : f32, camDistKm : f32) -> f32 {
 // Per-pixel normal that INCLUDES the faded detail octaves, so shading matches the
 // continued-detail geometry from cbtFbm_d_at. camDistKm must be the same distance the
 // height decode used for this surface point (length of the camera-relative position).
-fn cbtNoiseNormalAt(dir : vec3<f32>, radius : f32, camDistKm : f32) -> vec3<f32> {
+fn cbtNoiseNormalAt(dir : vec3<f32>, radius : f32, camDistKm : f32, footprintKm : f32) -> vec3<f32> {
     let nrm = normalize(dir);
     var tang : vec3<f32>;
     var bitan : vec3<f32>;
     cbtSphereTangents(nrm, &tang, &bitan);
 
     // NORMAL path: skipBig=true drops locally-flat huge craters from the per-pixel gradient (perf).
-    let grad = cbtFbm_d_at(nrm, camDistKm, radius, true).yzw;
+    // footprintKm Nyquist-fades sub-footprint octaves out of the gradient (grazing-sun grain fix).
+    let grad = cbtFbm_d_at(nrm, camDistKm, radius, true, footprintKm).yzw;
     let dhdt = dot(grad, tang);
     let dhdb = dot(grad, bitan);
 
