@@ -199,7 +199,7 @@ export function setupRuntime({
     // binary is ready, then the GPU-driven billboards appear seamlessly.
     // The binary is self-hosted (public/stars/) — not on the CDN — so use a root-relative
     // URL that works in both dev (rspack serves public/) and prod (GitHub Pages at /World42/).
-    const starCatalogUrl = '/stars/hyg_mag8.bin?v=1';
+    const starCatalogUrl = '/stars/hyg_mag9.bin?v=1';
     loadStarCatalog(starCatalogUrl)
         .then((catalog) => {
             const starfield = createStarfieldRenderer(scene, catalog);

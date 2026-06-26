@@ -28,7 +28,7 @@ import struct
 import sys
 from pathlib import Path
 
-MAG_LIMIT: float = 8.0
+MAG_LIMIT: float = 9.0
 
 # HYG id=0 is Sol — already rendered by the star ray-march SDF sphere.
 EXCLUDE_IDS: set[int] = {0}
