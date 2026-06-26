@@ -20,6 +20,8 @@ import {
     type Scene,
 } from '@babylonjs/core';
 import { ThinCustomPostProcess } from '@babylonjs/core/PostProcesses/thinCustomPostProcess';
+import { FrameGraphGUITask } from '@babylonjs/gui';
+import type { AdvancedDynamicTexture } from '@babylonjs/gui';
 import type { OriginCamera } from '../camera/camera_manager';
 import {
     setStarUniforms,
@@ -96,6 +98,8 @@ export type FrameGraphHandle = {
 export type FrameGraphOptions = {
     stars: StarGlowSource[];
     occluders?: StarOccluder[];
+    /** Fullscreen GUI texture (must be created with useStandalone: true) for the HUD overlay. */
+    gui: AdvancedDynamicTexture;
 };
 
 /**
@@ -210,9 +214,15 @@ export function attachFrameGraph(
     sharpen.postProcess.colorAmount = 1.0;
     fg.addTask(sharpen);
 
-    // 9. Present to the backbuffer.
+    // 9. GUI / HUD overlay (crosshair, speed, perf) composited on top — scene.frameGraph bypasses
+    // the normal scene layer pass, so the fullscreen GUI must be rendered as a graph task.
+    const guiTask = new FrameGraphGUITask('gui', fg, options.gui);
+    guiTask.targetTexture = sharpen.outputTexture;
+    fg.addTask(guiTask);
+
+    // 10. Present to the backbuffer.
     const copy = new FrameGraphCopyToBackbufferColorTask('copyToBackbuffer', fg);
-    copy.sourceTexture = sharpen.outputTexture;
+    copy.sourceTexture = guiTask.outputTexture;
     fg.addTask(copy);
 
     // Build then install. Until the build resolves, scene.frameGraph stays null and scene.render()

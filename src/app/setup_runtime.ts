@@ -277,7 +277,7 @@ export function setupRuntime({
     // Render pipeline as a Frame Graph (replaces the imperative camera post-process stack:
     // DefaultRenderingPipeline + TAA pipeline + star post-process). The graph governs only the
     // render passes; OCBT compute / LOD / floating-origin keep running in their scene observables.
-    const fg = attachFrameGraph(scene, camera, { stars, occluders });
+    const fg = attachFrameGraph(scene, camera, { stars, occluders, gui: gui.advancedTexture });
     disposables.add(() => fg.dispose());
 
     // Under a Frame Graph, scene.render() fires onBeforeRenderObservable but NOT

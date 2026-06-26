@@ -65,6 +65,11 @@ export type CrosshairOpts = {
 export class GuiManager {
     private ui: AdvancedDynamicTexture;
 
+    /** The underlying fullscreen GUI texture (composited by the Frame Graph GUI task). */
+    public get advancedTexture(): AdvancedDynamicTexture {
+        return this.ui;
+    }
+
     private speedHud: SpeedHUD;
     private perfHud: PerfHUD;
     private center: CenterCrosshair;
@@ -94,7 +99,12 @@ export class GuiManager {
             mouseActiveAlpha: opts.mouseActiveAlpha ?? (opts.mouseAlpha ?? 0.2),
         };
 
-        this.ui = AdvancedDynamicTexture.CreateFullscreenUI("World42UI", true, scene);
+        // useStandalone: the GUI is composited by the Frame Graph (FrameGraphGUITask) instead of
+        // the scene's normal layer pass — required because scene.frameGraph bypasses scene.layers.
+        this.ui = AdvancedDynamicTexture.CreateFullscreenUI("World42UI", true, {
+            useStandalone: true,
+            scene,
+        });
 
         // Speed HUD
         this.speedHud = new SpeedHUD(this.ui, {

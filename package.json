@@ -27,19 +27,19 @@
     "pw:install-browser": "node ./scripts/playwright_cli.mjs install-browser"
   },
   "devDependencies": {
-    "@rsbuild/core": "^1.4.12",
-    "@rspack/cli": "^1.5.8",
-    "@rspack/core": "^1.5.8",
-    "@types/node": "^24.9.2",
-    "@vitest/coverage-v8": "^4.0.5",
+    "@rsbuild/core": "^2.1.0",
+    "@rspack/cli": "^2.1.0",
+    "@rspack/core": "^2.1.0",
+    "@types/node": "^26.0.1",
+    "@vitest/coverage-v8": "^4.1.9",
     "@webgpu/types": "^0.1.71",
-    "dotenv-webpack": "^8.1.1",
+    "dotenv-webpack": "^9.0.0",
     "gh-pages": "^6.3.0",
-    "html-webpack-plugin": "^5.6.4",
+    "html-webpack-plugin": "^5.6.7",
     "playwright": "^1.61.1",
-    "ts-checker-rspack-plugin": "^1.1.6",
+    "ts-checker-rspack-plugin": "^1.5.1",
     "ts-shader-loader": "^2.0.2",
-    "vitest": "^4.0.5"
+    "vitest": "^4.1.9"
   },
   "dependencies": {
     "@babylonjs/core": "^9.14.0",
@@ -49,6 +49,6 @@
     "@babylonjs/loaders": "^9.14.0",
     "@babylonjs/materials": "^9.14.0",
     "cors": "^2.8.5",
-    "dotenv": "^17.2.3"
+    "dotenv": "^17.4.2"
   }
 }
