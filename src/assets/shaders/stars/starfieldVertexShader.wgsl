@@ -41,31 +41,53 @@ fn cornerOffset(vi : u32) -> vec2<f32> {
     }
 }
 
-// B-V color index → linear RGB (approximate stellar spectral color).
-// Piece-wise polynomial fit to standard stellar color tables.
-// Input: B-V in the typical range [-0.4, 2.0] (blue O-type to red M-type).
-// Output: linear RGB (input values are display-gamma-encoded; pow(2.2) linearizes).
+// B-V color index → linear sRGB via physical blackbody pipeline.
+//
+// Pipeline:
+//   1. B-V → T_eff  (Ballesteros 2012, A&A 536, A9)
+//   2. T_eff → CIE 1931 xy chromaticity  (Kang et al. 2002, Planckian locus)
+//   3. xy → XYZ (Y = 1, chromaticity only)
+//   4. XYZ → linear sRGB  (D65, IEC 61966-2-1)
+//   5. Normalize peak channel to 1 — hue only; brightness comes from vBrightness.
+//
+// Valid B-V range: [-0.4, 2.0]  (hot blue O-type → cool red M-type).
+// Corresponding T_eff range: ~3 200 K – ~21 700 K, within Kang's [1667, 25000] K domain.
 fn bvToLinearRgb(bv : f32) -> vec3<f32> {
+    // Step 1 — B-V → effective temperature.
     let t = clamp(bv, -0.4, 2.0);
+    let T = 4600.0 * (1.0 / (0.92 * t + 1.7) + 1.0 / (0.92 * t + 0.62));
 
-    var r : f32;
-    if (t < 0.0)      { r = 0.61 + 0.11 * t + 0.1 * t * t; }
-    else if (t < 0.4) { r = 0.83 + 0.17 * t; }
-    else               { r = 1.0; }
+    // Step 2 — T_eff → CIE 1931 xy (Planckian locus, Kang et al. 2002).
+    let T2 = T * T;
+    let T3 = T2 * T;
+    var x : f32;
+    if (T < 4000.0) {
+        x = -2.661239e8 / T3 - 2.343580e5 / T2 + 8.776956e2 / T + 0.179910;
+    } else {
+        x = -3.025847e9 / T3 + 2.107038e6 / T2 + 2.226347e2 / T + 0.240390;
+    }
+    var y : f32;
+    if (T < 2222.0) {
+        y = -1.1063814 * x*x*x - 1.34811020 * x*x + 2.18555832 * x - 0.20219683;
+    } else if (T < 4000.0) {
+        y = -0.9549476 * x*x*x - 1.37418593 * x*x + 2.09137015 * x - 0.16748867;
+    } else {
+        y =  3.0817580 * x*x*x - 5.87338670 * x*x + 3.75112997 * x - 0.37001483;
+    }
 
-    var g : f32;
-    if (t < 0.0)      { g = 0.70 + 0.07 * t; }
-    else if (t < 0.6) { g = 0.87 - 0.1 * t + 0.02 * t * t; }
-    else if (t < 1.6) { g = 1.0 - 0.5 * (t - 0.6); }
-    else               { g = 0.5; }
+    // Step 3 — xy → XYZ  (Y = 1).
+    let X = x / y;
+    let Z = (1.0 - x - y) / y;
 
-    var b : f32;
-    if (t < 0.4)      { b = 1.0; }
-    else if (t < 1.5) { b = 1.0 - 0.5 * (t - 0.4); }
-    else               { b = 0.0; }
+    // Step 4 — XYZ → linear sRGB  (D65, IEC 61966-2-1).
+    let r =  3.2404542 * X - 1.5371385       - 0.4985314 * Z;
+    let g = -0.9692660 * X + 1.8760108       + 0.0415560 * Z;
+    let b =  0.0556434 * X - 0.2040259       + 1.0572252 * Z;
+    let rgb = max(vec3<f32>(r, g, b), vec3<f32>(0.0));
 
-    // Decode sRGB display values to linear (approximate γ = 2.2).
-    return pow(clamp(vec3<f32>(r, g, b), vec3<f32>(0.0), vec3<f32>(1.0)), vec3<f32>(2.2));
+    // Step 5 — normalize to hue only (brightness is handled by vBrightness).
+    let peak = max(max(rgb.r, rgb.g), rgb.b);
+    return rgb / max(peak, 1.0e-5);
 }
 
 @vertex
@@ -97,10 +119,15 @@ fn main(input : VertexInputs) -> FragmentInputs {
     let ndcCenter = clip.xy / clip.w;
 
     // Billboard pixel radius from apparent magnitude.
-    // Flux relative to mag 6 (bright edge of the naked-eye limit).
-    // pow(flux, 0.25) compresses the range so very bright stars don't dwarf faint ones.
-    let flux = pow(10.0, -0.4 * (mag - 6.0));
-    let pixelRadius = clamp(1.0 + 2.0 * pow(flux, 0.25), 1.0, 14.0);
+    // Physical model: apparent flux ∝ 10^(-0.4 × mag).
+    // Radius scales as flux^0.31 so that:
+    //   mag 8 → ~0.7 px (sub-pixel point source)
+    //   mag 6 → ~1.0 px (naked-eye limit)
+    //   mag 0 → ~7.0 px (Vega-class, bloom carries the halo)
+    //   mag −2 → clamped to 12 px
+    // Keeping faint stars sub-pixel prevents ALPHA_ADD overdraw from dominating the frame.
+    let flux = pow(10.0, -0.4 * mag);
+    let pixelRadius = clamp(7.0 * pow(flux, 0.31), 0.6, 12.0);
 
     // NDC extent: convert pixel radius to NDC half-extent (NDC spans 2 units = viewport width).
     let ndcExtent = pixelRadius * 2.0 / uniforms.viewport;
