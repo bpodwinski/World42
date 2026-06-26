@@ -45,7 +45,7 @@ export type OcbtRenderOptions = {
 
 function bakedHeader(opts: OcbtRenderOptions): string {
     const n = opts.noise;
-    const albedo = opts.albedo ?? new Vector3(0.5, 0.49, 0.48);
+    const albedo = opts.albedo ?? new Vector3(0.15, 0.14, 0.13);
     const ambient = opts.ambient ?? new Vector3(0.008, 0.008, 0.008);
     const lightColor = opts.lightColor ?? new Vector3(1, 1, 1);
     return [
@@ -91,7 +91,14 @@ function bakedHeader(opts: OcbtRenderOptions): string {
         // Smooth plains vs cratered highlands: a BROAD (continental ~400 km), SUBTLE brightness
         // variation so the surface isn't uniform — NOT the fine blotches. dir-based (no swim).
         `const CBT_PLAINS_FREQ : f32 = ${f(opts.radius / 400)};`,
-        `const CBT_PLAINS_AMP : f32 = 0.12;`
+        `const CBT_PLAINS_AMP : f32 = 0.12;`,
+        // Lunar (airless-regolith) BRDF. CBT_LUNAR_LS blends Lambert (0) <-> Lommel-Seeliger (1):
+        // the regolith reflects flat, with NO limb darkening (a full Moon looks like a uniform
+        // disc, not a shaded sphere) and slight limb BRIGHTENING. CBT_OPP_* is the opposition
+        // surge (hotspot when the Sun is at the camera's back, low phase angle).
+        `const CBT_LUNAR_LS : f32 = 0.7;`,
+        `const CBT_OPP_AMP : f32 = 0.15;`,
+        `const CBT_OPP_COS : f32 = 0.93;`
     ].flat().join('\n');
 }
 
@@ -266,8 +273,20 @@ function fragmentSource(opts: OcbtRenderOptions): string {
         '    }',
         '    let nWorld = normalize((uniforms.world * vec4<f32>(nLocal, 0.0)).xyz);',
         '    let L = normalize(-uniforms.uLightDirection);',
-        '    let ndl = max(dot(nWorld, L), 0.0);',
-        '    let lighting = CBT_AMBIENT + CBT_LIGHTCOLOR * ndl;',
+        '    // View direction (surface -> camera) in the same world-aligned space as nWorld and L:',
+        '    // rel is the camera-relative surface position, so world * rel points camera -> surface.',
+        '    let V = normalize(-(uniforms.world * vec4<f32>(rel, 0.0)).xyz);',
+        '    let NdL = max(dot(nWorld, L), 0.0);',
+        '    let NdV = max(dot(nWorld, V), 1e-3);',
+        '    // Lommel-Seeliger single-scattering term NdL/(NdL+NdV): the airless-regolith look. It',
+        '    // does NOT fall off toward the limb like Lambert and brightens at grazing emission, so',
+        '    // the planet reads flat/uniformly lit (real Moon) instead of a smooth-shaded ball.',
+        '    let ls = NdL / (NdL + NdV);',
+        '    var refl = mix(NdL, 2.0 * ls, CBT_LUNAR_LS);',
+        '    // Opposition surge: a gentle hotspot when the Sun is near the camera back (low phase).',
+        '    let cosPhase = clamp(dot(V, L), -1.0, 1.0);',
+        '    refl = refl * (1.0 + CBT_OPP_AMP * smoothstep(CBT_OPP_COS, 1.0, cosPhase));',
+        '    let lighting = CBT_AMBIENT + CBT_LIGHTCOLOR * refl;',
         '    // Procedural albedo + slope/altitude splatting (replaces the flat CBT_ALBEDO).',
         '    var albedo = cbtGroundAlbedo(slope01, altKm);',
         '    // Broad plains/highlands brightness variation (continental scale, subtle, no swim).',

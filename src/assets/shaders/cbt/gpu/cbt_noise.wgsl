@@ -130,24 +130,32 @@ fn craterParams(k : i32) -> vec4<f32> {
 // Radial crater profile h(rn) (rn = dist/radius) + derivative h'(rn). C1, compact support (0 and
 // 0-slope at rn>=2): flat-floored bowl (depression) + raised rim + fading ejecta, all (1-x^2)^2.
 // `morph` (0..1) adds COMPLEX-crater morphology (big craters): a central peak rising from the floor.
-fn craterProfile(rn : f32, morph : f32, hp : ptr<function, f32>, dhp : ptr<function, f32>) {
-    let RIM = 0.85; let RIMH = 0.22; let RW = 0.18; let FLOOR = -1.0;
+// `maturity` (0 = fresh/sharp, 1 = old/eroded): the floor fills in (shallower bowl), the rim wears
+// down AND widens, the ejecta blanket and central peak fade away. All maturity factors are LINEAR
+// scalings (and a consistent effective rim width), so the analytic derivative stays exact.
+fn craterProfile(rn : f32, morph : f32, maturity : f32, hp : ptr<function, f32>, dhp : ptr<function, f32>) {
+    let RIM = 0.85; let RW0 = 0.18; let RIMH = 0.22; let FLOOR = -1.0;
     let EJH = 0.06; let EJC = 1.1; let EJW = 0.9;
+    let floorMul = 1.0 - 0.6 * maturity; // old craters: filled floor (shallower bowl)
+    let rimMul = 1.0 - 0.7 * maturity;   // old craters: worn-down rim
+    let ejMul = 1.0 - maturity;          // old craters: ejecta gone
+    let peakMul = 1.0 - maturity;        // old craters: central peak eroded
+    let RW = RW0 * (1.0 + 1.6 * maturity); // old craters: wider, softer rim
     var h = 0.0; var d = 0.0;
     if (rn < RIM) {
         let u = rn / RIM; let s = u * u * (3.0 - 2.0 * u);
-        h = h + FLOOR * (1.0 - s);
-        d = d + FLOOR * (-(6.0 * u - 6.0 * u * u)) / RIM;
+        h = h + floorMul * FLOOR * (1.0 - s);
+        d = d + floorMul * FLOOR * (-(6.0 * u - 6.0 * u * u)) / RIM;
     }
     let x = (rn - RIM) / RW;
-    if (abs(x) < 1.0) { let b = 1.0 - x * x; h = h + RIMH * b * b; d = d + RIMH * (-4.0 * x * b) / RW; }
+    if (abs(x) < 1.0) { let b = 1.0 - x * x; h = h + rimMul * RIMH * b * b; d = d + rimMul * RIMH * (-4.0 * x * b) / RW; }
     let xe = (rn - EJC) / EJW;
-    if (abs(xe) < 1.0) { let be = 1.0 - xe * xe; h = h + EJH * be * be; d = d + EJH * (-4.0 * xe * be) / EJW; }
+    if (abs(xe) < 1.0) { let be = 1.0 - xe * xe; h = h + ejMul * EJH * be * be; d = d + ejMul * EJH * (-4.0 * xe * be) / EJW; }
     // Central peak (complex craters): a bump rising from the bowl floor, fading out by rn=PW.
     if (morph > 0.0 && rn < 0.22) {
         let xp = rn / 0.22; let bp = 1.0 - xp * xp; let CPH = 0.55;
-        h = h + morph * CPH * bp * bp;
-        d = d + morph * CPH * (-4.0 * xp * bp) / 0.22;
+        h = h + morph * peakMul * CPH * bp * bp;
+        d = d + morph * peakMul * CPH * (-4.0 * xp * bp) / 0.22;
     }
     *hp = h; *dhp = d;
 }
@@ -185,6 +193,10 @@ fn craterField(dir : vec3<f32>, radiusKm : f32, camDistKm : f32, skipBig : bool)
             if (rExist >= prm.w) { continue; }
             let q1 = cbtPermAt(ix + 1 + cbtPermAt(iy + cbtPermAt(iz)));
             let q2 = cbtPermAt(ix + cbtPermAt(iy + 1 + cbtPermAt(iz)));
+            // Age hash (same cell hash the ray system uses for freshness) -> maturity 0..1.
+            // Fresh (low q3) craters are sharp AND emit bright rays; the rest are eroded.
+            let q3 = cbtPermAt(ix + cbtPermAt(iy + cbtPermAt(iz + 1)));
+            let maturity = f32(q3) * (1.0 / 256.0);
             let jitter = vec3<f32>(f32(q0), f32(q1), f32(q2)) * (1.0 / 256.0);
             let rVar = f32(q1) * (1.0 / 256.0);
             let rSize = f32(q2) * (1.0 / 256.0);
@@ -200,7 +212,7 @@ fn craterField(dir : vec3<f32>, radiusKm : f32, camDistKm : f32, skipBig : bool)
             var morph = 0.0;
             if (k <= 2) { morph = 1.0; }
             var hp : f32; var dhp : f32;
-            craterProfile(rn, morph, &hp, &dhp);
+            craterProfile(rn, morph, maturity, &hp, &dhp);
             h = h + depe * hp;
             if (dist > 1e-6 * rEff) { g = g + (depe * dhp / rEff) * (qd / dist); }
         }

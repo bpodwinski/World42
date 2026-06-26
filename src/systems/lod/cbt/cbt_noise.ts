@@ -222,35 +222,41 @@ const CRATER_PARAMS: ReadonlyArray<readonly [number, number, number, number]> = 
 ];
 
 /** Radial crater profile h(rn) (height only) — mirror of craterProfile (WGSL). `morph` adds the
- *  complex-crater central peak for big classes. */
-function craterProfile(rn: number, morph: number): number {
+ *  complex-crater central peak for big classes. `maturity` (0 = fresh, 1 = old/eroded) fills the
+ *  floor, wears + widens the rim, and fades the ejecta + central peak. */
+function craterProfile(rn: number, morph: number, maturity: number): number {
     const RIM = 0.85,
         RIMH = 0.22,
-        RW = 0.18,
+        RW0 = 0.18,
         FLOOR = -1.0,
         EJH = 0.06,
         EJC = 1.1,
         EJW = 0.9;
+    const floorMul = 1 - 0.6 * maturity;
+    const rimMul = 1 - 0.7 * maturity;
+    const ejMul = 1 - maturity;
+    const peakMul = 1 - maturity;
+    const RW = RW0 * (1 + 1.6 * maturity);
     let h = 0;
     if (rn < RIM) {
         const u = rn / RIM;
         const s = u * u * (3 - 2 * u);
-        h += FLOOR * (1 - s);
+        h += floorMul * FLOOR * (1 - s);
     }
     const x = (rn - RIM) / RW;
     if (Math.abs(x) < 1) {
         const b = 1 - x * x;
-        h += RIMH * b * b;
+        h += rimMul * RIMH * b * b;
     }
     const xe = (rn - EJC) / EJW;
     if (Math.abs(xe) < 1) {
         const be = 1 - xe * xe;
-        h += EJH * be * be;
+        h += ejMul * EJH * be * be;
     }
     if (morph > 0 && rn < 0.22) {
         const xp = rn / 0.22;
         const bp = 1 - xp * xp;
-        h += morph * 0.55 * bp * bp;
+        h += morph * peakMul * 0.55 * bp * bp;
     }
     return h;
 }
@@ -296,6 +302,9 @@ function craterField(
                     if (q0 / 256 >= density) continue;
                     const q1 = pa(ix + 1 + pa(iy + pa(iz)));
                     const q2 = pa(ix + pa(iy + 1 + pa(iz)));
+                    // Age hash (mirror of WGSL) -> maturity 0..1: fresh craters stay sharp.
+                    const q3 = pa(ix + pa(iy + pa(iz + 1)));
+                    const maturity = q3 / 256;
                     const r0e = r0 * (0.8 + 0.4 * (q2 / 256));
                     const depe = depth * CRATER_SCALE * (0.6 + 0.8 * (q1 / 256));
                     const qx = Px - (cix + 0.15 + 0.7 * (q0 / 256));
@@ -306,7 +315,7 @@ function craterField(
                     const rn = dist / rEff;
                     if (rn >= 2) continue;
                     const morph = k <= 2 ? 1 : 0;
-                    h += depe * craterProfile(rn, morph);
+                    h += depe * craterProfile(rn, morph, maturity);
                 }
             }
         }
