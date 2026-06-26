@@ -76,7 +76,19 @@ export function setupRuntime({
     const sampleStats = () => {
         const cbt = lod.getCbtStats();
         const frameMs = sceneInstr.frameTimeCounter.lastSecAverage;
-        const gpuMs = engineInstr.gpuFrameTimeCounter.lastSecAverage / 1e6; // ns → ms
+        // WebGPU reports real GPU time on engine.gpuTimeInFrameForMainPass (a WebGPUPerfCounter, in
+        // ns) once enableGPUTimingMeasurements is armed (see engine_manager). The legacy
+        // EngineInstrumentation.gpuFrameTimeCounter is the WebGL2 GLQuery path and stays 0 under
+        // WebGPU — so prefer the WebGPU counter, fall back to the instrumentation for WebGL2. NOTE:
+        // this is the MAIN (canvas) pass only — the terrain draw + post, NOT the OCBT compute passes.
+        const wgpuMain = (
+            engine as unknown as {
+                gpuTimeInFrameForMainPass?: { counter: { lastSecAverage: number } };
+            }
+        ).gpuTimeInFrameForMainPass;
+        const gpuMs = wgpuMain
+            ? wgpuMain.counter.lastSecAverage / 1e6
+            : engineInstr.gpuFrameTimeCounter.lastSecAverage / 1e6; // ns → ms
         const mem = perfMemory();
         return {
             fps: engine.getFps(),

@@ -33,13 +33,16 @@ export class EngineManager {
         const engine = new WebGPUEngine(canvas, {
             stencil: true,
             antialias: true,
-            // Request the timestamp-query feature so EngineInstrumentation.gpuFrameTime
-            // (perf HUD + headless bench) reports real GPU time instead of 0. Negligible
-            // overhead; degrades gracefully to 0 on adapters without the feature.
-            enableGPUTimingMeasurements: true,
+            // Request the timestamp-query DEVICE feature (Babylon filters it to the adapter's
+            // supported features, so it is a safe no-op where unsupported). This is what lets
+            // EngineInstrumentation.gpuFrameTimeCounter / the perf-HUD gpuMs report real GPU
+            // time. NOTE: `enableGPUTimingMeasurements` is NOT a constructor option (it is an
+            // engine PROPERTY, armed below) — passing it here did nothing, so gpuMs read 0.
+            deviceDescriptor: { requiredFeatures: ['timestamp-query'] as GPUFeatureName[] },
         } as WebGPUEngineOptions);
 
         await engine.initAsync();
+        engine.enableGPUTimingMeasurements = true; // arm the GPU timer (property, not an option)
         console.info(`[EngineManager] active=webgpu | mode=forced-webgpu`);
 
         return engine;
@@ -93,10 +96,13 @@ export class EngineManager {
                 const engine = new WebGPUEngine(canvas, {
                     stencil: true,
                     antialias: true,
-                    enableGPUTimingMeasurements: true, // real GPU time for HUD + bench
+                    // timestamp-query DEVICE feature -> real gpuMs. enableGPUTimingMeasurements is a
+                    // PROPERTY (armed below), not an option — passing it as an option did nothing.
+                    deviceDescriptor: { requiredFeatures: ['timestamp-query'] as GPUFeatureName[] },
                 } as WebGPUEngineOptions);
 
                 await engine.initAsync();
+                engine.enableGPUTimingMeasurements = true; // arm the GPU timer
                 console.info(`[EngineManager] active=webgpu | mode=${mode}`);
 
                 return engine;
@@ -124,10 +130,13 @@ export class EngineManager {
                 const engine = new WebGPUEngine(canvas, {
                     stencil: true,
                     antialias: true,
-                    enableGPUTimingMeasurements: true, // real GPU time for HUD + bench
+                    // timestamp-query DEVICE feature -> real gpuMs. enableGPUTimingMeasurements is a
+                    // PROPERTY (armed below), not an option — passing it as an option did nothing.
+                    deviceDescriptor: { requiredFeatures: ['timestamp-query'] as GPUFeatureName[] },
                 } as WebGPUEngineOptions);
 
                 await engine.initAsync();
+                engine.enableGPUTimingMeasurements = true; // arm the GPU timer
                 console.info(`[EngineManager] active=webgpu | mode=${mode}`);
 
                 return engine;

@@ -624,7 +624,11 @@ export class CbtScheduler {
             agg.mergesThisFrame += s.mergesThisFrame;
             agg.classifyMs = Math.max(agg.classifyMs, s.classifyMs);
             agg.rebuildMs = Math.max(agg.rebuildMs, s.rebuildMs);
-            agg.vertexCount += s.lastVertexCount;
+            // GPU-driven sources (OCBT/GPU-CBT) emit no CPU vertices, so lastVertexCount is 0.
+            // They draw 1 instanced 3-vertex template per live leaf, so the rendered vertex
+            // count is leafCount * 3 (1 triangle / leaf). Fall back to that when there is no
+            // CPU vertex count, so the HUD "verts" reflects the real geometry being drawn.
+            agg.vertexCount += s.lastVertexCount || s.leafCount * 3;
         }
         return agg;
     }
