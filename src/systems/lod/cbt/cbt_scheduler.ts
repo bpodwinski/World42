@@ -75,8 +75,16 @@ export class CbtPlanet {
     readonly radiusSim: number;
     readonly starPosWorldDouble: Vector3 | null;
 
-    private source: CbtGeometrySource;
+    // Lazily created on first update() that passes the SSE threshold, so we don't
+    // flood the WebGPU driver with 224 compute pipelines at startup (one per planet
+    // × 14 shaders). Creation is deferred until the camera is actually close enough
+    // to need terrain detail for this planet.
+    private source: CbtGeometrySource | null = null;
+    private readonly sourceOpts: CbtPlanetOptions;
+
     private debugLod = false;
+    private pendingWireframe = false;
+    private pendingDebugLod = false;
     private readonly stats: CbtStats = {
         leafCount: 0,
         splitsThisFrame: 0,
@@ -101,8 +109,19 @@ export class CbtPlanet {
         this.starPosWorldDouble = opts.starPosWorldDouble;
         this.starColor = opts.starColor;
         this.noise = opts.noise ?? DEFAULT_NOISE;
-        this.source = this.createSource(opts);
-        this.source.refresh();
+        this.sourceOpts = opts;
+        // Source is NOT created here — deferred to the first update() call.
+    }
+
+    private getOrCreateSource(): CbtGeometrySource {
+        if (!this.source) {
+            this.source = this.createSource(this.sourceOpts);
+            this.source.refresh();
+            // Apply any debug flags that were toggled before this planet activated.
+            this.source.setWireframe?.(this.pendingWireframe);
+            this.source.setDebugLod?.(this.pendingDebugLod);
+        }
+        return this.source;
     }
 
     private createSource(opts: CbtPlanetOptions): CbtGeometrySource {
@@ -220,7 +239,7 @@ export class CbtPlanet {
     }
 
     resetNow(): void {
-        this.source.reset();
+        this.source?.reset();
     }
 
     /**
@@ -254,7 +273,7 @@ export class CbtPlanet {
 
     update(deadline: number, frustumPlanes: ReadonlyArray<Plane> | null = null): void {
         if (performance.now() >= deadline) return;
-        this.source.requestUpdate({
+        this.getOrCreateSource().requestUpdate({
             cameraWorldDouble: this.camera.doublepos,
             planetCenterWorldDouble: this.entity.doublepos,
             renderParentWorldMatrix: this.renderParent.getWorldMatrix(),
@@ -265,16 +284,18 @@ export class CbtPlanet {
     }
 
     dispose(): void {
-        this.source.dispose();
+        this.source?.dispose();
     }
 
     setWireframe(on: boolean): void {
-        this.source.setWireframe?.(on);
+        this.pendingWireframe = on;
+        this.source?.setWireframe?.(on);
     }
 
     setDebugLod(on: boolean): void {
         this.debugLod = on;
-        this.source.setDebugLod?.(on);
+        this.pendingDebugLod = on;
+        this.source?.setDebugLod?.(on);
     }
 }
 
@@ -412,11 +433,26 @@ export class CbtScheduler {
         if (!this.planets.length) return;
         const end = performance.now() + maxMs;
         const farDeadline = end + 1e9; // never trips the per-update deadline guard
+
+        // Only warm planets that are LOD-active from the current camera position.
+        // Warming all 16 planets wastes the prewarm budget on inter-system bodies.
+        const viewH = this.scene.getEngine().getRenderHeight();
+        const K = viewH > 0
+            ? viewH / (2 * Math.tan(this.camera.fov * 0.5))
+            : 780; // fallback: ~1080p / 70° fov
+        const SKIP_SSE_PX = 4.0;
+        const cam = this.camera.doublepos;
+
         let progressing = true;
         let guard = 0;
         while (progressing && performance.now() < end && guard < 10000) {
             progressing = false;
             for (const planet of this.planets) {
+                const c = planet.entity.doublepos;
+                const dx = cam.x - c.x, dy = cam.y - c.y, dz = cam.z - c.z;
+                const dist = Math.max(Math.sqrt(dx*dx + dy*dy + dz*dz), 1);
+                if ((planet.radiusSim * 0.5) * K / dist < SKIP_SSE_PX) continue;
+
                 planet.update(farDeadline);
                 const s = planet.getStats();
                 if (s.splitsThisFrame > 0 || s.mergesThisFrame > 0) progressing = true;
@@ -451,6 +487,9 @@ export class CbtScheduler {
         this.planets = [];
     }
 
+    // Scratch vector for distance checks — avoids per-frame allocation in tick().
+    private readonly tmpCamOffset = new Vector3();
+
     private tick = (): void => {
         const count = this.planets.length;
         if (!count) return;
@@ -465,10 +504,31 @@ export class CbtScheduler {
             planes = this.frustumPlanes;
         }
 
+        // Per-frame SSE constant: converts world-space error to pixels.
+        // Same formula as the GPU classifier: ssePx = error * K / dist,
+        // where K = viewportHeight / (2 * tan(fov/2)).
+        const viewH = this.scene.getEngine().getRenderHeight();
+        const K = viewH / (2 * Math.tan(this.camera.fov * 0.5));
+
+        // Skip threshold: if the root node SSE is below this, the planet will never
+        // split — no GPU compute needed. 4 px = half the OCBT merge threshold (8 px),
+        // giving a 2× safety margin so inter-system planets are always culled while
+        // a planet the camera is approaching stays active well before it would split.
+        const SKIP_SSE_PX = 4.0;
+
+        const cam = this.camera.doublepos;
         const deadline = performance.now() + this.budgetMs;
         for (let i = 0; i < count; i++) {
             if (performance.now() >= deadline) break;
             const planet = this.planets[(this.robin + i) % count];
+
+            // Root-node SSE: error ≈ radius/2, distance = camera → planet center.
+            const c = planet.entity.doublepos;
+            this.tmpCamOffset.set(cam.x - c.x, cam.y - c.y, cam.z - c.z);
+            const dist = Math.max(this.tmpCamOffset.length(), 1);
+            const rootSsePx = (planet.radiusSim * 0.5) * K / dist;
+            if (rootSsePx < SKIP_SSE_PX) continue;
+
             planet.update(deadline, planes);
         }
         this.robin = (this.robin + 1) % Math.max(1, count);

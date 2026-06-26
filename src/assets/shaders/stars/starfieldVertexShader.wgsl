@@ -20,7 +20,11 @@
 // BJS WGSL note: BJS ShaderMaterial does NOT auto-inject the WebGPU NDC-Y flip that it
 // applies when transpiling GLSL. The Y-flip is done manually (same as ocbt_render_material).
 
-var<storage, read> starData : array<vec4<f32>>;
+// [ra, dec, mag, bv] per star — positional data used for direction + scintillation seed.
+var<storage, read> starData   : array<vec4<f32>>;
+// [r, g, b, baseRadius] per star — precomputed once on CPU at load time.
+// Replaces bvToLinearRgb() + baseRadius(mag) which previously ran 4× per star per frame.
+var<storage, read> starColors : array<vec4<f32>>;
 
 uniform viewProjection   : mat4x4<f32>;
 uniform viewport         : vec2<f32>;    // canvas size in pixels (width, height)
@@ -46,55 +50,6 @@ fn cornerOffset(vi : u32) -> vec2<f32> {
     }
 }
 
-// B-V color index → linear sRGB via physical blackbody pipeline.
-//
-// Pipeline:
-//   1. B-V → T_eff  (Ballesteros 2012, A&A 536, A9)
-//   2. T_eff → CIE 1931 xy chromaticity  (Kang et al. 2002, Planckian locus)
-//   3. xy → XYZ (Y = 1, chromaticity only)
-//   4. XYZ → linear sRGB  (D65, IEC 61966-2-1)
-//   5. Normalize peak channel to 1 — hue only; brightness comes from vBrightness.
-//
-// Valid B-V range: [-0.4, 2.0]  (hot blue O-type → cool red M-type).
-// Corresponding T_eff range: ~3 200 K – ~21 700 K, within Kang's [1667, 25000] K domain.
-fn bvToLinearRgb(bv : f32) -> vec3<f32> {
-    // Step 1 — B-V → effective temperature.
-    let t = clamp(bv, -0.4, 2.0);
-    let T = 4600.0 * (1.0 / (0.92 * t + 1.7) + 1.0 / (0.92 * t + 0.62));
-
-    // Step 2 — T_eff → CIE 1931 xy (Planckian locus, Kang et al. 2002).
-    let T2 = T * T;
-    let T3 = T2 * T;
-    var x : f32;
-    if (T < 4000.0) {
-        x = -2.661239e8 / T3 - 2.343580e5 / T2 + 8.776956e2 / T + 0.179910;
-    } else {
-        x = -3.025847e9 / T3 + 2.107038e6 / T2 + 2.226347e2 / T + 0.240390;
-    }
-    var y : f32;
-    if (T < 2222.0) {
-        y = -1.1063814 * x*x*x - 1.34811020 * x*x + 2.18555832 * x - 0.20219683;
-    } else if (T < 4000.0) {
-        y = -0.9549476 * x*x*x - 1.37418593 * x*x + 2.09137015 * x - 0.16748867;
-    } else {
-        y =  3.0817580 * x*x*x - 5.87338670 * x*x + 3.75112997 * x - 0.37001483;
-    }
-
-    // Step 3 — xy → XYZ  (Y = 1).
-    let X = x / y;
-    let Z = (1.0 - x - y) / y;
-
-    // Step 4 — XYZ → linear sRGB  (D65, IEC 61966-2-1).
-    let r =  3.2404542 * X - 1.5371385       - 0.4985314 * Z;
-    let g = -0.9692660 * X + 1.8760108       + 0.0415560 * Z;
-    let b =  0.0556434 * X - 0.2040259       + 1.0572252 * Z;
-    let rgb = max(vec3<f32>(r, g, b), vec3<f32>(0.0));
-
-    // Step 5 — normalize to hue only (brightness is handled by vBrightness).
-    let peak = max(max(rgb.r, rgb.g), rgb.b);
-    return rgb / max(peak, 1.0e-5);
-}
-
 // Atmospheric scintillation noise for a given star instance.
 // Returns a value in roughly [-1, 1] built from four sine waves at frequencies
 // matching real atmospheric scintillation (~2–25 Hz). The golden-ratio seed spreads
@@ -110,10 +65,13 @@ fn scintillate(instanceIdx : u32, t : f32) -> f32 {
 @vertex
 fn main(input : VertexInputs) -> FragmentInputs {
     let star = starData[vertexInputs.instanceIndex];
-    let ra   = star.x;
-    let dec  = star.y;
-    let mag  = star.z;
-    let bv   = star.w;
+    let ra  = star.x;
+    let dec = star.y;
+    let mag = star.z;
+
+    // Per-star precomputed data: [r, g, b, baseRadius] — computed once on CPU at load time.
+    let colorData  = starColors[vertexInputs.instanceIndex];
+    let baseRadius = colorData.w;
 
     // RA/Dec (equatorial J2000) → unit direction vector.
     let cosDec = cos(dec);
@@ -129,17 +87,13 @@ fn main(input : VertexInputs) -> FragmentInputs {
         vertexOutputs.vColor      = vec3<f32>(0.0);
         vertexOutputs.vBrightness = 0.0;
         vertexOutputs.vOffset     = vec2<f32>(0.0);
+        vertexOutputs.vBaseRadius  = baseRadius;
+        vertexOutputs.vPixelRadius = baseRadius;
         return vertexOutputs;
     }
 
     // NDC center of the star (perspective divide).
     let ndcCenter = clip.xy / clip.w;
-
-    // Apparent flux and base point radius.
-    // Radius scales as flux^0.31: mag 8 → ~0.7 px, mag 6 → ~1.0 px, mag 0 → ~7.0 px.
-    // Faint stars stay sub-pixel to avoid ALPHA_ADD overdraw dominating the frame.
-    let flux = pow(10.0, -0.4 * mag);
-    let baseRadius = clamp(7.0 * pow(flux, 0.31), 0.6, 12.0);
 
     // Irradiance-scaled brightness: mag 1.5 → 1.0 (bloom onset at the ~25 brightest stars).
     let brightness = pow(10.0, -0.4 * (mag - 1.5));
@@ -156,8 +110,14 @@ fn main(input : VertexInputs) -> FragmentInputs {
         let sinElev = dot(dir, uniforms.worldUp);
 
         if (sinElev <= 0.0) {
-            // Star is below the local horizon: occluded by the planet body.
-            clippedBr = 0.0;
+            // Star is below the local horizon: collapse to degenerate vertex (no fragments).
+            vertexOutputs.position    = vec4<f32>(0.0, 0.0, 2.0, 1.0);
+            vertexOutputs.vColor      = vec3<f32>(0.0);
+            vertexOutputs.vBrightness = 0.0;
+            vertexOutputs.vOffset     = vec2<f32>(0.0);
+            vertexOutputs.vBaseRadius  = baseRadius;
+            vertexOutputs.vPixelRadius = baseRadius;
+            return vertexOutputs;
         } else {
             let airmass = 1.0 / max(sinElev, 0.05);  // geometric airmass, capped at ~20
 
@@ -205,9 +165,8 @@ fn main(input : VertexInputs) -> FragmentInputs {
     pos.y = -pos.y;
     vertexOutputs.position = pos;
 
-    // Apply reddening to the physical hue and re-normalise (brightness stays in vBrightness).
-    let baseHue = bvToLinearRgb(bv);
-    let reddenedHue = baseHue * extRgb;
+    // Apply reddening to the precomputed hue and re-normalise (brightness stays in vBrightness).
+    let reddenedHue = colorData.xyz * extRgb;
     let huePeak = max(max(reddenedHue.r, reddenedHue.g), reddenedHue.b);
     vertexOutputs.vColor       = reddenedHue / max(huePeak, 1.0e-5);
     vertexOutputs.vBrightness  = clippedBr;
