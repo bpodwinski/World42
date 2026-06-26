@@ -132,7 +132,6 @@ void main() {
     rayMarch(ro, rd, tStop, glow);
 
     vec3 add = glow * starColor * starIntensity;
-    vec3 hdr = sceneColor + add;
-    vec3 outColor = hdr / (vec3(1.0) + hdr);
-    gl_FragColor = vec4(outColor, 1.0);
+    // Output linear HDR — tone-mapping is applied once by the DefaultRenderingPipeline (ACES).
+    gl_FragColor = vec4(sceneColor + add, 1.0);
 }

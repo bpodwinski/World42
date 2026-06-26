@@ -30,3 +30,5 @@ Cargo.lock
 output/playwright/
 .playwright-cli/
 .playwright-mcp/
+# dev-only GPU HUD bridge output (scripts/gpu_hud_bridge.ps1)
+public/gpu_stats.json

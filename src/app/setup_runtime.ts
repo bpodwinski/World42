@@ -62,10 +62,41 @@ export function setupRuntime({
     disposables.add(() => sceneInstr.dispose());
     disposables.add(() => engineInstr.dispose());
 
+    // OS-level GPU stats bridge: the browser cannot read GPU utilization, so the optional
+    // scripts/gpu_hud_bridge.ps1 helper writes live nvidia-smi values to public/gpu_stats.json
+    // and the HUD polls it (same-origin). Absent/stale => the HUD shows "GPU% n/a". Polling runs
+    // ONLY while capture/HUD is on, so normal runs make no extra requests.
+    type OsGpu = { util: number; vramUsed: number; vramTotal: number; clock: number; power: number };
+    let osGpu: { data: OsGpu; recvMs: number } | null = null;
+    let osGpuTimer: ReturnType<typeof setInterval> | undefined;
+    const pollOsGpu = (): void => {
+        fetch(`/gpu_stats.json?t=${Math.floor(performance.now())}`)
+            .then((r) => (r.ok ? r.json() : null))
+            .then((d: OsGpu | null) => {
+                if (d && typeof d.util === 'number') {
+                    osGpu = { data: d, recvMs: performance.now() };
+                }
+            })
+            .catch(() => {
+                /* bridge not running — leave osGpu to go stale (HUD shows n/a) */
+            });
+    };
+
     const setCaptureEnabled = (on: boolean): void => {
         sceneInstr.captureFrameTime = on;
         engineInstr.captureGPUFrameTime = on;
+        if (on && osGpuTimer === undefined) {
+            pollOsGpu();
+            osGpuTimer = setInterval(pollOsGpu, 1000);
+        } else if (!on && osGpuTimer !== undefined) {
+            clearInterval(osGpuTimer);
+            osGpuTimer = undefined;
+            osGpu = null;
+        }
     };
+    disposables.add(() => {
+        if (osGpuTimer !== undefined) clearInterval(osGpuTimer);
+    });
 
     // JS heap (Chromium only). usedJSHeapSize is the live retained JS memory; a rising
     // trend across a stationary scene is the signal for a leak (e.g. node churn / no pooling).
@@ -98,6 +129,10 @@ export function setupRuntime({
             activeIndices: scene.getActiveIndices(),
             // RAM: live JS heap in MB (-1 where the browser does not expose performance.memory).
             jsHeapMB: mem ? mem.usedJSHeapSize / 1048576 : -1,
+            // OS GPU (whole device) from the nvidia-smi bridge; null if the bridge is not running
+            // or the last sample is stale (> 3 s old). util %, VRAM MiB, clock MHz, power W.
+            osGpu:
+                osGpu && performance.now() - osGpu.recvMs < 3000 ? osGpu.data : null,
             cbt,
         };
     };
@@ -106,7 +141,10 @@ export function setupRuntime({
         const f = (n: number, d = 1) => n.toFixed(d);
         return [
             `FPS ${Math.round(s.fps)}  frame ${f(s.frameMs)}ms`,
-            `gpu ${f(s.gpuMs)}ms  draws ${s.drawCalls}`,
+            `gpu ${f(s.gpuMs)}ms (canvas)  draws ${s.drawCalls}`,
+            s.osGpu
+                ? `GPU ${f(s.osGpu.util, 0)}%  vram ${(s.osGpu.vramUsed / 1024).toFixed(1)}/${(s.osGpu.vramTotal / 1024).toFixed(0)}G  ${f(s.osGpu.clock, 0)}MHz ${f(s.osGpu.power, 0)}W`
+                : `GPU% n/a (run scripts/gpu_hud_bridge.ps1)`,
             `ram ${s.jsHeapMB < 0 ? 'n/a' : f(s.jsHeapMB, 0) + 'MB'}  idx ${(s.activeIndices / 1000).toFixed(0)}k`,
             `cbt leaves ${s.cbt.leafCount}  verts ${s.cbt.vertexCount}`,
             `split/f ${s.cbt.splitsThisFrame}  merge/f ${s.cbt.mergesThisFrame}`,

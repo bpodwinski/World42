@@ -41,12 +41,12 @@ export type OcbtRenderOptions = {
     albedo?: Vector3;
     ambient?: Vector3;
     lightColor?: Vector3;
+    lightIntensity?: number;
 };
 
 function bakedHeader(opts: OcbtRenderOptions): string {
     const n = opts.noise;
     const albedo = opts.albedo ?? new Vector3(0.15, 0.14, 0.13);
-    const ambient = opts.ambient ?? new Vector3(0.008, 0.008, 0.008);
     const lightColor = opts.lightColor ?? new Vector3(1, 1, 1);
     return [
         `const CBT_RADIUS : f32 = ${f(opts.radius)};`,
@@ -59,7 +59,6 @@ function bakedHeader(opts: OcbtRenderOptions): string {
         `const CBT_DETAIL_OCTAVES : i32 = ${Math.max(0, Math.floor(n.detailOctaves ?? 0))};`,
         `const CBT_DETAIL_RANGE : f32 = ${f(n.detailRange ?? 60)};`,
         `const CBT_ALBEDO : vec3<f32> = vec3<f32>(${f(albedo.x)}, ${f(albedo.y)}, ${f(albedo.z)});`,
-        `const CBT_AMBIENT : vec3<f32> = vec3<f32>(${f(ambient.x)}, ${f(ambient.y)}, ${f(ambient.z)});`,
         `const CBT_LIGHTCOLOR : vec3<f32> = vec3<f32>(${f(lightColor.x)}, ${f(lightColor.y)}, ${f(lightColor.z)});`,
         // Near-ground detail band (world-anchored df64 micro-relief). ON/OFF in km = the
         // camera-distance fade; STRENGTH = normal-tilt amount; BASE_FREQ = first ground
@@ -98,7 +97,15 @@ function bakedHeader(opts: OcbtRenderOptions): string {
         // surge (hotspot when the Sun is at the camera's back, low phase angle).
         `const CBT_LUNAR_LS : f32 = 0.7;`,
         `const CBT_OPP_AMP : f32 = 0.15;`,
-        `const CBT_OPP_COS : f32 = 0.93;`
+        `const CBT_OPP_COS : f32 = 0.93;`,
+        // Curvature AO: ambient occlusion from deviation of terrain normal vs radial direction.
+        // Applied to ambient only. Computed from nSlope (smooth normal) for macro-scale AO.
+        `const CBT_AO_STRENGTH : f32 = 0.35;`,
+        // GGX micro-facette specular. Slope-driven roughness (flat=smoother, steep=matte).
+        // CBT_SPEC_STRENGTH is low (0.03) for lunar regolith; raise for icy/silica-rich planets.
+        `const CBT_ROUGH_LO : f32 = 0.3;`,
+        `const CBT_ROUGH_HI : f32 = 0.85;`,
+        `const CBT_SPEC_STRENGTH : f32 = 0.03;`
     ].flat().join('\n');
 }
 
@@ -184,14 +191,19 @@ function fragmentSource(opts: OcbtRenderOptions): string {
         'uniform logarithmicDepthConstant : f32;',
         'uniform uDebugLod : i32;',
         // Fragment perf-profiling mask (debug): skip heavy blocks to measure each one s GPU cost
-        // via the P-HUD gpuMs. bit0 = skip the slope normal (a full extra cbtNoiseNormalAt incl.
-        // craters); bit1 = skip the df64 near-ground detail block; bit2 = skip the crater rays.
+        // via the P-HUD gpuMs. bit0 = skip the slope normal; bit1 = skip the df64 near-ground
+        // detail block; bit2 = skip the crater rays; bit3 = skip AO; bit4 = skip GGX specular.
         'uniform uPerfMask : i32;',
         // Camera position in planet-local sim units (= the SAME f32 value the df64 eval
         // subtracted to make `rel`). world = uCamAnchor + rel reconstructs the surface point
         // exactly (the camera's f32 rounding cancels), giving a frame-invariant, cm-precise
         // direction for the ground detail noise (no swim, no banding).
         'uniform uCamAnchor : vec3<f32>;',
+        // Runtime ambient (replaces the former CBT_AMBIENT baked constant) and star intensity
+        // multiplier for the diffuse+specular term. Both can be changed per-frame without a
+        // material rebuild.
+        'uniform uAmbient : vec3<f32>;',
+        'uniform uLightIntensity : f32;',
         'varying vDir : vec3<f32>;',
         'varying vRel : vec3<f32>;',
         'varying vFragmentDepth : f32;',
@@ -277,6 +289,14 @@ function fragmentSource(opts: OcbtRenderOptions): string {
         '        nLocal = normalize(nLocal - (CBT_GROUND_STRENGTH * dFade) * tg);',
         '    }',
         '    let nWorld = normalize((uniforms.world * vec4<f32>(nLocal, 0.0)).xyz);',
+        '    // Curvature-based ambient occlusion: deviation of the SMOOTH landform normal from',
+        '    // the radial direction. nSlope is at CBT_SLOPE_DIST km so micro-bumps are faded out,',
+        '    // giving macro-scale AO (craters + valleys) without per-pixel noise speckling.',
+        '    var ao = 1.0;',
+        '    if ((uniforms.uPerfMask & 8) == 0) {',
+        '        let curvature = clamp(1.0 - dot(nSlope, dir), 0.0, 1.0);',
+        '        ao = 1.0 - CBT_AO_STRENGTH * curvature;',
+        '    }',
         '    let L = normalize(-uniforms.uLightDirection);',
         '    // View direction (surface -> camera) in the same world-aligned space as nWorld and L:',
         '    // rel is the camera-relative surface position, so world * rel points camera -> surface.',
@@ -291,7 +311,19 @@ function fragmentSource(opts: OcbtRenderOptions): string {
         '    // Opposition surge: a gentle hotspot when the Sun is near the camera back (low phase).',
         '    let cosPhase = clamp(dot(V, L), -1.0, 1.0);',
         '    refl = refl * (1.0 + CBT_OPP_AMP * smoothstep(CBT_OPP_COS, 1.0, cosPhase));',
-        '    let lighting = CBT_AMBIENT + CBT_LIGHTCOLOR * refl;',
+        '    // GGX micro-facette specular. H = half-vector. Slope-driven roughness: flat terrain',
+        '    // is smoother (lower roughness) than steep slopes. NdL gate zeroes spec in shadow.',
+        '    var spec = 0.0;',
+        '    if ((uniforms.uPerfMask & 16) == 0) {',
+        '        let H = normalize(L + V);',
+        '        let NdH = max(dot(nWorld, H), 0.0);',
+        '        let roughness = mix(CBT_ROUGH_LO, CBT_ROUGH_HI, slope01);',
+        '        let alpha = roughness * roughness;',
+        '        let denom = NdH * NdH * (alpha * alpha - 1.0) + 1.0;',
+        '        let D = (alpha * alpha) / (3.14159 * denom * denom);',
+        '        spec = D * CBT_SPEC_STRENGTH * NdL;',
+        '    }',
+        '    let lighting = uniforms.uAmbient * ao + CBT_LIGHTCOLOR * (uniforms.uLightIntensity * refl);',
         '    // Procedural albedo + slope/altitude splatting (replaces the flat CBT_ALBEDO).',
         '    var albedo = cbtGroundAlbedo(slope01, altKm);',
         '    // Broad plains/highlands brightness variation (continental scale, subtle, no swim).',
@@ -301,7 +333,7 @@ function fragmentSource(opts: OcbtRenderOptions): string {
         '    var rays = 0.0;',
         '    if ((uniforms.uPerfMask & 4) == 0) { rays = craterRays(dir, CBT_RADIUS, camDistKm); }',
         '    albedo = albedo + vec3<f32>(rays);',
-        '    fragmentOutputs.color = vec4<f32>(albedo * lighting, 1.0);',
+        '    fragmentOutputs.color = vec4<f32>(albedo * lighting + CBT_LIGHTCOLOR * (uniforms.uLightIntensity * spec), 1.0);',
         '    fragmentOutputs.fragDepth = log2(fragmentInputs.vFragmentDepth) * uniforms.logarithmicDepthConstant * 0.5;',
         '    return fragmentOutputs;',
         '}'
@@ -315,6 +347,8 @@ export type OcbtRenderMaterial = {
     setDebugLod(on: boolean): void;
     setPerfMask(mask: number): void;
     setCamAnchor(camLocal: Vector3): void;
+    setAmbient(ambient: Vector3): void;
+    setLightIntensity(intensity: number): void;
     dispose(): void;
 };
 
@@ -336,7 +370,7 @@ export function buildOcbtRenderMaterial(
         {
             shaderLanguage: ShaderLanguage.WGSL,
             attributes: ['position'],
-            uniforms: ['viewProjection', 'world', 'uLightDirection', 'logarithmicDepthConstant', 'uDebugLod', 'uPerfMask', 'uCamAnchor'],
+            uniforms: ['viewProjection', 'world', 'uLightDirection', 'logarithmicDepthConstant', 'uDebugLod', 'uPerfMask', 'uCamAnchor', 'uAmbient', 'uLightIntensity'],
             storageBuffers: ['ocbtHeap', 'ocbtPos', 'ocbtIndices', 'cbtPerm']
         }
     );
@@ -376,6 +410,8 @@ export function buildOcbtRenderMaterial(
     material.setInt('uDebugLod', 0);
     material.setInt('uPerfMask', 0);
     material.setVector3('uCamAnchor', new Vector3(0, 0, 0));
+    material.setVector3('uAmbient', opts.ambient ?? new Vector3(0.008, 0.008, 0.008));
+    material.setFloat('uLightIntensity', opts.lightIntensity ?? 1.0);
 
     return {
         material,
@@ -391,6 +427,12 @@ export function buildOcbtRenderMaterial(
         },
         setCamAnchor(camLocal: Vector3): void {
             material.setVector3('uCamAnchor', camLocal);
+        },
+        setAmbient(ambient: Vector3): void {
+            material.setVector3('uAmbient', ambient);
+        },
+        setLightIntensity(intensity: number): void {
+            material.setFloat('uLightIntensity', intensity);
         },
         dispose(): void {
             material.dispose();

@@ -80,16 +80,6 @@ vec3 worldFromUV(vec2 UV, float depth) {
     return posWS.xyz;
 }
 
-// remaps colors from [0, inf] to [0, 1]
-vec3 acesTonemap(vec3 color) {
-    mat3 m1 = mat3(0.59719, 0.07600, 0.02840, 0.35458, 0.90834, 0.13383, 0.04823, 0.01566, 0.83777);
-    mat3 m2 = mat3(1.60475, -0.10208, -0.00327, -0.53108, 1.10813, -0.07276, -0.07367, -0.00605, 1.07602);
-    vec3 v = m1 * color;
-    vec3 a = v * (v + 0.0245786) - 0.000090537;
-    vec3 b = v * (0.983729 * v + 0.4329510) + 0.238081;
-    return clamp(m2 * (a / b), 0.0, 1.0);
-}
-
 // Determines whether a ray intersects a sphere, returning intersection points if applicable
 // Explanation: https://viclw17.github.io/2018/07/16/raytracing-ray-sphere-intersection
 bool rayIntersectSphere(vec3 rayOrigin, vec3 rayDir, vec3 spherePosition, float sphereRadius, out float t0, out float t1) {
@@ -277,18 +267,6 @@ void main() {
     // Color to be displayed on the screen
     vec3 finalColor = scatter(screenColor, cameraPosition, rayDir, maximumDistance);
 
-    // Exposure
-    finalColor *= 1.2;
-
-    // Tonemapping
-    finalColor = acesTonemap(finalColor);
-
-    // Saturation
-    float saturation = 1.2;
-    vec3 grayscale = vec3(0.299, 0.587, 0.114) * finalColor;
-    finalColor = mix(grayscale, finalColor, saturation);
-    finalColor = clamp(finalColor, 0.0, 1.0);
-
-    // Displaying final color
+    // Output linear HDR — tone-mapping is applied once by the DefaultRenderingPipeline (ACES).
     gl_FragColor = vec4(finalColor, 1.0);
 }

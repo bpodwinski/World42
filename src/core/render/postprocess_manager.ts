@@ -34,7 +34,7 @@ export class PostProcess {
         this.pipeline.bloomEnabled = true;
         this.pipeline.bloomThreshold = 0;
         this.pipeline.bloomKernel = 90;
-        this.pipeline.bloomWeight = 0.4;
+        this.pipeline.bloomWeight = 0.25; // reduced: pipeline now receives real HDR (no prior tone-map clamp)
 
         // Enable and configure sharpening effect
         this.pipeline.sharpenEnabled = true;

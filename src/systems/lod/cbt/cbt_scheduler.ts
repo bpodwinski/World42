@@ -199,6 +199,7 @@ export class CbtPlanet {
                     radiusSim: opts.radiusSim,
                     noise: this.noise,
                     starColor: this.starColor,
+                    starIntensity: opts.starIntensity,
                     starPosWorldDouble: this.starPosWorldDouble,
                     capacity: OCBT_CAPACITY,
                     splitThresholdPx: OCBT_SPLIT_PX,

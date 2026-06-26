@@ -42,7 +42,10 @@ export function benchSystemIds(allIds: string[], algo: LodAlgorithm | null): str
 
 /**
  * Force every non-star body of the loaded systems onto `algo` (in place). Stars
- * keep their type. No-op when `algo` is null.
+ * keep their type. Also FREEZES the bench planet: `rotationPeriodDays = null` so the
+ * loader's spin observable skips it (the surface stays still under the camera, which
+ * is what we want for a stable benchmark / perf profiling — there is no orbital
+ * translation in the sim, so the spin is the only motion). No-op when `algo` is null.
  */
 export function applyBenchOverride(
     loadedSystems: Map<string, LoadedSystem>,
@@ -53,6 +56,7 @@ export function applyBenchOverride(
         for (const body of system.bodies.values()) {
             if (body.bodyType !== 'star') {
                 body.lodAlgorithm = algo;
+                body.rotationPeriodDays = null; // freeze spin in bench mode
             }
         }
     }

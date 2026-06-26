@@ -26,6 +26,7 @@ export type OcbtSourceOptions = {
     radiusSim: number;
     noise: NoiseParams;
     starColor: Vector3;
+    starIntensity: number;
     starPosWorldDouble: Vector3 | null;
     /** Pool capacity (power of two). Must hold the converged live leaf set. */
     capacity: number;
@@ -44,6 +45,7 @@ export class OcbtSource implements CbtGeometrySource {
     private readonly render: OcbtRenderMaterial;
     private readonly mesh: Mesh;
     private readonly starPos: Vector3 | null;
+    private readonly starIntensity: number;
     private readonly listener: CbtGeometryListener;
     private readonly radius: number;
     private readonly splitThresholdPx: number;
@@ -82,6 +84,7 @@ export class OcbtSource implements CbtGeometrySource {
     ) {
         this.listener = listener;
         this.starPos = opts.starPosWorldDouble;
+        this.starIntensity = opts.starIntensity;
         this.radius = opts.radiusSim;
         this.splitThresholdPx = opts.splitThresholdPx;
         this.mergeThresholdPx = opts.mergeThresholdPx;
@@ -194,6 +197,7 @@ export class OcbtSource implements CbtGeometrySource {
         this.render.setPerfMask(
             (globalThis as unknown as { __ocbtPerfMask?: number }).__ocbtPerfMask ?? 0
         );
+        this.render.setLightIntensity(this.starIntensity);
 
         // Frustum cull: rotate each render-space plane normal into camera-relative
         // planet-local space (R^T·n via the inverse world matrix; renderPos = R·rel, so
