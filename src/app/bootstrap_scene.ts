@@ -60,9 +60,8 @@ export async function bootstrapScene(
     scene.collisionsEnabled = true;
     scene.onDisposeObservable.add(() => disposables.dispose());
 
-    // Dev perf benchmark: `?bench=<algo>` loads ONLY the dedicated Benchmark
-    // system and forces its planet onto <algo>, so the same world can be timed
-    // under each LOD backend in isolation (see bench_override.ts).
+    // Dev perf benchmark: `?bench=1` loads ONLY the dedicated Benchmark system
+    // and freezes planet rotation for a stable capture (see bench_override.ts).
     const benchAlgo = parseBenchAlgorithm(
         typeof window !== 'undefined' ? window.location.search : ''
     );

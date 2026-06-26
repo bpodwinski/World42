@@ -11,7 +11,7 @@ import {
 import { FloatingEntity, OriginCamera } from "../../core/camera/camera_manager";
 import { ScaleManager } from "../../core/scale/scale_manager";
 import { TextureManager } from "../../core/io/texture_manager";
-import { CbtPlanet, type CbtType } from "../../systems/lod/cbt/cbt_scheduler";
+import { CbtPlanet } from "../../systems/lod/cbt/cbt_scheduler";
 import type { NoiseParams } from "../../systems/lod/cbt/cbt_noise";
 import {
     normalizeCatalogJSON as normalizeCatalogJSONFromSource,
@@ -29,14 +29,11 @@ export type StarJSON = {
     intensity?: number;
 };
 
-export type LodAlgorithm = "cbt-cpu" | "cbt-gpu" | "cbt-ocbt";
-
 export type BodyJSON = {
     type: string;
     position_km: [number, number, number];
     diameter_km: number;
     rotation_period_days: number | null;
-    lod_algorithm?: LodAlgorithm;
     star?: StarJSON;
     /** Per-planet lighting overrides — merged with planet_lighting.json `_defaults`. */
     lighting?: PlanetLightingParams;
@@ -72,7 +69,6 @@ export type StellarCatalogJSON = {
 export type LoadedBody = {
     systemId: string;
     bodyType: string;
-    lodAlgorithm: LodAlgorithm;
     name: string;
 
     /** Pivot in render-space (rotation/tilt), parented under FloatingEntity. */
@@ -226,7 +222,6 @@ export async function loadStellarSystemFromCatalog(
         bodies.set(name, {
             systemId,
             bodyType: type,
-            lodAlgorithm: data.lod_algorithm ?? "cbt-ocbt",
             name,
             node: pivot,
             meshName,
@@ -268,11 +263,7 @@ export function createCBTForSystem(
         splitHysteresis = 0.7,
         noise,
         engine,
-        skip = (_name: string, body: LoadedBody) =>
-            body.bodyType === "star" ||
-            (body.lodAlgorithm !== "cbt-cpu" &&
-                body.lodAlgorithm !== "cbt-gpu" &&
-                body.lodAlgorithm !== "cbt-ocbt"),
+        skip = (_name: string, body: LoadedBody) => body.bodyType === "star",
     } = opts;
 
     for (const [name, body] of loaded.bodies) {
@@ -297,22 +288,6 @@ export function createCBTForSystem(
         const { pos: starPosWorldDouble, color: starColor, intensity: starIntensity, name: starName } =
             pickNearestStar(body, stars);
 
-        let offThreadCbt = false;
-        let gpuCbt = false;
-        let cbtType: CbtType | undefined;
-
-        switch (body.lodAlgorithm) {
-            case "cbt-cpu":
-                offThreadCbt = true;
-                break;
-            case "cbt-gpu":
-                gpuCbt = true;
-                break;
-            case "cbt-ocbt":
-                cbtType = "gpu-ocbt";
-                break;
-        }
-
         const ent = body.entity!;
         const planetKey = `${loaded.systemId}:${name}`;
         const runtime = new CbtPlanet(scene, camera, {
@@ -326,9 +301,6 @@ export function createCBTForSystem(
             splitThresholdPx2,
             splitHysteresis,
             noise,
-            offThreadCbt,
-            gpuCbt,
-            cbtType,
             starPosWorldDouble,
             starColor,
             starIntensity,

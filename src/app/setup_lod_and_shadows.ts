@@ -5,7 +5,7 @@ import {
 } from '@babylonjs/core';
 import { OriginCamera } from '../core/camera/camera_manager';
 import { DisposableRegistry } from '../core/lifecycle/disposable_registry';
-import { attachStarRayMarchingPostProcess, type StarGlowSource, type StarOccluder } from '../core/render/star_raymarch_postprocess';
+import type { StarGlowSource, StarOccluder } from '../core/render/star_raymarch_postprocess';
 import {
     createCBTForSystem,
     type LoadedSystem,
@@ -48,6 +48,10 @@ export type LodController = {
 export type LodSetupResult = {
     lod: LodController;
     refreshActivePlanetSelection: () => void;
+    /** Star glow sources for the Frame Graph star ray-march task. */
+    stars: StarGlowSource[];
+    /** Planet occluders for the star ray-march task. */
+    occluders: StarOccluder[];
 };
 
 type PlanetShadowSource = {
@@ -128,7 +132,8 @@ export function setupLodAndShadows(
         posWorldDouble: p.entity.doublepos,
         radiusSim: p.radiusSim,
     }));
-    attachStarRayMarchingPostProcess(scene, camera, stars, planetOccluders);
+    // The star ray-march is now a Frame Graph task (see attachFrameGraph in setup_runtime); we just
+    // surface the star/occluder data so the runtime can build the graph.
 
-    return { lod, refreshActivePlanetSelection: () => {} };
+    return { lod, refreshActivePlanetSelection: () => {}, stars, occluders: planetOccluders };
 }

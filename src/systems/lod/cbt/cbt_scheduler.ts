@@ -19,23 +19,18 @@ import type {
 } from '../../../core/camera/camera_manager';
 import type { EmitResult } from './cbt_emit';
 import {
-    LocalCbtSource,
     type CbtFrameParams,
     type CbtGeometrySource,
     type CbtSourceStats,
-    type LocalCbtSourceOptions,
 } from './cbt_geometry_source';
 import { DEFAULT_NOISE, fbmNoise, fbmGroundHeight, type NoiseParams } from './cbt_noise';
 import { createCbtTerrainMaterial } from './cbt_terrain_shader';
-import { getGlobalCbtKernelClient } from './workers/cbt_kernel_client';
-import { WorkerCbtSource } from './workers/cbt_worker_source';
-import { GpuCbtSource } from './gpu/gpu_cbt_source';
 import { OcbtSource } from './ocbt/ocbt_source';
 import type { WebGPUEngine } from '@babylonjs/core';
 import type { ResolvedLighting } from '../../../game_world/stellar_system/planet_lighting';
 
 /** Geometry backend for a CBT planet. */
-export type CbtType = 'cpu' | 'gpu-implicit' | 'gpu-ocbt';
+export type CbtType = 'gpu-ocbt';
 
 export type CbtPlanetOptions = {
     key: string;
@@ -68,26 +63,6 @@ export type CbtPlanetOptions = {
      * match). Default DEFAULT_NOISE. See cbt_quality.ts for presets.
      */
     noise?: NoiseParams;
-    /**
-     * Run classify/split/merge/emit in a Rust/WASM worker instead of on the main
-     * thread (default false). The synchronous path stays the fallback + golden
-     * reference. The worker path is wired in Phase 3.
-     */
-    offThreadCbt?: boolean;
-    /**
-     * Run the full CBT on the GPU (Dupuy 2021: bitfield + sum-reduction +
-     * split/merge compute passes + implicit-mesh draw), WebGPU only. Default
-     * false. Takes precedence over {@link offThreadCbt} when both are set and the
-     * engine is WebGPU; otherwise the worker/sync path is used. Wired in Phase 5.
-     */
-    gpuCbt?: boolean;
-    /**
-     * Geometry backend selector (supersedes {@link gpuCbt}). 'cpu' = worker/sync,
-     * 'gpu-implicit' = the Dupuy 2021 implicit CBT, 'gpu-ocbt' = the pool-CBT
-     * concurrent engine (HPG 2024). When unset, falls back to gpuCbt ?
-     * 'gpu-implicit' : 'cpu'. WebGPU required for both GPU paths.
-     */
-    cbtType?: CbtType;
     /** Per-planet resolved lighting params (from planet_lighting.json). */
     lighting?: ResolvedLighting;
 };
@@ -177,126 +152,32 @@ export class CbtPlanet {
 
     private createSource(opts: CbtPlanetOptions): CbtGeometrySource {
         const engine = this.scene.getEngine();
-        const cbtType: CbtType = opts.cbtType ?? (opts.gpuCbt ? 'gpu-implicit' : 'cpu');
-
-        // OCBT path (WebGPU only): the pool-CBT concurrent engine (HPG 2024). Cost is
-        // decoupled from subdivision depth (fixed pool capacity). Owns its own
-        // mesh/material; the listener is telemetry-only.
-        if (cbtType === 'gpu-ocbt') {
-            // Phase 2 bring-up constants: a fixed pool plus a screen-space-area metric.
-            // f32 vertex decode caps usable depth (~16); Phase 3 lifts it via f64.
-            const OCBT_CAPACITY = 1 << 20; // 1 048 576 slots
-            const OCBT_MAX_LEVEL = 32; // u64 hard cap (depth 63); df64 cracks well before
-            // Hysteresis rule: MERGE must be < SPLIT / sqrt(2) (~0.707*SPLIT). A longest-edge
-            // split makes children edge = parent/sqrt(2); if MERGE >= that, the children merge
-            // back the next frame -> split/merge oscillate every frame (leafCount flips,
-            // debug-LOD flickers). 8/4 keeps a safe gap (4 < 5.66).
-            const OCBT_SPLIT_PX = 8; // split when longest edge > 8 px
-            const OCBT_MERGE_PX = 4; // merge < 8/sqrt(2)=5.66 px (stable hysteresis)
-            return new OcbtSource(
-                engine as WebGPUEngine,
-                this.scene,
-                {
-                    key: opts.key,
-                    renderParent: this.renderParent,
-                    radiusSim: opts.radiusSim,
-                    noise: this.noise,
-                    starColor: this.starColor,
-                    starIntensity: opts.starIntensity,
-                    starPosWorldDouble: this.starPosWorldDouble,
-                    capacity: OCBT_CAPACITY,
-                    splitThresholdPx: OCBT_SPLIT_PX,
-                    mergeThresholdPx: OCBT_MERGE_PX,
-                    maxLevel: OCBT_MAX_LEVEL,
-                    lighting: opts.lighting
-                },
-                this.onSourceUpdate
-            );
-        }
-
-        // GPU CBT path (WebGPU only): a fully GPU-resident concurrent binary tree
-        // rendered as an implicit mesh. Owns its own mesh/material; the listener is
-        // called for telemetry only. Supersedes the worker/sync path when enabled.
-        if (cbtType === 'gpu-implicit') {
-            // The update is now dispatched INDIRECTLY (workgroups = ceil(liveLeaves/256))
-            // and the draw is bounded via forcedInstanceCount, so per-frame cost scales
-            // with the LIVE leaf count, not 2^maxDepth. The residual O(2^maxDepth) term
-            // is the sum-reduction (breadth-first over the full tree), which becomes the
-            // ceiling — hence ~24-25 is the practical max, not the worker's 28. Heap mem
-            // ≈ 8.4 MB/planet at 24 (16.8 MB at 25). 25 is opt-in after a perf check.
-            const GPU_MAX_DEPTH = 25;
-            // GPU-specific split threshold (px²): lower than the worker preset so the
-            // implicit mesh subdivides finer everywhere. Cost scales ~linearly with the
-            // resulting live leaf count (not exponential like GPU_MAX_DEPTH).
-            const GPU_SPLIT_THRESHOLD_PX2 = 40;
-            return new GpuCbtSource(
-                engine as WebGPUEngine,
-                this.scene,
-                {
-                    key: opts.key,
-                    renderParent: this.renderParent,
-                    radiusSim: opts.radiusSim,
-                    noise: this.noise,
-                    starColor: this.starColor,
-                    starPosWorldDouble: this.starPosWorldDouble,
-                    maxDepth: Math.min(opts.maxDepth, GPU_MAX_DEPTH),
-                    splitThresholdPx2: Math.min(opts.splitThresholdPx2, GPU_SPLIT_THRESHOLD_PX2),
-                    splitHysteresis: opts.splitHysteresis,
-                    cullBackface: opts.cullBackface ?? true,
-                    cullMinDot: opts.cullMinDot ?? -0.05,
-                },
-                this.onSourceUpdate
-            );
-        }
-
-        const sourceOpts: LocalCbtSourceOptions = {
-            radiusSim: opts.radiusSim,
-            maxDepth: opts.maxDepth,
-            maxSplitsPerFrame: opts.maxSplitsPerFrame,
-            maxMergesPerFrame: opts.maxMergesPerFrame ?? opts.maxSplitsPerFrame,
-            splitThresholdPx2: opts.splitThresholdPx2,
-            splitHysteresis: opts.splitHysteresis,
-            cullBackface: opts.cullBackface ?? true,
-            cullMinDot: opts.cullMinDot ?? -0.05,
-            frustumGuardScale: opts.frustumGuardScale ?? 1.0,
-            incrementalMesh: opts.incrementalMesh ?? true,
-            noise: this.noise,
-        };
-        // Off-thread path: run the identical pipeline in the Rust/WASM worker. The
-        // worker owns the tree; only camera params go out and geometry comes back.
-        if (opts.offThreadCbt) {
-            // Spawn frame the worker refines toward before the first geometry, so
-            // the planet is not shown at minimum LOD (no-frustum, like the sync
-            // prewarm). renderParent matrix is computed on demand here.
-            const prewarmFrame: CbtFrameParams = {
-                cameraWorldDouble: this.camera.doublepos,
-                planetCenterWorldDouble: this.entity.doublepos,
-                renderParentWorldMatrix: this.renderParent.getWorldMatrix(),
-                viewportHeightPx: Math.max(1, this.scene.getEngine().getRenderHeight()),
-                cameraFovRadians: this.camera.fov,
-                frustumPlanes: null,
-            };
-            return new WorkerCbtSource(
-                getGlobalCbtKernelClient(),
-                {
-                    key: opts.key,
-                    radiusSim: sourceOpts.radiusSim,
-                    maxDepth: sourceOpts.maxDepth,
-                    maxSplitsPerFrame: sourceOpts.maxSplitsPerFrame,
-                    maxMergesPerFrame: sourceOpts.maxMergesPerFrame,
-                    splitThresholdPx2: sourceOpts.splitThresholdPx2,
-                    splitHysteresis: sourceOpts.splitHysteresis,
-                    cullBackface: sourceOpts.cullBackface,
-                    cullMinDot: sourceOpts.cullMinDot,
-                    frustumGuardScale: sourceOpts.frustumGuardScale,
-                    incrementalMesh: sourceOpts.incrementalMesh,
-                    noise: sourceOpts.noise,
-                    prewarmFrame,
-                },
-                this.onSourceUpdate
-            );
-        }
-        return new LocalCbtSource(sourceOpts, this.onSourceUpdate);
+        // OCBT (pool-CBT, HPG 2024): cost decoupled from subdivision depth via fixed
+        // pool capacity. Owns its own mesh/material; the listener is telemetry-only.
+        const OCBT_CAPACITY = 1 << 20; // 1 048 576 slots
+        const OCBT_MAX_LEVEL = 32; // u64 hard cap; df64 cracks well before
+        // Hysteresis: MERGE < SPLIT/sqrt(2). 8/4 keeps a safe gap (4 < 5.66).
+        const OCBT_SPLIT_PX = 8;
+        const OCBT_MERGE_PX = 4;
+        return new OcbtSource(
+            engine as WebGPUEngine,
+            this.scene,
+            {
+                key: opts.key,
+                renderParent: this.renderParent,
+                radiusSim: opts.radiusSim,
+                noise: this.noise,
+                starColor: this.starColor,
+                starIntensity: opts.starIntensity,
+                starPosWorldDouble: this.starPosWorldDouble,
+                capacity: OCBT_CAPACITY,
+                splitThresholdPx: OCBT_SPLIT_PX,
+                mergeThresholdPx: OCBT_MERGE_PX,
+                maxLevel: OCBT_MAX_LEVEL,
+                lighting: opts.lighting
+            },
+            this.onSourceUpdate
+        );
     }
 
     private onSourceUpdate = (

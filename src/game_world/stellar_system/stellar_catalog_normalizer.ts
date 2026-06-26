@@ -1,5 +1,4 @@
 import type {
-    LodAlgorithm,
     StellarCatalogJSON,
     StellarSystemJSON,
     SystemJSON,
@@ -9,13 +8,6 @@ function canonicalType(typeRaw: unknown): string {
     let type = (typeof typeRaw === 'string' ? typeRaw : 'planet').toLowerCase().trim();
     if (type === 'sun') type = 'star';
     return type;
-}
-
-function canonicalLodAlgorithm(value: unknown): LodAlgorithm {
-    if (typeof value !== 'string') return 'cbt-ocbt';
-    const v = value.toLowerCase().trim() as LodAlgorithm;
-    const valid: LodAlgorithm[] = ['cbt-cpu', 'cbt-gpu', 'cbt-ocbt'];
-    return valid.includes(v) ? v : 'cbt-ocbt';
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -94,7 +86,6 @@ export function normalizeSystemJSON(raw: unknown): SystemJSON {
             position_km: position,
             diameter_km: diameterKm,
             rotation_period_days: rotationPeriodDays,
-            lod_algorithm: canonicalLodAlgorithm(body.lod_algorithm ?? body.lodAlgorithm),
             star: starRecord
                 ? {
                     temperature_k: asFiniteNumber(starRecord.temperature_k),

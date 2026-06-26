@@ -8,8 +8,7 @@ import {
 import type { LoadedBody, LoadedSystem } from './stellar_catalog_loader';
 
 function fakeBody(name: string, bodyType: string): LoadedBody {
-    // Only the fields the override touches matter; cast the rest.
-    return { name, bodyType, lodAlgorithm: 'cbt-ocbt' } as unknown as LoadedBody;
+    return { name, bodyType, rotationPeriodDays: 1 } as unknown as LoadedBody;
 }
 
 function fakeSystems(): Map<string, LoadedSystem> {
@@ -36,25 +35,20 @@ function fakeSystems(): Map<string, LoadedSystem> {
 }
 
 describe('parseBenchAlgorithm', () => {
-    it('returns null when absent', () => {
-        expect(parseBenchAlgorithm('')).toBeNull();
-        expect(parseBenchAlgorithm('?foo=1')).toBeNull();
+    it('returns false when absent', () => {
+        expect(parseBenchAlgorithm('')).toBe(false);
+        expect(parseBenchAlgorithm('?foo=1')).toBe(false);
     });
 
-    it('parses each valid backend', () => {
-        expect(parseBenchAlgorithm('?bench=cbt-cpu')).toBe('cbt-cpu');
-        expect(parseBenchAlgorithm('?bench=cbt-gpu')).toBe('cbt-gpu');
-        expect(parseBenchAlgorithm('?bench=CBT-OCBT')).toBe('cbt-ocbt'); // case-insensitive
-    });
-
-    it('returns null for an unknown value', () => {
-        expect(parseBenchAlgorithm('?bench=potato')).toBeNull();
+    it('returns true for any non-empty bench param', () => {
+        expect(parseBenchAlgorithm('?bench=1')).toBe(true);
+        expect(parseBenchAlgorithm('?bench=cbt-ocbt')).toBe(true);
     });
 });
 
 describe('benchSystemIds', () => {
     it('returns all ids when not in bench mode', () => {
-        expect(benchSystemIds(['Sol', 'AlphaCentauri', BENCH_SYSTEM_ID], null)).toEqual([
+        expect(benchSystemIds(['Sol', 'AlphaCentauri', BENCH_SYSTEM_ID], false)).toEqual([
             'Sol',
             'AlphaCentauri',
             BENCH_SYSTEM_ID,
@@ -62,26 +56,26 @@ describe('benchSystemIds', () => {
     });
 
     it('narrows to the benchmark system in bench mode', () => {
-        expect(benchSystemIds(['Sol', 'AlphaCentauri', BENCH_SYSTEM_ID], 'cbt-ocbt')).toEqual([
+        expect(benchSystemIds(['Sol', 'AlphaCentauri', BENCH_SYSTEM_ID], true)).toEqual([
             BENCH_SYSTEM_ID,
         ]);
     });
 });
 
 describe('applyBenchOverride', () => {
-    it('is a no-op when algo is null', () => {
+    it('is a no-op when inactive', () => {
         const systems = fakeSystems();
-        applyBenchOverride(systems, null);
-        expect(systems.get(BENCH_SYSTEM_ID)!.bodies.get('BenchWorld')!.lodAlgorithm).toBe('cbt-ocbt');
+        applyBenchOverride(systems, false);
+        expect(systems.get(BENCH_SYSTEM_ID)!.bodies.get('BenchWorld')!.rotationPeriodDays).toBe(1);
     });
 
-    it('forces every non-star body onto the algo and leaves stars untouched', () => {
+    it('freezes spin on non-star bodies and leaves stars untouched', () => {
         const systems = fakeSystems();
-        applyBenchOverride(systems, 'cbt-ocbt');
+        applyBenchOverride(systems, true);
         const bench = systems.get(BENCH_SYSTEM_ID)!;
-        expect(bench.bodies.get('BenchWorld')!.lodAlgorithm).toBe('cbt-ocbt');
+        expect(bench.bodies.get('BenchWorld')!.rotationPeriodDays).toBeNull();
         expect(bench.bodies.get('BenchStar')!.bodyType).toBe('star');
-        // Stars are not LOD bodies; their lodAlgorithm is irrelevant but must not crash.
-        expect(systems.get('Sol')!.bodies.get('Earth')!.lodAlgorithm).toBe('cbt-ocbt');
+        expect(bench.bodies.get('BenchStar')!.rotationPeriodDays).toBe(1); // star untouched
+        expect(systems.get('Sol')!.bodies.get('Earth')!.rotationPeriodDays).toBeNull();
     });
 });

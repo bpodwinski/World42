@@ -13,8 +13,8 @@ import { OriginCamera } from '../core/camera/camera_manager';
 import { teleportToEntity } from '../core/camera/teleport_entity';
 import { GuiManager } from '../core/gui/gui_manager';
 import { DisposableRegistry } from '../core/lifecycle/disposable_registry';
-import { PostProcess } from '../core/render/postprocess_manager';
-import { attachTaaPipeline } from '../core/render/taa_postprocess';
+import { attachFrameGraph } from '../core/render/frame_graph';
+import type { StarGlowSource, StarOccluder } from '../core/render/star_raymarch_postprocess';
 import { ScaleManager } from '../core/scale/scale_manager';
 import type { LoadedBody, LoadedSystem } from '../game_world/stellar_system/stellar_catalog_loader';
 import type { LodController } from './setup_lod_and_shadows';
@@ -28,6 +28,8 @@ export type RuntimeSetupOptions = {
     loadedSystems: Map<string, LoadedSystem>;
     lod: LodController;
     refreshActivePlanetSelection: () => void;
+    stars: StarGlowSource[];
+    occluders: StarOccluder[];
     disposables: DisposableRegistry;
 };
 
@@ -40,6 +42,8 @@ export function setupRuntime({
     loadedSystems,
     lod,
     refreshActivePlanetSelection,
+    stars,
+    occluders,
     disposables,
 }: RuntimeSetupOptions): void {
     disposables.addDomListener(window, 'keydown', (event) => {
@@ -186,12 +190,6 @@ export function setupRuntime({
         delete (window as unknown as { __world42Perf?: typeof perfHook }).__world42Perf;
     });
 
-    // TAA MUST be created before the DefaultRenderingPipeline (Babylon requires it
-    // to be first in the camera's post-process chain). See attachTaaPipeline.
-    attachTaaPipeline(scene, camera);
-
-    new PostProcess('Pipeline', scene, camera);
-
     const skybox = MeshBuilder.CreateBox('skyBox', { size: 1_000 }, scene);
     const skyboxMaterial = new StandardMaterial('skyBox', scene);
     skyboxMaterial.backFaceCulling = false;
@@ -275,6 +273,22 @@ export function setupRuntime({
         }
     });
     disposables.addBabylonObserver(scene.onBeforeRenderObservable, hudObserver);
+
+    // Render pipeline as a Frame Graph (replaces the imperative camera post-process stack:
+    // DefaultRenderingPipeline + TAA pipeline + star post-process). The graph governs only the
+    // render passes; OCBT compute / LOD / floating-origin keep running in their scene observables.
+    const fg = attachFrameGraph(scene, camera, { stars, occluders });
+    disposables.add(() => fg.dispose());
+
+    // Under a Frame Graph, scene.render() fires onBeforeRenderObservable but NOT
+    // onBeforeActiveMeshesEvaluationObservable — yet OriginCamera's floating-origin re-centering is
+    // registered there. Re-fire it once per frame so the camera integration still runs. Registered
+    // LAST (after control / LOD tick / ground collision) so the fold happens after this-frame moves,
+    // matching the non-frame-graph ordering.
+    const foldObserver = scene.onBeforeRenderObservable.add(() => {
+        scene.onBeforeActiveMeshesEvaluationObservable.notifyObservers(scene);
+    });
+    disposables.addBabylonObserver(scene.onBeforeRenderObservable, foldObserver);
 
     const renderLoop = () => scene.render();
     engine.runRenderLoop(renderLoop);
