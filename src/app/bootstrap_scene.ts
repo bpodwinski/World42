@@ -23,8 +23,10 @@ import {
 } from '../game_world/stellar_system/stellar_catalog_loader';
 import {
     applyBenchOverride,
-    benchSystemIds,
     parseBenchAlgorithm,
+    parsePlanetName,
+    parseSystemFilter,
+    selectSystemIds,
 } from '../game_world/stellar_system/bench_override';
 
 export type SceneBootstrapResult = {
@@ -36,7 +38,22 @@ export type SceneBootstrapResult = {
     loadedSystems: Map<string, LoadedSystem>;
 };
 
-function pickSpawnBody(loadedSystems: Map<string, LoadedSystem>): LoadedBody {
+function pickSpawnBody(
+    loadedSystems: Map<string, LoadedSystem>,
+    planetName: string | null
+): LoadedBody {
+    // `?planet=<name>`: spawn at the named planet (case-insensitive), searched across loaded systems.
+    if (planetName) {
+        const wanted = planetName.toLowerCase();
+        for (const system of loadedSystems.values()) {
+            for (const body of system.bodies.values()) {
+                if (body.bodyType !== 'star' && body.name.toLowerCase() === wanted) {
+                    return body;
+                }
+            }
+        }
+    }
+
     const loadedSystemsArr = Array.from(loadedSystems.values());
     const activeSystem = loadedSystems.get('Sol') ?? loadedSystemsArr[0];
     const body =
@@ -44,7 +61,7 @@ function pickSpawnBody(loadedSystems: Map<string, LoadedSystem>): LoadedBody {
         Array.from(activeSystem.bodies.values()).find((candidate) => candidate.bodyType !== 'star');
 
     if (!body) {
-        throw new Error('Aucun corps (planete) trouve dans le systeme actif.');
+        throw new Error('No planet body found in the active system.');
     }
 
     return body;
@@ -60,18 +77,20 @@ export async function bootstrapScene(
     scene.collisionsEnabled = true;
     scene.onDisposeObservable.add(() => disposables.dispose());
 
-    // Dev perf benchmark: `?bench=1` loads ONLY the dedicated Benchmark system
-    // and freezes planet rotation for a stable capture (see bench_override.ts).
-    const benchAlgo = parseBenchAlgorithm(
-        typeof window !== 'undefined' ? window.location.search : ''
-    );
-    const systemIds = benchSystemIds(listStellarSystems(planetsJson), benchAlgo);
+    // URL params (dev): `?bench=1` loads ONLY the Benchmark system + freezes rotation; `?system=<id>`
+    // loads only that system (e.g. ?system=Dev — avoids loading all 16 planets); `?planet=<name>`
+    // spawns the camera at that planet (e.g. ?system=Dev&planet=Earth). See bench_override.ts.
+    const search = typeof window !== 'undefined' ? window.location.search : '';
+    const benchAlgo = parseBenchAlgorithm(search);
+    const systemFilter = parseSystemFilter(search);
+    const planetName = parsePlanetName(search);
+    const systemIds = selectSystemIds(listStellarSystems(planetsJson), benchAlgo, systemFilter);
     const loadedSystemsArr = await Promise.all(
         systemIds.map((id) => loadStellarSystemFromCatalog(scene, planetsJson, id))
     );
     const loadedSystems = new Map(loadedSystemsArr.map((system) => [system.systemId, system]));
     applyBenchOverride(loadedSystems, benchAlgo);
-    const spawnBody = pickSpawnBody(loadedSystems);
+    const spawnBody = pickSpawnBody(loadedSystems, planetName);
 
     scene.textures.forEach((texture) => {
         texture.anisotropicFilteringLevel = 16;
@@ -85,7 +104,10 @@ export async function bootstrapScene(
     // the octahedron's +Y vertex; the pivot only spins about Y, so local +Y maps to
     // world +Y), looking out toward the lit limb tilted slightly below the horizon
     // so foreground terrain and the horizon are both framed.
-    const spawnSystem = loadedSystems.get('Sol') ?? Array.from(loadedSystems.values())[0];
+    const spawnSystem =
+        loadedSystems.get(spawnBody.systemId) ??
+        loadedSystems.get('Sol') ??
+        Array.from(loadedSystems.values())[0];
     const spawnStar = spawnSystem
         ? Array.from(spawnSystem.bodies.values()).find((b) => b.bodyType === 'star')
         : undefined;

@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
     BENCH_SYSTEM_ID,
     applyBenchOverride,
-    benchSystemIds,
     parseBenchAlgorithm,
+    parsePlanetName,
+    parseSystemFilter,
+    selectSystemIds,
 } from './bench_override';
 import type { LoadedBody, LoadedSystem } from './stellar_catalog_loader';
 
@@ -46,19 +48,42 @@ describe('parseBenchAlgorithm', () => {
     });
 });
 
-describe('benchSystemIds', () => {
-    it('returns all ids when not in bench mode', () => {
-        expect(benchSystemIds(['Sol', 'AlphaCentauri', BENCH_SYSTEM_ID], false)).toEqual([
-            'Sol',
-            'AlphaCentauri',
-            BENCH_SYSTEM_ID,
-        ]);
+describe('parseSystemFilter', () => {
+    it('returns null when absent', () => {
+        expect(parseSystemFilter('')).toBeNull();
+        expect(parseSystemFilter('?bench=1')).toBeNull();
+    });
+    it('returns the system id', () => {
+        expect(parseSystemFilter('?system=Dev')).toBe('Dev');
+    });
+});
+
+describe('parsePlanetName', () => {
+    it('returns null when absent', () => {
+        expect(parsePlanetName('')).toBeNull();
+    });
+    it('returns the planet name', () => {
+        expect(parsePlanetName('?system=Dev&planet=Earth')).toBe('Earth');
+    });
+});
+
+describe('selectSystemIds', () => {
+    const all = ['Sol', 'AlphaCentauri', 'Dev', BENCH_SYSTEM_ID];
+
+    it('returns all ids with no bench and no filter', () => {
+        expect(selectSystemIds(all, false, null)).toEqual(all);
     });
 
-    it('narrows to the benchmark system in bench mode', () => {
-        expect(benchSystemIds(['Sol', 'AlphaCentauri', BENCH_SYSTEM_ID], true)).toEqual([
-            BENCH_SYSTEM_ID,
-        ]);
+    it('narrows to the benchmark system in bench mode (filter ignored)', () => {
+        expect(selectSystemIds(all, true, 'Dev')).toEqual([BENCH_SYSTEM_ID]);
+    });
+
+    it('narrows to a single system via ?system= (case-insensitive)', () => {
+        expect(selectSystemIds(all, false, 'dev')).toEqual(['Dev']);
+    });
+
+    it('falls back to all systems for an unknown ?system=', () => {
+        expect(selectSystemIds(all, false, 'Nope')).toEqual(all);
     });
 });
 

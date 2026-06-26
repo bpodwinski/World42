@@ -6,6 +6,7 @@ import {
 import { OriginCamera } from '../core/camera/camera_manager';
 import { DisposableRegistry } from '../core/lifecycle/disposable_registry';
 import type { StarGlowSource, StarOccluder } from '../core/render/star_raymarch_postprocess';
+import type { AtmosphereSource } from '../core/render/atmosphere_postprocess';
 import {
     createCBTForSystem,
     type LoadedSystem,
@@ -52,6 +53,8 @@ export type LodSetupResult = {
     stars: StarGlowSource[];
     /** Planet occluders for the star ray-march task. */
     occluders: StarOccluder[];
+    /** Atmospheric planets for the Frame Graph atmosphere task. */
+    atmospheres: AtmosphereSource[];
 };
 
 type PlanetShadowSource = {
@@ -130,5 +133,17 @@ export function setupLodAndShadows(
     // The star ray-march is now a Frame Graph task (see attachFrameGraph in setup_runtime); we just
     // surface the star/occluder data so the runtime can build the graph.
 
-    return { lod, refreshActivePlanetSelection: () => {}, stars, occluders: planetOccluders };
+    // Atmospheric planets (bodies whose resolved lighting carries an atmosphere block).
+    const atmospheres: AtmosphereSource[] = [];
+    for (const planet of mergedCBT.values()) {
+        if (!planet.atmosphere) continue;
+        atmospheres.push({
+            centerWorldDouble: planet.entity.doublepos,
+            radiusKm: planet.radiusSim, // 1 sim unit = 1 km
+            starPosWorldDouble: planet.starPosWorldDouble,
+            params: planet.atmosphere,
+        });
+    }
+
+    return { lod, refreshActivePlanetSelection: () => {}, stars, occluders: planetOccluders, atmospheres };
 }

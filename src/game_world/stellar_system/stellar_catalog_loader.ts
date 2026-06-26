@@ -18,7 +18,7 @@ import {
     normalizeSystemJSON,
 } from "./stellar_catalog_normalizer";
 import lightingJsonRaw from "./planet_lighting.json";
-import { resolveLighting, type PlanetLightingJSON, type PlanetLightingParams } from "./planet_lighting";
+import { resolveLighting, type PlanetLightingJSON, type PlanetLightingParams, type ResolvedAtmosphere } from "./planet_lighting";
 
 const LIGHTING_JSON = lightingJsonRaw as unknown as PlanetLightingJSON;
 
@@ -111,6 +111,8 @@ export type PlanetCBT = {
     radiusSim: number;
     /** Star position in WorldDouble used for terrain lighting. */
     starPosWorldDouble: Vector3 | null;
+    /** Resolved single-scattering atmosphere, or null for airless bodies. */
+    atmosphere: ResolvedAtmosphere | null;
 };
 
 export type CBTOptions = {
@@ -280,6 +282,7 @@ export function createCBTForSystem(
 
         const ent = body.entity!;
         const planetKey = `${loaded.systemId}:${name}`;
+        const lighting = resolveLighting(LIGHTING_JSON, body.lighting);
         const runtime = new CbtPlanet(scene, camera, {
             key: planetKey,
             entity: ent,
@@ -289,7 +292,7 @@ export function createCBTForSystem(
             starPosWorldDouble,
             starColor,
             starIntensity,
-            lighting: resolveLighting(LIGHTING_JSON, body.lighting),
+            lighting,
         });
 
         console.log(
@@ -301,6 +304,7 @@ export function createCBTForSystem(
             runtime,
             radiusSim: body.radiusSim,
             starPosWorldDouble,
+            atmosphere: lighting.atmosphere,
         });
     }
 

@@ -15,6 +15,7 @@ import { GuiManager } from '../core/gui/gui_manager';
 import { DisposableRegistry } from '../core/lifecycle/disposable_registry';
 import { attachFrameGraph } from '../core/render/frame_graph';
 import type { StarGlowSource, StarOccluder } from '../core/render/star_raymarch_postprocess';
+import type { AtmosphereSource } from '../core/render/atmosphere_postprocess';
 import { ScaleManager } from '../core/scale/scale_manager';
 import type { LoadedBody, LoadedSystem } from '../game_world/stellar_system/stellar_catalog_loader';
 import type { LodController } from './setup_lod_and_shadows';
@@ -30,6 +31,7 @@ export type RuntimeSetupOptions = {
     refreshActivePlanetSelection: () => void;
     stars: StarGlowSource[];
     occluders: StarOccluder[];
+    atmospheres: AtmosphereSource[];
     disposables: DisposableRegistry;
 };
 
@@ -44,6 +46,7 @@ export function setupRuntime({
     refreshActivePlanetSelection,
     stars,
     occluders,
+    atmospheres,
     disposables,
 }: RuntimeSetupOptions): void {
     disposables.addDomListener(window, 'keydown', (event) => {
@@ -277,7 +280,7 @@ export function setupRuntime({
     // Render pipeline as a Frame Graph (replaces the imperative camera post-process stack:
     // DefaultRenderingPipeline + TAA pipeline + star post-process). The graph governs only the
     // render passes; OCBT compute / LOD / floating-origin keep running in their scene observables.
-    const fg = attachFrameGraph(scene, camera, { stars, occluders, gui: gui.advancedTexture });
+    const fg = attachFrameGraph(scene, camera, { stars, occluders, atmospheres, gui: gui.advancedTexture });
     disposables.add(() => fg.dispose());
 
     // Under a Frame Graph, scene.render() fires onBeforeRenderObservable but NOT

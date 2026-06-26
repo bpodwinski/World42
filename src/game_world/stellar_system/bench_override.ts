@@ -20,12 +20,42 @@ export function parseBenchAlgorithm(search: string): boolean {
 }
 
 /**
- * Filter a freshly built system-id list down to the benchmark system when bench
- * mode is active. Returns the input unchanged when inactive.
+ * Parse `?system=<id>` — load ONLY that system (case-insensitive match against the catalog ids).
+ * Lets you isolate e.g. the Dev system without loading all 16 planets. Null if absent.
  */
-export function benchSystemIds(allIds: string[], active: boolean): string[] {
-    if (!active) return allIds;
-    return allIds.includes(BENCH_SYSTEM_ID) ? [BENCH_SYSTEM_ID] : allIds;
+export function parseSystemFilter(search: string): string | null {
+    if (!search) return null;
+    const raw = new URLSearchParams(search).get('system');
+    return raw && raw.trim().length > 0 ? raw.trim() : null;
+}
+
+/**
+ * Parse `?planet=<name>` — spawn the camera at this planet (case-insensitive name match). Null if
+ * absent. Pairs well with `?system=` (e.g. `?system=Dev&planet=Earth`).
+ */
+export function parsePlanetName(search: string): string | null {
+    if (!search) return null;
+    const raw = new URLSearchParams(search).get('planet');
+    return raw && raw.trim().length > 0 ? raw.trim() : null;
+}
+
+/**
+ * Choose which systems to load. Precedence: bench mode (Benchmark only) > `?system=<id>` filter >
+ * everything. An unknown `?system=` value falls back to loading all systems.
+ */
+export function selectSystemIds(
+    allIds: string[],
+    benchActive: boolean,
+    systemFilter: string | null
+): string[] {
+    if (benchActive) {
+        return allIds.includes(BENCH_SYSTEM_ID) ? [BENCH_SYSTEM_ID] : allIds;
+    }
+    if (systemFilter) {
+        const match = allIds.find((id) => id.toLowerCase() === systemFilter.toLowerCase());
+        if (match) return [match];
+    }
+    return allIds;
 }
 
 /**

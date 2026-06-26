@@ -31,6 +31,13 @@ import {
     type StarGlowSource,
     type StarOccluder,
 } from './star_raymarch_postprocess';
+import {
+    setAtmosphereUniforms,
+    ATMO_PP_FRAGMENT,
+    ATMO_PP_SAMPLERS,
+    ATMO_PP_UNIFORMS,
+    type AtmosphereSource,
+} from './atmosphere_postprocess';
 
 /**
  * Frame Graph custom task for the star ray-march pass.
@@ -90,6 +97,37 @@ class FrameGraphStarTask extends FrameGraphPostProcessTask {
     }
 }
 
+/**
+ * Frame Graph custom task for the single-scattering atmosphere pass. Reads scene color
+ * (sourceTexture = `textureSampler`) and sets all uniforms per-frame in `onBindObservable` from the
+ * nearest atmosphere source. The surface is bounded analytically (planet sphere) so it does NOT
+ * sample scene depth. When no source is active the shader passes the scene through (sunIntensity = 0).
+ */
+class FrameGraphAtmosphereTask extends FrameGraphPostProcessTask {
+    constructor(
+        name: string,
+        frameGraph: FrameGraph,
+        scene: Scene,
+        camera: OriginCamera,
+        sources: AtmosphereSource[]
+    ) {
+        const engine = frameGraph.engine;
+        const pp = new ThinCustomPostProcess(name, engine, {
+            name,
+            engine,
+            fragmentShader: ATMO_PP_FRAGMENT,
+            useShaderStore: false,
+            uniformNames: [...ATMO_PP_UNIFORMS],
+            samplerNames: [...ATMO_PP_SAMPLERS],
+            shaderLanguage: ShaderLanguage.GLSL,
+        });
+        super(name, frameGraph, pp);
+        pp.onBindObservable.add((effect: Effect) => {
+            setAtmosphereUniforms(effect, scene, camera, sources);
+        });
+    }
+}
+
 export type FrameGraphHandle = {
     frameGraph: FrameGraph;
     dispose: () => void;
@@ -98,6 +136,8 @@ export type FrameGraphHandle = {
 export type FrameGraphOptions = {
     stars: StarGlowSource[];
     occluders?: StarOccluder[];
+    /** Atmospheric planets (single-scattering pass). Empty => the atmosphere task is not added. */
+    atmospheres: AtmosphereSource[];
     /** Fullscreen GUI texture (must be created with useStandalone: true) for the HUD overlay. */
     gui: AdvancedDynamicTexture;
 };
@@ -182,12 +222,22 @@ export function attachFrameGraph(
     star.depthTexture = objRenderer.outputDepthTexture;
     fg.addTask(star);
 
+    // 3b. Atmosphere (single-scattering, HDR) — only when the scene has atmospheric bodies. Reads the
+    // star output + scene depth (aerial perspective). Output feeds TAA; otherwise TAA reads star.
+    let preTaaColor = star.outputTexture;
+    if (options.atmospheres.length > 0) {
+        const atmo = new FrameGraphAtmosphereTask('atmosphere', fg, scene, camera, options.atmospheres);
+        atmo.sourceTexture = star.outputTexture;
+        fg.addTask(atmo);
+        preTaaColor = atmo.outputTexture;
+    }
+
     // 4. TAA — ALWAYS ON (also while the camera moves). No reprojection (PrePass/velocity is
     // incompatible with the OCBT GPU mesh + log depth), so the 3x3 neighborhood clamp (clampHistory)
     // is what suppresses ghosting/smear during motion. MSAA above handles geometric edges so TAA can
     // stay light. If motion ghosting is too strong, re-enable disableOnCameraMove or lower samples.
     const taa = new FrameGraphTAATask('taa', fg);
-    taa.sourceTexture = star.outputTexture;
+    taa.sourceTexture = preTaaColor;
     taa.objectRendererTask = objRenderer;
     taa.postProcess.samples = 16;
     taa.postProcess.disableOnCameraMove = true; // always accumulate

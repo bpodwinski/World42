@@ -3,6 +3,7 @@ import type {
     StellarSystemJSON,
     SystemJSON,
 } from './stellar_catalog_loader';
+import type { PlanetLightingParams } from './planet_lighting';
 
 function canonicalType(typeRaw: unknown): string {
     let type = (typeof typeRaw === 'string' ? typeRaw : 'planet').toLowerCase().trim();
@@ -92,6 +93,12 @@ export function normalizeSystemJSON(raw: unknown): SystemJSON {
                     intensity: asFiniteNumber(starRecord.intensity),
                     color_rgb: colorRGB,
                 }
+                : undefined,
+            // Pass per-planet lighting overrides through verbatim (resolveLighting fills any gaps from
+            // defaults). Previously dropped here, which silently discarded ALL data.json `lighting`
+            // blocks (albedo/brdf/atmosphere) — bodies fell back to global defaults.
+            lighting: asRecord(body.lighting)
+                ? (body.lighting as PlanetLightingParams)
                 : undefined,
         };
     }

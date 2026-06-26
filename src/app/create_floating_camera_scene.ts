@@ -22,7 +22,7 @@ export async function createFloatingCameraScene(
         disposables
     );
 
-    const { lod, refreshActivePlanetSelection, stars, occluders } = setupLodAndShadows(
+    const { lod, refreshActivePlanetSelection, stars, occluders, atmospheres } = setupLodAndShadows(
         scene,
         engine,
         camera,
@@ -41,6 +41,7 @@ export async function createFloatingCameraScene(
         refreshActivePlanetSelection,
         stars,
         occluders,
+        atmospheres,
         disposables,
     });
 

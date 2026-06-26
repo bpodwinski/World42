@@ -49,6 +49,28 @@ export type BrdfLightingParams = {
     specMax?: number;
 };
 
+/**
+ * Physically-based (single-scattering) atmosphere parameters. Present only on bodies that HAVE an
+ * atmosphere; absent/null => airless (the atmosphere Frame Graph task is inactive for that body).
+ * Coefficients are per-kilometre; defaults are Earth-like (see ATMOSPHERE_DEFAULTS).
+ */
+export type AtmosphereParams = {
+    /** Atmosphere shell thickness above the surface, in km. */
+    heightKm?: number;
+    /** Rayleigh scattering coefficients per km [r, g, b]. */
+    rayleigh?: [number, number, number];
+    /** Rayleigh density scale height, in km. */
+    rayleighScaleKm?: number;
+    /** Mie scattering coefficient per km (scalar, grey). */
+    mie?: number;
+    /** Mie density scale height, in km. */
+    mieScaleKm?: number;
+    /** Mie Henyey-Greenstein asymmetry g (0..~0.9, forward-scatter sun halo). */
+    mieG?: number;
+    /** Sun radiance multiplier feeding the in-scattering. */
+    intensity?: number;
+};
+
 export type PlanetLightingParams = {
     /** Base surface albedo [r, g, b] in linear space. */
     albedo?: [number, number, number];
@@ -58,6 +80,8 @@ export type PlanetLightingParams = {
     atmoDensity?: number;
     /** Aerial fog target color [r, g, b] in linear space. */
     atmoColor?: [number, number, number];
+    /** Single-scattering atmosphere (omit for airless bodies). */
+    atmosphere?: AtmosphereParams;
     ground?: GroundLightingParams;
     terrain?: TerrainLightingParams;
     brdf?: BrdfLightingParams;
@@ -75,15 +99,29 @@ export type PlanetLightingJSON = {
 export type ResolvedGround   = Required<GroundLightingParams>;
 export type ResolvedTerrain  = Required<TerrainLightingParams>;
 export type ResolvedBrdf     = Required<BrdfLightingParams>;
+export type ResolvedAtmosphere = Required<AtmosphereParams>;
 
 export type ResolvedLighting = {
     albedo: [number, number, number];
     ambient: [number, number, number];
     atmoDensity: number;
     atmoColor: [number, number, number];
+    /** Resolved single-scattering atmosphere, or null for airless bodies. */
+    atmosphere: ResolvedAtmosphere | null;
     ground: ResolvedGround;
     terrain: ResolvedTerrain;
     brdf: ResolvedBrdf;
+};
+
+/** Earth-like fallbacks for any atmosphere field a body omits. */
+export const ATMOSPHERE_DEFAULTS: ResolvedAtmosphere = {
+    heightKm:        100,
+    rayleigh:        [5.8e-3, 13.5e-3, 33.1e-3],
+    rayleighScaleKm: 8.0,
+    mie:             21e-3,
+    mieScaleKm:      1.2,
+    mieG:            0.76,
+    intensity:       20
 };
 
 /** Code-level fallbacks — values identical to the previous hardcoded constants. */
@@ -92,6 +130,7 @@ export const DEFAULT_LIGHTING: ResolvedLighting = {
     ambient:     [0.008, 0.008, 0.008],
     atmoDensity: 0,
     atmoColor:   [0, 0, 0],
+    atmosphere:  null,
     ground: {
         onKm:     0.05,
         offKm:    0.15,
@@ -118,6 +157,21 @@ export const DEFAULT_LIGHTING: ResolvedLighting = {
     }
 };
 
+/** Resolve an atmosphere block (or null if the body has none), filling gaps from ATMOSPHERE_DEFAULTS. */
+function resolveAtmosphere(a: AtmosphereParams | undefined): ResolvedAtmosphere | null {
+    if (!a) return null;
+    const A = ATMOSPHERE_DEFAULTS;
+    return {
+        heightKm:        a.heightKm        ?? A.heightKm,
+        rayleigh:        a.rayleigh        ?? A.rayleigh,
+        rayleighScaleKm: a.rayleighScaleKm ?? A.rayleighScaleKm,
+        mie:             a.mie             ?? A.mie,
+        mieScaleKm:      a.mieScaleKm      ?? A.mieScaleKm,
+        mieG:            a.mieG            ?? A.mieG,
+        intensity:       a.intensity       ?? A.intensity
+    };
+}
+
 /**
  * Resolve lighting params for a planet.
  * Merge order: per-planet override (from data.json) → _defaults (from planet_lighting.json) → DEFAULT_LIGHTING.
@@ -138,6 +192,7 @@ export function resolveLighting(json: PlanetLightingJSON, override?: PlanetLight
         ambient:     o.ambient     ?? d.ambient     ?? D.ambient,
         atmoDensity: o.atmoDensity ?? d.atmoDensity ?? D.atmoDensity,
         atmoColor:   o.atmoColor   ?? d.atmoColor   ?? D.atmoColor,
+        atmosphere:  resolveAtmosphere(o.atmosphere ?? d.atmosphere),
         ground: {
             onKm:     og.onKm     ?? dg.onKm     ?? D.ground.onKm,
             offKm:    og.offKm    ?? dg.offKm    ?? D.ground.offKm,
