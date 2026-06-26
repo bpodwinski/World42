@@ -125,12 +125,15 @@ export function attachFrameGraph(
     const tm = fg.textureManager;
 
     // Full-screen HDR color + depth render targets (1:1 with the canvas).
+    // MSAA 4x on the scene pass (color + depth MUST share sample count). The object renderer resolves
+    // both to single-sample outputs (resolveMSAADepth below) so the star/post tasks can sample them.
+    const MSAA_SAMPLES = 4;
     const sceneColor = tm.createRenderTargetTexture('sceneColor', {
         size: 100,
         sizeIsPercentage: true,
         options: {
             createMipMaps: false,
-            samples: 1,
+            samples: MSAA_SAMPLES,
             types: [Constants.TEXTURETYPE_HALF_FLOAT],
             formats: [Constants.TEXTUREFORMAT_RGBA],
             labels: ['sceneColor'],
@@ -141,7 +144,7 @@ export function attachFrameGraph(
         sizeIsPercentage: true,
         options: {
             createMipMaps: false,
-            samples: 1,
+            samples: MSAA_SAMPLES,
             formats: [Constants.TEXTUREFORMAT_DEPTH32_FLOAT],
             types: [Constants.TEXTURETYPE_FLOAT],
             labels: ['sceneDepth'],
@@ -165,6 +168,8 @@ export function attachFrameGraph(
     objRenderer.depthTexture = clear.outputDepthTexture;
     objRenderer.isMainObjectRenderer = true;
     objRenderer.disableImageProcessing = true; // tonemap is a dedicated task AFTER bloom
+    objRenderer.resolveMSAAColors = true; // resolve MSAA color -> single-sample for post tasks
+    objRenderer.resolveMSAADepth = true; // resolve MSAA depth so the star task can sample it
     const objectList = new FrameGraphObjectList();
     objectList.meshes = scene.meshes;
     objectList.particleSystems = scene.particleSystems;
@@ -177,14 +182,17 @@ export function attachFrameGraph(
     star.depthTexture = objRenderer.outputDepthTexture;
     fg.addTask(star);
 
-    // 4. TAA (accumulate while still; disabled on camera move; no reprojection — matches taa_postprocess.ts).
+    // 4. TAA — ALWAYS ON (also while the camera moves). No reprojection (PrePass/velocity is
+    // incompatible with the OCBT GPU mesh + log depth), so the 3x3 neighborhood clamp (clampHistory)
+    // is what suppresses ghosting/smear during motion. MSAA above handles geometric edges so TAA can
+    // stay light. If motion ghosting is too strong, re-enable disableOnCameraMove or lower samples.
     const taa = new FrameGraphTAATask('taa', fg);
     taa.sourceTexture = star.outputTexture;
     taa.objectRendererTask = objRenderer;
     taa.postProcess.samples = 16;
-    taa.postProcess.disableOnCameraMove = true;
+    taa.postProcess.disableOnCameraMove = true; // always accumulate
     taa.postProcess.reprojectHistory = false;
-    taa.postProcess.clampHistory = true;
+    taa.postProcess.clampHistory = true; // neighborhood clamp limits motion ghosting
     fg.addTask(taa);
 
     // 5. Bloom (HDR).

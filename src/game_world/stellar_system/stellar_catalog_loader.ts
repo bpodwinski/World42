@@ -114,12 +114,7 @@ export type PlanetCBT = {
 };
 
 export type CBTOptions = {
-    maxDepth?: number;
-    maxSplitsPerFrame?: number;
-    maxMergesPerFrame?: number;
-    splitThresholdPx2?: number;
-    splitHysteresis?: number;
-    /** Noise field (CPU displacement + per-pixel shader); default DEFAULT_NOISE. */
+    /** Noise field (CPU displacement + GPU shader); default DEFAULT_NOISE. */
     noise?: NoiseParams;
     engine?: WebGPUEngine;
     skip?: (name: string, body: LoadedBody) => boolean;
@@ -256,11 +251,6 @@ export function createCBTForSystem(
     opts: CBTOptions = {}
 ): Map<string, PlanetCBT> {
     const {
-        maxDepth = 9,
-        maxSplitsPerFrame = 8,
-        maxMergesPerFrame = 8,
-        splitThresholdPx2 = 900,
-        splitHysteresis = 0.7,
         noise,
         engine,
         skip = (_name: string, body: LoadedBody) => body.bodyType === "star",
@@ -295,11 +285,6 @@ export function createCBTForSystem(
             entity: ent,
             renderParent: body.node,
             radiusSim: body.radiusSim,
-            maxDepth,
-            maxSplitsPerFrame,
-            maxMergesPerFrame,
-            splitThresholdPx2,
-            splitHysteresis,
             noise,
             starPosWorldDouble,
             starColor,

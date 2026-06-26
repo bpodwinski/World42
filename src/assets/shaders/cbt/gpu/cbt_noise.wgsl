@@ -163,7 +163,7 @@ fn craterProfile(rn : f32, morph : f32, maturity : f32, hp : ptr<function, f32>,
 // craterField(dir, radiusKm) -> vec4(height_km, dHeight/d(dir)). Sums all craters in the 3x3x3
 // neighbourhood of each size class (overlapping bowls/ejecta superpose); support 2*r0 < 1 cell so
 // 27 neighbours suffice. Bypasses the fbm normalization (heights are already in km).
-fn craterField(dir : vec3<f32>, radiusKm : f32, camDistKm : f32, skipBig : bool) -> vec4<f32> {
+fn craterField(dir : vec3<f32>, radiusKm : f32, camDistKm : f32, skipBig : bool, footprintKm : f32) -> vec4<f32> {
     var H = 0.0; var G = vec3<f32>(0.0);
     for (var k = 0; k < CBT_CRATER_CLASSES; k = k + 1) {
         let prm = craterParams(k);
@@ -172,6 +172,12 @@ fn craterField(dir : vec3<f32>, radiusKm : f32, camDistKm : f32, skipBig : bool)
         let onKm = CBT_CRATER_RANGE * prm.x;
         let fade = 1.0 - smoothstep(onKm, onKm * 2.0, camDistKm);
         if (fade <= 0.0) { continue; }
+        // NORMAL-only Nyquist footprint fade (footprintKm>0): a crater whose radius (km) drops below
+        // the pixel footprint can only alias in the shading normal -> fade it OUT of the GRADIENT
+        // (not the height: far small craters are sub-pixel in silhouette anyway, collision stays
+        // exact). This kills the "small craters shimmering at long range" without flattening relief.
+        let craterKm = prm.y * prm.x; // nominal crater radius in km
+        let crFp = select(1.0, smoothstep(footprintKm * CBT_NORMAL_FP_LO, footprintKm * CBT_NORMAL_FP_HI, craterKm), footprintKm > 0.0);
         // skipBig (NORMAL path only): a crater much bigger than the camera distance has a far,
         // gradual wall -> ~flat locally -> drop it from the per-pixel gradient (keeps ~3 active
         // classes => 60 fps). The HEIGHT path passes skipBig=false so geometry/collision keep it.
@@ -219,7 +225,7 @@ fn craterField(dir : vec3<f32>, radiusKm : f32, camDistKm : f32, skipBig : bool)
         }
         }
         H = H + h * fade;
-        G = G + g * (fk * fade);
+        G = G + g * (fk * fade * crFp);
     }
     return vec4<f32>(H, G);
 }
@@ -324,7 +330,7 @@ fn cbtFbm_d_at(p : vec3<f32>, camDistKm : f32, radiusKm : f32, craterSkipBig : b
     let inv = CBT_GLOBAL_AMP / maxMacro;
     // Craters are the dominant relief (added AFTER fbm normalization; already in km). No distance
     // fade: they are macro landforms whose shape must be stable from orbit to ground.
-    let cr = craterField(p, radiusKm, camDistKm, craterSkipBig);
+    let cr = craterField(p, radiusKm, camDistKm, craterSkipBig, footprintKm);
     return vec4<f32>(sum * inv + cr.x, grad * inv + cr.yzw);
 }
 

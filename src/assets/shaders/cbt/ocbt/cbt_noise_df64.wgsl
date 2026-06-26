@@ -137,7 +137,7 @@ fn cbtFbm_d_at_df64(dx : vec2<f32>, dy : vec2<f32>, dz : vec2<f32>, camDistKm : 
     // Craters (dominant relief). Crater cells are low-frequency (>= ~20 km) so f32 dir is exact at
     // crater scale — reuse the f32 craterField (from cbt_noise.wgsl, composed before this file) on
     // the narrowed unit dir. No distance fade (macro landforms). Added after fbm normalization.
-    let cr = craterField(vec3<f32>(df64_to_f32(dx), df64_to_f32(dy), df64_to_f32(dz)), radiusKm, camDistKm, craterSkipBig);
+    let cr = craterField(vec3<f32>(df64_to_f32(dx), df64_to_f32(dy), df64_to_f32(dz)), radiusKm, camDistKm, craterSkipBig, 0.0);
     return vec4<f32>(sum * inv + cr.x, grad * inv + cr.yzw);
 }
 

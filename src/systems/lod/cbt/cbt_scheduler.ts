@@ -1,17 +1,11 @@
 import {
-    Color3,
-    DirectionalLight,
     Frustum,
     Matrix,
-    Mesh,
     Observer,
     Plane,
     Scene,
-    ShaderMaterial,
-    StandardMaterial,
     TransformNode,
     Vector3,
-    VertexData,
 } from '@babylonjs/core';
 import type {
     FloatingEntityInterface,
@@ -24,7 +18,6 @@ import {
     type CbtSourceStats,
 } from './cbt_geometry_source';
 import { DEFAULT_NOISE, fbmNoise, fbmGroundHeight, type NoiseParams } from './cbt_noise';
-import { createCbtTerrainMaterial } from './cbt_terrain_shader';
 import { OcbtSource } from './ocbt/ocbt_source';
 import type { WebGPUEngine } from '@babylonjs/core';
 import type { ResolvedLighting } from '../../../game_world/stellar_system/planet_lighting';
@@ -37,31 +30,10 @@ export type CbtPlanetOptions = {
     entity: FloatingEntityInterface;
     renderParent: TransformNode;
     radiusSim: number;
-    maxDepth: number;
-    maxSplitsPerFrame: number;
-    maxMergesPerFrame?: number;
-    splitThresholdPx2: number;
-    splitHysteresis: number;
     starPosWorldDouble: Vector3 | null;
     starColor: Vector3;
     starIntensity: number;
-    /** Enable backside culling of split candidates (default true). */
-    cullBackface?: boolean;
-    /** Guard-band cosine threshold for the backside cull (default -0.05). */
-    cullMinDot?: number;
-    /** Use the incremental (per-slot cached) mesh emitter (default true). */
-    incrementalMesh?: boolean;
-    /** Frustum guard band as a multiple of triangle bound radius (default 1). */
-    frustumGuardScale?: number;
-    /**
-     * Use the per-pixel-normal ShaderMaterial (default true). When false, falls
-     * back to the legacy StandardMaterial (Gouraud, vertex normals).
-     */
-    perPixelNormals?: boolean;
-    /**
-     * Noise field for CPU displacement AND the per-pixel-normal shader (they must
-     * match). Default DEFAULT_NOISE. See cbt_quality.ts for presets.
-     */
+    /** Noise field shared by GPU shader and CPU collision. Default DEFAULT_NOISE. */
     noise?: NoiseParams;
     /** Per-planet resolved lighting params (from planet_lighting.json). */
     lighting?: ResolvedLighting;
@@ -69,18 +41,11 @@ export type CbtPlanetOptions = {
 
 /** Per-planet telemetry, refreshed on each {@link CbtPlanet.update}. */
 export type CbtStats = {
-    /** Current leaf (triangle) count. */
     leafCount: number;
-    /** Splits applied during the last update. */
     splitsThisFrame: number;
-    /** Merges applied during the last update. */
     mergesThisFrame: number;
-    /** Wall-clock ms for the classify (measure + split-candidate) section. */
     classifyMs: number;
-    /** Wall-clock ms for the last mesh rebuild (0 if no rebuild occurred). */
     rebuildMs: number;
-    /** Vertex count of the most recently emitted mesh. */
-    lastVertexCount: number;
 };
 
 /** Minimal per-planet geometry for deterministic headless capture. */
@@ -110,11 +75,7 @@ export class CbtPlanet {
     readonly radiusSim: number;
     readonly starPosWorldDouble: Vector3 | null;
 
-    private mesh: Mesh | null = null;
-    private material: StandardMaterial | ShaderMaterial | null = null;
-    private sunLight: DirectionalLight | null = null;
     private source: CbtGeometrySource;
-    private shadowAttached = false;
     private debugLod = false;
     private readonly stats: CbtStats = {
         leafCount: 0,
@@ -122,11 +83,9 @@ export class CbtPlanet {
         mergesThisFrame: 0,
         classifyMs: 0,
         rebuildMs: 0,
-        lastVertexCount: 0,
     };
 
     private readonly renderParent: TransformNode;
-    private readonly perPixelNormals: boolean;
     private readonly starColor: Vector3;
     private readonly noise: NoiseParams;
 
@@ -140,13 +99,9 @@ export class CbtPlanet {
         this.radiusSim = opts.radiusSim;
         this.renderParent = opts.renderParent;
         this.starPosWorldDouble = opts.starPosWorldDouble;
-        this.perPixelNormals = opts.perPixelNormals ?? true;
         this.starColor = opts.starColor;
         this.noise = opts.noise ?? DEFAULT_NOISE;
         this.source = this.createSource(opts);
-
-        // Initial mesh: emit the 8 root triangles (no classify) so the planet
-        // exists before the first refinement pass.
         this.source.refresh();
     }
 
@@ -181,22 +136,14 @@ export class CbtPlanet {
     }
 
     private onSourceUpdate = (
-        geometry: EmitResult | null,
+        _geometry: EmitResult | null,
         stats: CbtSourceStats
     ): void => {
         this.stats.classifyMs = stats.classifyMs;
         this.stats.splitsThisFrame = stats.splitsThisFrame;
         this.stats.mergesThisFrame = stats.mergesThisFrame;
         this.stats.leafCount = stats.leafCount;
-
-        if (geometry) {
-            const applyStart = performance.now();
-            this.applyGeometry(geometry);
-            // rebuildMs preserves the prior meaning: emit + GPU upload.
-            this.stats.rebuildMs = stats.emitMs + (performance.now() - applyStart);
-        } else {
-            this.stats.rebuildMs = 0;
-        }
+        this.stats.rebuildMs = 0;
     };
 
     estimatePriority(camera: OriginCamera): number {
@@ -307,11 +254,6 @@ export class CbtPlanet {
 
     update(deadline: number, frustumPlanes: ReadonlyArray<Plane> | null = null): void {
         if (performance.now() >= deadline) return;
-
-        // Dispatch one classify/split/merge/emit cycle to the geometry source.
-        // For the local source this runs synchronously and invokes
-        // onSourceUpdate before returning; the worker source (Phase 3) replies
-        // asynchronously.
         this.source.requestUpdate({
             cameraWorldDouble: this.camera.doublepos,
             planetCenterWorldDouble: this.entity.doublepos,
@@ -320,124 +262,19 @@ export class CbtPlanet {
             cameraFovRadians: this.camera.fov,
             frustumPlanes,
         });
-
-        this.updateSunDirection();
-        this.ensureShadowCaster();
     }
 
     dispose(): void {
         this.source.dispose();
-        this.sunLight?.dispose();
-        this.sunLight = null;
-        this.material?.dispose();
-        this.material = null;
-        this.mesh?.dispose();
-        this.mesh = null;
-        this.shadowAttached = false;
-    }
-
-    private applyGeometry(meshData: EmitResult): void {
-        this.stats.lastVertexCount = meshData.positions.length / 3;
-
-        if (!this.mesh) {
-            this.mesh = new Mesh(`cbt_${this.key}`, this.scene);
-            this.mesh.parent = this.renderParent;
-            this.mesh.checkCollisions = true;
-            this.mesh.alwaysSelectAsActiveMesh = false;
-            this.ensureMaterial();
-            this.mesh.material = this.material;
-        }
-
-        const vertexData = new VertexData();
-        vertexData.positions = meshData.positions;
-        vertexData.normals = meshData.normals;
-        vertexData.uvs = meshData.uvs;
-        vertexData.indices = meshData.indices;
-        vertexData.colors = meshData.colors;
-        vertexData.applyToMesh(this.mesh, true);
-        this.mesh.setVerticesData('morphDelta', meshData.morphDeltas, true, 3);
-        this.mesh.useVertexColors = this.debugLod;
-        this.shadowAttached = false;
-    }
-
-    private ensureMaterial(): void {
-        if (this.material) return;
-
-        if (this.perPixelNormals) {
-            // Per-pixel-normal shader: shading is decoupled from tessellation,
-            // so it does not pop when triangles refine. No DirectionalLight
-            // needed — lighting is driven by the uLightDirection uniform.
-            this.material = createCbtTerrainMaterial(this.scene, this.key, {
-                radius: this.radiusSim,
-                noise: this.noise,
-                lightColor: this.starColor
-            });
-            return;
-        }
-
-        // Legacy fallback: StandardMaterial (Gouraud, vertex normals).
-        // DirectionalLight oriented from star → planet
-        this.sunLight = new DirectionalLight(
-            `cbt_sun_${this.key}`,
-            new Vector3(0, -1, 0), // placeholder, updated each frame
-            this.scene
-        );
-        this.sunLight.intensity = 1.5;
-
-        const std = new StandardMaterial(`cbt_mat_${this.key}`, this.scene);
-        std.backFaceCulling = true;
-        std.diffuseColor = new Color3(0.6, 0.55, 0.4);
-        std.specularColor = new Color3(0.05, 0.05, 0.05);
-        std.useLogarithmicDepth = true;
-        this.material = std;
     }
 
     setWireframe(on: boolean): void {
-        if (this.material) this.material.wireframe = on;
         this.source.setWireframe?.(on);
     }
 
     setDebugLod(on: boolean): void {
         this.debugLod = on;
-        // GPU path: the material is owned by the source, not CbtPlanet.
         this.source.setDebugLod?.(on);
-        if (!this.material) return;
-        if (this.material instanceof ShaderMaterial) {
-            this.material.setInt('uDebugLod', on ? 1 : 0);
-        } else {
-            if (on) {
-                this.material.disableLighting = true;
-                this.material.emissiveColor = new Color3(1, 1, 1);
-                this.material.diffuseColor = new Color3(0, 0, 0);
-            } else {
-                this.material.disableLighting = false;
-                this.material.emissiveColor = new Color3(0, 0, 0);
-                this.material.diffuseColor = new Color3(0.6, 0.55, 0.4);
-            }
-        }
-        if (this.mesh) {
-            this.mesh.useVertexColors = on;
-        }
-    }
-
-    private updateSunDirection(): void {
-        if (!this.starPosWorldDouble) return;
-
-        // lightDirection convention: planetCenter - starPos (star→planet), shader negates to get L toward star.
-        const dir = this.entity.doublepos.subtract(this.starPosWorldDouble);
-        if (dir.lengthSquared() < 1e-12) return;
-        dir.normalize();
-
-        if (this.material instanceof ShaderMaterial) {
-            this.material.setVector3('uLightDirection', dir);
-        } else if (this.sunLight) {
-            this.sunLight.direction.copyFrom(dir);
-        }
-    }
-
-    private ensureShadowCaster(): void {
-        if (!this.mesh) return;
-        this.mesh.receiveShadows = false;
     }
 }
 
@@ -509,11 +346,7 @@ export class CbtScheduler {
             agg.mergesThisFrame += s.mergesThisFrame;
             agg.classifyMs = Math.max(agg.classifyMs, s.classifyMs);
             agg.rebuildMs = Math.max(agg.rebuildMs, s.rebuildMs);
-            // GPU-driven sources (OCBT/GPU-CBT) emit no CPU vertices, so lastVertexCount is 0.
-            // They draw 1 instanced 3-vertex template per live leaf, so the rendered vertex
-            // count is leafCount * 3 (1 triangle / leaf). Fall back to that when there is no
-            // CPU vertex count, so the HUD "verts" reflects the real geometry being drawn.
-            agg.vertexCount += s.lastVertexCount || s.leafCount * 3;
+            agg.vertexCount += s.leafCount * 3;
         }
         return agg;
     }

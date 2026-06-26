@@ -72,11 +72,6 @@ export function setupLodAndShadows(
     for (const system of loadedSystems.values()) {
         const quality = CBT_QUALITY_PRESETS[CBT_QUALITY];
         const cbt = createCBTForSystem(scene, camera, system, {
-            maxDepth: quality.maxDepth,
-            maxSplitsPerFrame: 8,
-            maxMergesPerFrame: 8,
-            splitThresholdPx2: quality.splitThresholdPx2,
-            splitHysteresis: 0.75,
             noise: noiseForQuality(quality),
             engine,
         });
