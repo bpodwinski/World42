@@ -1,11 +1,7 @@
 import {
-    CubeTexture,
     EngineInstrumentation,
-    MeshBuilder,
     Scene,
     SceneInstrumentation,
-    StandardMaterial,
-    Texture,
     Vector3,
     WebGPUEngine,
 } from '@babylonjs/core';
@@ -16,6 +12,8 @@ import { DisposableRegistry } from '../core/lifecycle/disposable_registry';
 import { attachFrameGraph } from '../core/render/frame_graph';
 import type { StarGlowSource, StarOccluder } from '../core/render/star_raymarch_postprocess';
 import type { AtmosphereSource } from '../core/render/atmosphere_postprocess';
+import { loadStarCatalog } from '../core/io/star_catalog';
+import { createStarfieldRenderer } from '../core/render/starfield_renderer';
 import { ScaleManager } from '../core/scale/scale_manager';
 import type { LoadedBody, LoadedSystem } from '../game_world/stellar_system/stellar_catalog_loader';
 import type { LodController } from './setup_lod_and_shadows';
@@ -193,17 +191,25 @@ export function setupRuntime({
         delete (window as unknown as { __world42Perf?: typeof perfHook }).__world42Perf;
     });
 
-    const skybox = MeshBuilder.CreateBox('skyBox', { size: 1_000 }, scene);
-    const skyboxMaterial = new StandardMaterial('skyBox', scene);
-    skyboxMaterial.backFaceCulling = false;
-    skyboxMaterial.disableLighting = true;
-    skybox.material = skyboxMaterial;
-    skybox.infiniteDistance = true;
-    skyboxMaterial.reflectionTexture = new CubeTexture(`${process.env.ASSETS_URL}/skybox`, scene);
-    skyboxMaterial.reflectionTexture.coordinatesMode = Texture.SKYBOX_MODE;
-    skyboxMaterial.disableDepthWrite = true;
-    skybox.isPickable = false;
-    skybox.renderingGroupId = 0;
+    // Physically-based starfield from the HYG catalog (replaces the static cubemap skybox).
+    // The load is async and fire-and-forget: the scene shows a black background until the
+    // binary is ready, then the GPU-driven billboards appear seamlessly.
+    // The binary is self-hosted (public/stars/) — not on the CDN — so use a root-relative
+    // URL that works in both dev (rspack serves public/) and prod (GitHub Pages at /World42/).
+    const starCatalogUrl = '/stars/hyg_mag8.bin?v=1';
+    loadStarCatalog(starCatalogUrl)
+        .then((catalog) => {
+            const starfield = createStarfieldRenderer(scene, catalog);
+            disposables.add(() => starfield.dispose());
+        })
+        .catch((err: unknown) => {
+            console.warn(
+                '[World42] Star catalog unavailable — background will be black.\n' +
+                '  Run: python tools/hyg_to_binary.py tools/hyg_v41.csv public/stars/hyg_mag8.bin\n' +
+                `  URL attempted: ${starCatalogUrl}`,
+                err
+            );
+        });
 
     // Analytic hard-floor ground collision: keep the camera above the CBT/OCBT
     // surface (the GPU terrain has no CPU mesh, so Babylon collision can't see it).
