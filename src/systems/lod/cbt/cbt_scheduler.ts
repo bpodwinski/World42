@@ -130,6 +130,11 @@ export class CbtPlanet {
         // pool capacity. Owns its own mesh/material; the listener is telemetry-only.
         const OCBT_CAPACITY = 1 << 20; // 1 048 576 slots
         const OCBT_MAX_LEVEL = 32; // u64 hard cap; df64 cracks well before
+        // Subdivision FLOOR: the whole sphere is force-refined to at least this level so it never
+        // shows the bare 8 octahedron faces (faceted limb) when far or merging. Cost is fixed and
+        // tiny: a full sphere at level L is 8*2^L triangles (level 6 = 512). Raise for a rounder
+        // far-away limb, lower to save draw instances on distant bodies.
+        const OCBT_MIN_LEVEL = 6;
         // Hysteresis: MERGE < SPLIT/sqrt(2). 8/4 keeps a safe gap (4 < 5.66).
         const OCBT_SPLIT_PX = 16;
         const OCBT_MERGE_PX = 8;
@@ -148,6 +153,7 @@ export class CbtPlanet {
                 splitThresholdPx: OCBT_SPLIT_PX,
                 mergeThresholdPx: OCBT_MERGE_PX,
                 maxLevel: OCBT_MAX_LEVEL,
+                minLevel: OCBT_MIN_LEVEL,
                 lighting: opts.lighting
             },
             this.onSourceUpdate

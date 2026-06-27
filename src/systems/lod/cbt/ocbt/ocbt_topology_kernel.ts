@@ -78,6 +78,8 @@ export interface OcbtCameraParams {
     mergeThresholdPx: number;
     cullMinDot: number;
     maxLevel: number;
+    /** Subdivision floor: force-refine to at least this level everywhere (keeps the planet round). */
+    minLevel: number;
 }
 
 /** Live topology snapshot read back from the GPU for the cross-check. */
@@ -705,7 +707,7 @@ export class OcbtTopologyKernel {
         }
         this.classifyParams.updateFloat4('camRadius', p.camLocal[0], p.camLocal[1], p.camLocal[2], p.radius);
         this.classifyParams.updateFloat4('thresh', p.focalPx, p.splitThresholdPx, p.mergeThresholdPx, p.cullMinDot);
-        this.classifyParams.updateFloat4('limits', p.maxLevel, 0, 0, 0);
+        this.classifyParams.updateFloat4('limits', p.maxLevel, p.minLevel, 0, 0);
         this.classifyParams.update();
     }
 

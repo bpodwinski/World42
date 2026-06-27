@@ -39,6 +39,9 @@ export type OcbtSourceOptions = {
     cullMinDot?: number;
     /** Max subdivision LEVEL (depth - 3). f32 positions cap this in Phase 2 (~16). */
     maxLevel: number;
+    /** Min subdivision LEVEL: force-refine the whole sphere to at least this level so it never
+     *  collapses to the 8 octahedron roots (faceted limb) when far / merging. */
+    minLevel: number;
     /** Per-planet resolved lighting params forwarded to the render material. */
     lighting?: ResolvedLighting;
 };
@@ -55,6 +58,7 @@ export class OcbtSource implements CbtGeometrySource {
     private readonly mergeThresholdPx: number;
     private readonly cullMinDot: number;
     private readonly maxLevel: number;
+    private readonly minLevel: number;
     /** Max radial relief (noise globalAmplitude). Used by the relief-aware horizon cull. The
      *  frustum no longer needs it: the df64 eval now decodes TERRAIN-displaced positions, so
      *  the frustum test is exact (no smooth-sphere vs displaced mismatch). */
@@ -124,6 +128,7 @@ export class OcbtSource implements CbtGeometrySource {
         this.mergeThresholdPx = opts.mergeThresholdPx;
         this.cullMinDot = opts.cullMinDot ?? -0.1;
         this.maxLevel = opts.maxLevel;
+        this.minLevel = opts.minLevel;
         this.heightMargin = Math.max(0, opts.noise.globalAmplitude);
 
         // useIndirect: the 7 work-list passes dispatch over their candidate counts
@@ -302,7 +307,8 @@ export class OcbtSource implements CbtGeometrySource {
                 splitThresholdPx: this.splitThresholdPx,
                 mergeThresholdPx: this.mergeThresholdPx,
                 cullMinDot: this.horizonCullMinDot(),
-                maxLevel: this.maxLevel
+                maxLevel: this.maxLevel,
+                minLevel: this.minLevel
             });
 
             // Frustum cull: rotate each render-space plane normal into camera-relative

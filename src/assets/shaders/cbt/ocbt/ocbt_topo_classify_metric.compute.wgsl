@@ -15,7 +15,7 @@
 struct ClassifyParams {
     camRadius : vec4<f32>, // xyz = camera in planet-local sim units, w = planet radius
     thresh    : vec4<f32>, // x = focal px, y = splitThreshold px, z = mergeThreshold px, w = cullMinDot
-    limits    : vec4<f32>  // x = maxLevel (as f32)
+    limits    : vec4<f32>  // x = maxLevel, y = minLevel (as f32)
 };
 
 // Camera frustum, EXPRESSED IN CAMERA-RELATIVE PLANET-LOCAL SPACE (the same space as
@@ -72,6 +72,10 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>,
     let mergeT = cp.thresh.z;
     let cullMinDot = cp.thresh.w;
     let maxLevel = cp.limits.x;
+    // Subdivision FLOOR: the planet is force-refined to at least this level everywhere (even far /
+    // off-screen), so a distant or merging planet never collapses to the 8 octahedron roots and the
+    // limb silhouette stays round. Cheap: a full sphere at level L is 8*2^L triangles.
+    let minLevel = cp.limits.y;
 
     // Camera-relative corner positions (TERRAIN-displaced; |rel| = distance to camera).
     let r0 = corner_rel(id, 0u);
@@ -130,11 +134,15 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>,
         }
     }
 
-    if (!culled && screenPx > splitT && level < maxLevel) {
+    // Below the floor → force a split regardless of cull / screen size (this also breaks the
+    // cull-deadlock that used to collapse the whole tree to the 8 roots). Above the floor → the
+    // normal camera metric (split only the visible, on-screen-large leaves).
+    let belowFloor = level < minLevel;
+    if (level < maxLevel && (belowFloor || (!culled && screenPx > splitT))) {
         bisectorData[b + BD_STATE] = ST_BISECT;
         let slot = atomicAdd(&classification[SPLIT_COUNTER], 1u);
         atomicStore(&classification[CLASSIFY_COUNTER_OFFSET + slot], id);
-    } else if (level > 0.0 && (culled || screenPx < mergeT)) {
+    } else if (level > minLevel && (culled || screenPx < mergeT)) {
         bisectorData[b + BD_STATE] = ST_SIMPLIFY;
         if (u64_bit(heap, 0u) == 0u) {
             let slot = atomicAdd(&classification[SIMPLIFY_COUNTER], 1u);
