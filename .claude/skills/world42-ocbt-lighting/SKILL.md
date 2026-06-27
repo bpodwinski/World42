@@ -31,10 +31,17 @@ ocbt_render_material.ts (fragmentSource)
               + CBT_LIGHTCOLOR * uLightIntensity * spec
 ```
 
-Post-processing layered on top (all output **linear HDR** — tone-mapping applied once):
-- `atmosphericScatteringFragmentShader.glsl` — Rayleigh + Mie + ozone, outputs linear HDR
-- `starRayMarchingFragmentShader.glsl` — SDF star glow, outputs linear HDR
-- Babylon `DefaultRenderingPipeline` — **single ACES** tone-map (`toneMappingType=1`), bloom, FXAA, sharpen
+Post-processing is a Babylon 9 **Frame Graph** (`src/core/render/frame_graph.ts`) — NOT the old
+`DefaultRenderingPipeline` (`postprocess_manager.ts` is now dead code). Pass order (HDR linear until the
+tonemap task):
+
+```
+ObjectRenderer (terrain) → Star → Atmosphere* → TAA → Bloom → ImageProcessing (single ACES tonemap)
+  → FXAA → Sharpen → GUI → backbuffer        (*Atmosphere task added only if a body has an atmosphere)
+```
+
+The Star and Atmosphere passes are custom `FrameGraphPostProcessTask`s with **native WGSL** fragment
+shaders (migrated from GLSL — the whole project is WGSL now). Both output linear HDR.
 
 ## Key files
 
@@ -45,9 +52,9 @@ Post-processing layered on top (all output **linear HDR** — tone-mapping appli
 | `src/systems/lod/cbt/cbt_scheduler.ts` | `CbtPlanetOptions` type — source of `starIntensity`, `starColor`, `starPosWorldDouble`, `lighting` |
 | `src/assets/shaders/cbt/ocbt/cbt_noise_df64.wgsl` | df64 noise + gradients (near-ground detail) |
 | `src/assets/shaders/cbt/gpu/cbt_noise.wgsl` | f32 FBM/simplex used by both vertex and fragment |
-| `src/assets/shaders/atmosphericScatteringFragmentShader.glsl` | Atmosphere post-process (linear HDR out) |
-| `src/assets/shaders/stars/starRayMarchingFragmentShader.glsl` | Star glow post-process (linear HDR out) |
-| `src/core/render/postprocess_manager.ts` | Babylon pipeline (ACES, bloom weight=0.25, FXAA) |
+| `src/assets/shaders/atmosphere/atmosphereFragmentShader.wgsl` | Atmosphere single-scattering post-process, **WGSL** (linear HDR out) |
+| `src/assets/shaders/stars/starRayMarchingFragmentShader.wgsl` | Star glow post-process, **WGSL** (linear HDR out) |
+| `src/core/render/frame_graph.ts` | Frame Graph render+post pipeline (ACES tonemap, bloom, FXAA, sharpen, TAA, star, atmosphere) |
 | `src/game_world/stellar_system/data.json` | Star + planet catalogue — per-planet `lighting` overrides live here |
 | `src/game_world/stellar_system/planet_lighting.json` | Global lighting `_defaults` (no per-planet blocks) |
 | `src/game_world/stellar_system/planet_lighting.ts` | Types (`PlanetLightingParams`, `ResolvedLighting`), `DEFAULT_LIGHTING`, `resolveLighting()` |
@@ -88,14 +95,48 @@ Baked constants (compiled into shader via `bakedHeader()` — changing requires 
 | `CBT_ROUGH_LO` / `CBT_ROUGH_HI` | `lighting.brdf.roughLo` / `roughHi` | 0.6 / 0.9 |
 | `CBT_F0` | `lighting.brdf.f0` | 0.04 (dielectric rock) |
 | `CBT_SPEC_AA` / `CBT_SPEC_MAX` | `lighting.brdf.specAa` / `specMax` | 0.5 / 4.0 |
-| `CBT_AA_FOOTPRINT_KM` | hardcoded (physical) | 0.03 |
+| `CBT_NORMAL_AA` | hardcoded in `bakedHeader()` (NOT in the lighting JSON) | 12.0 |
 | `CBT_GROUND_BASE_FREQ` | `opts.radius * 1000` (physical, not aesthetic) | — |
 
 **Note**: `CBT_AMBIENT` no longer exists — ambient is the runtime uniform `uAmbient`.
+**Note**: `CBT_AA_FOOTPRINT_KM` was REMOVED — the pixel footprint is now computed per-pixel
+(`fpKm = max(length(dpdx(rel)), length(dpdy(rel)))`, `render_material:286`), not a hardcoded constant.
+**Note**: `CBT_NORMAL_FP_LO` / `CBT_NORMAL_FP_HI` (the grazing-sun normal anti-alias band) live in the
+**static** `cbt_noise.wgsl:286-287` (defaults 8.0 / 10.0), NOT in `bakedHeader()` — see Tuning recipes.
+
+## Tuning recipes (symptom → knob)
+
+Reach for the **first** matching row; later rows are secondary / last-resort. All of these are baked
+(in `bakedHeader()` or the static `cbt_noise.wgsl`), so a **page reload** is enough to see the change —
+no manual material rebuild.
+
+> ⚠️ Judge every shading/aliasing change **by eye in a REAL browser**. Playwright/headless cannot show
+> it faithfully: rAF is throttled to 30 fps and WebGPU timestamps are unavailable, so both the visual
+> and `gpuMs` are unreliable there. Use the in-app perf HUD (**P** key) + `window.__world42Perf.setPerfMask(n)`.
+
+| Symptom | Primary knob (location, default) | Direction | Trade-off |
+|---|---|---|---|
+| **Grazing-sun normal grain / sparkle** | `CBT_NORMAL_FP_LO` / `CBT_NORMAL_FP_HI` (`cbt_noise.wgsl:286-287`, 8.0 / 10.0) | **raise both** (e.g. 8→12 / 10→14) | softer / flatter micro-relief in the normal at the horizon |
+| …residual normal grain anywhere | `CBT_NORMAL_AA` (`ocbt_render_material.ts:129`, 12.0) | **raise** (12→18) | over-flattens the foreground if pushed; can expose geometric sparkle far away |
+| **Specular fireflies at low sun** | `CBT_SPEC_AA` (0.5) ↑ or `CBT_SPEC_MAX` (4.0) ↓ | raise AA / lower max | dimmer, softer glints |
+| **Banding at the df64 ground fade** (~150 m alt) | `CBT_GROUND_ON_KM` / `CBT_GROUND_OFF_KM` (0.05 / 0.15) | widen the band | df64 detail engages later / over a longer range |
+| Surface too flat (no relief shading) | `CBT_LUNAR_LS` (0.7) | lower toward Lambert | loses the airless-disc (flat-lit) look |
+| Whole surface too dark / too bright | `uAmbient` or `uLightIntensity` (runtime uniforms) | adjust | — |
+| Crater floors not darker than plains | `CBT_AO_STRENGTH` (0.35) | raise | crushes macro shading if too high |
+
+**How the grazing-sun fix works (the #1 recipe):** the per-pixel footprint `fpKm =
+max(length(dpdx(rel)), length(dpdy(rel)))` (`render_material:286`) blows up at grazing angles.
+`cbtFbm_d_at(..., footprintKm)` then Nyquist-fades any fbm octave whose wavelength
+`< footprintKm * CBT_NORMAL_FP_LO` **out of the gradient only** — height and collision are untouched.
+So fine octaves vanish from the SHADING normal exactly where they would alias. The same band gates
+crater-rim aliasing (`cbt_noise.wgsl:180`). `CBT_NORMAL_AA` (`render_material:327`) is the second,
+screen-space stage: `mix(nSlope, nLocal, 1/(1 + CBT_NORMAL_AA * nVar))` — blends toward the smooth slope
+normal where the per-pixel normal varies fast. Note the inline `// wl < 2*footprint` comments in
+`cbt_noise.wgsl` are stale; the live values are 8.0 / 10.0.
 
 ## Per-planet lighting config
 
-All 18 baked constants (except `CBT_AA_FOOTPRINT_KM` and `CBT_GROUND_BASE_FREQ`) are read from a three-tier merge at material build time:
+All 18 config-driven baked constants (except `CBT_NORMAL_AA` and `CBT_GROUND_BASE_FREQ`, which are hardcoded) are read from a three-tier merge at material build time:
 
 ```
 per-planet override  (data.json "lighting" block)
@@ -241,9 +282,16 @@ To add a new planet config, just add a `"lighting": {}` block under the planet e
 ## Validation
 
 ```bash
-npm test               # 156 CPU tests (noise + df64 + topology + planet_lighting) — must all pass
+npm test               # CPU tests (noise + df64 + topology + planet_lighting) — must all pass
 npm run serve          # dev server → http://localhost:19000
 ```
+
+> ⚠️ **Perf + visual shading must be judged in a REAL (non-headless) browser.** Playwright/headless
+> Chrome throttles rAF to a flat 30 fps and exposes no WebGPU timestamps, so `getStats().gpuMs` is
+> garbage and aliasing/grain is not faithfully rendered. Playwright is fine for correctness, console
+> errors and rough screenshots — not for perf or fine shading. In a real browser: **P** key toggles the
+> perf HUD (working `gpuMs`); `window.__world42Perf.setPerfMask(n)` toggles cost blocks; first call
+> `__world42Perf.enableCapture(true)` or the instrumentation counters read 0.
 
 Visual checklist after lighting changes:
 - [ ] Planet surface lit from the correct star direction
