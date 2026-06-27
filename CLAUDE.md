@@ -1,5 +1,9 @@
 # CLAUDE.md — World42 Reference Guide
 
+> **Shared agent rules:** Read `@AGENTS.md` first. It defines the common
+> Codex/Claude entry points and points to `AI_CONTEXT.md` for vendor-neutral
+> architecture contracts. Keep Claude-specific workflow notes in this file.
+
 > **Language rule:** All source code, comments, identifiers, commit messages, PR descriptions, and this file must be written in **American English**. No French anywhere in the codebase.
 
 ## Overview

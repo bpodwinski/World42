@@ -1,5 +1,12 @@
 # Repository Guidelines
 
+## Agent Entry Points
+- `AGENTS.md` is the primary operational guide for Codex and other OpenAI-style coding agents.
+- `CLAUDE.md` remains the primary long-form guide for Claude.
+- `AI_CONTEXT.md` contains shared project context that should stay vendor-neutral and readable by both Codex and Claude.
+- When the files disagree, follow this order: direct user request, nearest scoped `AGENTS.md`, `AI_CONTEXT.md`, then tool-specific guidance such as `CLAUDE.md` or `.codex/README.md`.
+- Keep new cross-agent guidance in `AI_CONTEXT.md` when possible, then reference it from tool-specific files instead of duplicating large sections.
+
 ## Project Structure & Module Organization
 - `src/` contains the TypeScript runtime code. Entry points are `src/index.ts` and `src/app.ts`.
 - Core engine subsystems live in `src/core/` (`camera/`, `render/`, `scale/`, `gui/`, `io/`).
@@ -28,6 +35,13 @@
 - Coverage currently includes `src/**/*.{ts,tsx}`.
 - Place tests as `*.test.ts` near source files (example: `src/core/scale/scale_manager.test.ts`).
 - Add unit tests for bug fixes and for logic-heavy systems (LOD scheduling, chunk evaluation, scale conversions).
+
+## Agent Workflow
+- Read `AI_CONTEXT.md` before changing architecture, coordinate-space logic, terrain LOD, workers, shaders, or camera behavior.
+- Prefer focused changes that preserve the existing CDLOD, CBT/OCBT, camera, worker, and shader contracts.
+- Do not rewrite Claude skills into Codex skills unless the user explicitly asks for skill migration.
+- Do not edit `.claude/worktrees/` unless the user explicitly asks for Claude worktree maintenance.
+- Keep generated validation artifacts under `output/playwright/`.
 
 ## AI Playwright Validation Policy (Mandatory)
 - Every AI agent task that modifies repository files must run `npm run pw:validate` before considering the task complete.
