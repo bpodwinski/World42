@@ -60,14 +60,27 @@ export class OcbtSource implements CbtGeometrySource {
      *  the frustum test is exact (no smooth-sphere vs displaced mismatch). */
     private readonly heightMargin: number;
     private frame = 0;
-    /** Skip-when-still: last camera position in PLANET-LOCAL space (NaN until the first frame).
-     *  Planet-local also captures planet spin, so a spinning planet never counts as static. */
-    private readonly lastCamLocal = new Vector3(NaN, NaN, NaN);
-    /** Frames since the view last moved. Past SETTLE_FRAMES the topology/eval/compact are frozen. */
-    private framesSinceMove = 1 << 30;
+    /** Frozen camera position (PLANET-LOCAL) the live POSITIONS buffer was last baked against.
+     *  The render carries the per-frame residual (anchor - live) in uCamDelta, so the topology +
+     *  EvaluateLEB noise pass only re-bakes when the drift exceeds a threshold (NOT every frame —
+     *  a spinning planet used to defeat the old per-frame still gate). NaN until the first bake. */
+    private readonly anchorCamLocal = new Vector3(NaN, NaN, NaN);
+    /** True once anchorCamLocal holds a valid baked frame. */
+    private anchorValid = false;
+    /** A fixed WORLD axis expressed in PLANET-LOCAL at the anchor — its rotation away from the live
+     *  value measures the planet spin since the anchor (catches spin near the rotation axis, where
+     *  the camera barely moves in planet-local but the visible cone still sweeps). */
+    private readonly anchorRefLocal = new Vector3();
+    /** Frames left in a post-jump convergence burst (incremental topology needs ~SETTLE_FRAMES to
+     *  fully refine a new view): force a re-bake every frame while > 0. */
+    private convergeFrames = 0;
+    /** Live camera planet-local from the previous frame — used to detect discrete jumps (teleport). */
+    private readonly lastFrameCamLocal = new Vector3(NaN, NaN, NaN);
     private readonly tmpDir = new Vector3();
     private readonly tmpInv = new Matrix();
     private readonly tmpCamLocal = new Vector3();
+    private readonly tmpRefLocal = new Vector3();
+    private readonly tmpCamDelta = new Vector3();
     private readonly tmpNormal = new Vector3();
     private readonly tmpLightLocal = new Vector3();
     /** 6 frustum planes packed as (nx,ny,nz,d) in camera-relative planet-local space. */
@@ -77,10 +90,17 @@ export class OcbtSource implements CbtGeometrySource {
     /** forcedInstanceCount = min(capacity, liveCount*SAFETY + FLOOR) — absorbs readback lag. */
     private static readonly INSTANCE_SAFETY = 2;
     private static readonly INSTANCE_FLOOR = 8192;
-    /** Planet-local movement (sim units = km) below which the view counts as static (~1 mm). */
-    private static readonly STILL_EPS = 1e-6;
-    /** Frames to keep refining AFTER the last motion before freezing, so the concurrent topology
-     *  (bounded work/frame) fully converges for the new view before its passes are skipped. */
+    /** Cosine of the max planet rotation (since the anchor) tolerated before re-baking (~0.3deg). */
+    private static readonly ROT_EPS_COS = Math.cos((0.3 * Math.PI) / 180);
+    /** A single-frame jump above this MANY drift thresholds is a teleport/discontinuity → arm the
+     *  convergence burst. Screen-relative (not absolute km): a distant fast-spinning planet's large
+     *  planet-local per-frame drift is sub-pixel, so it must NOT be mistaken for a teleport (that
+     *  armed a perpetual burst under GPU load → frames slow → bigger jump → re-arm: a feedback loop). */
+    private static readonly JUMP_FACTOR = 8;
+    /** Fixed world reference axis transformed into planet-local to measure planet spin (see anchorRefLocal). */
+    private static readonly WORLD_REF = new Vector3(1, 0, 0);
+    /** Frames to keep refining AFTER a discrete jump, so the concurrent topology (bounded work/frame)
+     *  fully converges for the new view before its passes are skipped. Reused as the burst length. */
     private static readonly SETTLE_FRAMES = 90;
 
     private ready = false;
@@ -205,22 +225,76 @@ export class OcbtSource implements CbtGeometrySource {
         Vector3.TransformCoordinatesToRef(Vector3.ZeroReadOnly, this.tmpInv, this.tmpCamLocal);
         const focalPx = frame.viewportHeightPx / (2 * Math.tan(frame.cameraFovRadians * 0.5));
 
-        // --- Skip-when-still gate ------------------------------------------------------------
-        // The topology + EvaluateLEB + compact passes are ~33 GPU compute passes/frame and ran
-        // UNCONDITIONALLY — wasted once the view is static (nothing to refine, and the camera-relative
-        // vertex positions are unchanged). Detect a static view (camera unmoved in PLANET-LOCAL space,
-        // which also catches planet spin) and, after a short settle window that lets the concurrent
-        // topology converge post-motion, skip those passes. The draw still runs every frame from the
-        // existing buffers, so the image is identical at ~zero GPU cost while static.
-        const moved =
-            !isFinite(this.lastCamLocal.x) ||
-            Vector3.Distance(this.tmpCamLocal, this.lastCamLocal) > OcbtSource.STILL_EPS;
-        this.lastCamLocal.copyFrom(this.tmpCamLocal);
-        if (moved) this.framesSinceMove = 0;
-        else this.framesSinceMove++;
-        const topoActive = this.framesSinceMove < OcbtSource.SETTLE_FRAMES;
+        // --- Re-bake-on-drift gate -----------------------------------------------------------
+        // The topology + EvaluateLEB + compact passes are ~33 GPU compute passes/frame, dominated by
+        // the df64 fbm noise in EvaluateLEB. The OLD gate skipped them when the camera was unmoved in
+        // PLANET-LOCAL space — but a spinning planet (or numerical jitter at interplanetary origins)
+        // moves the camera in planet-local EVERY frame, so it never disengaged at ground (GPU 100%).
+        //
+        // Instead: bake POSITIONS against a FROZEN anchor and carry the per-frame residual
+        // (anchorCamLocal - liveCamLocal) in the render uniform uCamDelta, which keeps the draw EXACT
+        // between re-bakes (vertex: R*(localRel+uCamDelta); fragment: camDistKm = |rel+uCamDelta|).
+        // Re-bake only when the drift would actually matter: lateral drift past the prefetch guard
+        // band, planet spin past ROT_EPS, f32 precision cap, a LOD-changing/discrete jump, or the
+        // first frame. A still camera on a (slowly) spinning planet now re-bakes rarely → ~0 passes.
 
-        if (topoActive) {
+        // Planet spin reference: a fixed world axis in planet-local; its rotation away from the anchor
+        // value measures spin since the anchor (catches spin near the axis, where camLocal barely moves).
+        Vector3.TransformNormalToRef(OcbtSource.WORLD_REF, this.tmpInv, this.tmpRefLocal);
+
+        // Residual drift since the frozen anchor (tmpCamDelta = anchor - live).
+        let driftKm = Infinity;
+        let viewRotated = true;
+        if (this.anchorValid) {
+            this.anchorCamLocal.subtractToRef(this.tmpCamLocal, this.tmpCamDelta);
+            driftKm = this.tmpCamDelta.length();
+            viewRotated =
+                Vector3.Dot(this.anchorRefLocal, this.tmpRefLocal) < OcbtSource.ROT_EPS_COS;
+        } else {
+            this.tmpCamDelta.set(0, 0, 0);
+        }
+
+        // LOD-aware coverage threshold: the finest visible leaf edge projects to ~splitThresholdPx, so
+        // its world size ~ splitThresholdPx*altitude/focalPx. Re-bake before lateral drift crosses half
+        // the prefetch guard band. This is SCREEN-projected, so a near-ground planet gets a tight (m)
+        // threshold while a distant one (e.g. Earth seen from the Moon, spinning fast off-axis → big
+        // planet-local drift but sub-pixel on screen) gets a huge (km) threshold and stays frozen.
+        // No flat absolute cap: it would force distant fast-spinning planets to re-bake every frame.
+        const altKm = Math.max(this.tmpCamLocal.length() - this.radius, 1e-3);
+        const finestLeafKm = (this.splitThresholdPx * altKm) / Math.max(focalPx, 1);
+        const driftThreshKm = 0.5 * OcbtSource.FRUSTUM_GUARD * finestLeafKm;
+
+        // Discrete jump (teleport / fast fly) → arm a convergence burst (incremental topology needs
+        // ~SETTLE_FRAMES to fully refine a new view). Steady drift/spin needs only single re-bakes.
+        // The jump bar is SCREEN-relative (× driftThreshKm) so a distant planet's large but sub-pixel
+        // per-frame spin drift is NOT mistaken for a teleport (which would arm a self-sustaining burst).
+        const jump = isFinite(this.lastFrameCamLocal.x)
+            ? Vector3.Distance(this.tmpCamLocal, this.lastFrameCamLocal)
+            : Infinity;
+        this.lastFrameCamLocal.copyFrom(this.tmpCamLocal);
+        if (!this.anchorValid || jump > OcbtSource.JUMP_FACTOR * driftThreshKm) {
+            this.convergeFrames = OcbtSource.SETTLE_FRAMES;
+        }
+
+        const needRebake =
+            !this.anchorValid ||
+            this.convergeFrames > 0 ||
+            driftKm > driftThreshKm ||
+            viewRotated;
+
+        // uCamDelta carries the residual so the draw is exact between re-bakes (0 on a re-bake frame).
+        if (needRebake) this.tmpCamDelta.set(0, 0, 0);
+        this.render.setCamDelta(this.tmpCamDelta);
+
+        // Debug fragment perf-profiling mask (set via __world42Perf.setPerfMask): bit0 skip slope
+        // normal, bit1 skip df64 ground detail, bit2 skip crater rays — to A/B each block's GPU cost.
+        // Set every frame (even when the topology is frozen) so toggles take effect immediately.
+        this.render.setPerfMask(
+            (globalThis as unknown as { __ocbtPerfMask?: number }).__ocbtPerfMask ?? 0
+        );
+        this.render.setLightIntensity(this.starIntensity);
+
+        if (needRebake) {
             this.kernel.setCameraParams({
                 camLocal: [this.tmpCamLocal.x, this.tmpCamLocal.y, this.tmpCamLocal.z],
                 radius: this.radius,
@@ -230,22 +304,7 @@ export class OcbtSource implements CbtGeometrySource {
                 cullMinDot: this.horizonCullMinDot(),
                 maxLevel: this.maxLevel
             });
-        }
 
-        // Ground-detail anchor: the render fragment reconstructs the world-anchored surface
-        // direction as world = uCamAnchor + rel. uCamAnchor MUST be the same f32 camera the
-        // df64 eval subtracts (camRadius.xyz) so the rounding cancels — pass the identical
-        // tmpCamLocal (it is f32-rounded the same way when written to either GPU buffer).
-        this.render.setCamAnchor(this.tmpCamLocal);
-
-        // Debug fragment perf-profiling mask (set via __world42Perf.setPerfMask): bit0 skip slope
-        // normal, bit1 skip df64 ground detail, bit2 skip crater rays — to A/B each block's GPU cost.
-        this.render.setPerfMask(
-            (globalThis as unknown as { __ocbtPerfMask?: number }).__ocbtPerfMask ?? 0
-        );
-        this.render.setLightIntensity(this.starIntensity);
-
-        if (topoActive) {
             // Frustum cull: rotate each render-space plane normal into camera-relative
             // planet-local space (R^T·n via the inverse world matrix; renderPos = R·rel, so
             // n·renderPos = (R^T·n)·rel), keep d. Lets the fixed pool concentrate on the
@@ -266,7 +325,7 @@ export class OcbtSource implements CbtGeometrySource {
                 this.kernel.setFrustum(this.frustumF32, OcbtSource.FRUSTUM_GUARD, false, 0);
             }
 
-            // Alternate split (even) / merge (odd) frames so the two halves never race on the
+            // Alternate split (even) / merge (odd) RE-BAKES so the two halves never race on the
             // same neighbor buffer. The split/merge limit cycle that used to flicker the mesh is
             // broken in PrepareSimplify (conformity guard: a leaf with a finer neighbor is not
             // merged, so the split pass can't re-create it).
@@ -281,6 +340,14 @@ export class OcbtSource implements CbtGeometrySource {
             // Compact the live slots into the draw-index list so the draw issues liveCount
             // instances (not CAPACITY) — the per-vertex fbm noise makes that the big win.
             this.kernel.runCompact();
+
+            // Re-anchor: POSITIONS is now baked against the live camera. uCamAnchor MUST be the same
+            // f32 camLocal the df64 eval subtracted (world = uCamAnchor + rel cancels its rounding).
+            this.anchorCamLocal.copyFrom(this.tmpCamLocal);
+            this.anchorRefLocal.copyFrom(this.tmpRefLocal);
+            this.anchorValid = true;
+            this.render.setCamAnchor(this.tmpCamLocal);
+            if (this.convergeFrames > 0) this.convergeFrames--;
         }
 
         // lightDirection convention: planetCenter - starPos (star→planet), shader negates to get L toward star.
@@ -329,7 +396,11 @@ export class OcbtSource implements CbtGeometrySource {
     }
 
     reset(): void {
-        // The GPU engine re-derives geometry each frame; nothing to reset.
+        // Invalidate the re-bake anchor so the next frame forces a full topology + EvaluateLEB pass
+        // (and a convergence burst). Without this, a teleport would bake the new view against a stale
+        // anchor with a huge uCamDelta. The GPU engine re-derives all geometry from there.
+        this.anchorValid = false;
+        this.convergeFrames = OcbtSource.SETTLE_FRAMES;
     }
 
     setWireframe(on: boolean): void {

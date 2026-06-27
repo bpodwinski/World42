@@ -146,6 +146,10 @@ function vertexSource(opts: OcbtRenderOptions): string {
         // world ROTATION/SCALE only, NOT worldViewProjection (which re-adds the big offset).
         'uniform viewProjection : mat4x4<f32>;',
         'uniform world : mat4x4<f32>;',
+        // Per-frame residual camera drift (planet-local): anchorCamLocal - liveCamLocal. The baked
+        // localRel is camera-relative to a FROZEN anchor; adding this delta makes the rendered
+        // position exact for the LIVE camera without re-running the EvaluateLEB noise (see OcbtSource).
+        'uniform uCamDelta : vec3<f32>;',
         'uniform logarithmicDepthConstant : f32;',
         'varying vDir : vec3<f32>;',
         'varying vRel : vec3<f32>;',
@@ -176,7 +180,9 @@ function vertexSource(opts: OcbtRenderOptions): string {
         '    let localRel = vec3<f32>(ocbtPos[base], ocbtPos[base + 1u], ocbtPos[base + 2u]);',
         '    let dir = vec3<f32>(ocbtPos[base + 3u], ocbtPos[base + 4u], ocbtPos[base + 5u]);',
         '    let R = mat3x3<f32>(uniforms.world[0].xyz, uniforms.world[1].xyz, uniforms.world[2].xyz);',
-        '    let renderPos = R * localRel;',
+        '    // localRel is camera-relative to the frozen anchor; uCamDelta = anchorCamLocal - liveCamLocal',
+        '    // re-bases it to the live camera: R*(localRel + uCamDelta) = R*(localPos - liveCamLocal).',
+        '    let renderPos = R * (localRel + uniforms.uCamDelta);',
         '    vertexOutputs.position = uniforms.viewProjection * vec4<f32>(renderPos, 1.0);',
         '    // Hand-written WGSL ShaderMaterial: Babylon does NOT auto-inject the WebGPU',
         '    // NDC-Y flip (it does for transpiled GLSL), so flip clip-space Y to match',
@@ -220,6 +226,11 @@ function fragmentSource(opts: OcbtRenderOptions): string {
         // exactly (the camera's f32 rounding cancels), giving a frame-invariant, cm-precise
         // direction for the ground detail noise (no swim, no banding).
         'uniform uCamAnchor : vec3<f32>;',
+        // Residual camera drift since the anchor (planet-local): anchorCamLocal - liveCamLocal.
+        // `rel` is anchor-relative; `rel + uCamDelta` is the LIVE camera-relative position, so
+        // camDistKm (detail-octave fade + aerial fog) tracks the live camera between re-bakes
+        // instead of breathing/popping. worldHi = uCamAnchor + rel stays anchor-based (exact).
+        'uniform uCamDelta : vec3<f32>;',
         // Runtime ambient (replaces the former CBT_AMBIENT baked constant) and star intensity
         // multiplier for the diffuse+specular term. Both can be changed per-frame without a
         // material rebuild.
@@ -278,7 +289,7 @@ function fragmentSource(opts: OcbtRenderOptions): string {
         '    let rel = fragmentInputs.vRel;',
         '    // Same per-vertex camera distance (km) the height decode used -> the detail',
         '    // octaves in the normal match the displaced geometry (no shading mismatch).',
-        '    let camDistKm = length(rel);',
+        '    let camDistKm = length(rel + uniforms.uCamDelta);',
         '    // Pixel world footprint (km): how much surface one pixel covers. Huge at grazing -> used',
         '    // to Nyquist-fade sub-footprint fbm octaves out of the SHADING normal (kills grazing-sun',
         '    // normal grain at the source; height/collision are untouched). dpdx/dpdy of the local',
@@ -409,6 +420,7 @@ export type OcbtRenderMaterial = {
     setDebugLod(on: boolean): void;
     setPerfMask(mask: number): void;
     setCamAnchor(camLocal: Vector3): void;
+    setCamDelta(delta: Vector3): void;
     setAmbient(ambient: Vector3): void;
     setLightIntensity(intensity: number): void;
     setAtmoDensity(density: number): void;
@@ -434,7 +446,7 @@ export function buildOcbtRenderMaterial(
         {
             shaderLanguage: ShaderLanguage.WGSL,
             attributes: ['position'],
-            uniforms: ['viewProjection', 'world', 'uLightDirection', 'logarithmicDepthConstant', 'uDebugLod', 'uPerfMask', 'uCamAnchor', 'uAmbient', 'uLightIntensity', 'uAtmoDensity', 'uAtmoColor'],
+            uniforms: ['viewProjection', 'world', 'uLightDirection', 'logarithmicDepthConstant', 'uDebugLod', 'uPerfMask', 'uCamAnchor', 'uCamDelta', 'uAmbient', 'uLightIntensity', 'uAtmoDensity', 'uAtmoColor'],
             storageBuffers: ['ocbtHeap', 'ocbtPos', 'ocbtIndices', 'cbtPerm']
         }
     );
@@ -474,6 +486,7 @@ export function buildOcbtRenderMaterial(
     material.setInt('uDebugLod', 0);
     material.setInt('uPerfMask', 0);
     material.setVector3('uCamAnchor', new Vector3(0, 0, 0));
+    material.setVector3('uCamDelta', new Vector3(0, 0, 0));
     material.setVector3('uAmbient', opts.ambient ?? new Vector3(0.008, 0.008, 0.008));
     material.setFloat('uLightIntensity', opts.lightIntensity ?? 1.0);
     material.setFloat('uAtmoDensity', opts.atmoDensity ?? 0);
@@ -493,6 +506,9 @@ export function buildOcbtRenderMaterial(
         },
         setCamAnchor(camLocal: Vector3): void {
             material.setVector3('uCamAnchor', camLocal);
+        },
+        setCamDelta(delta: Vector3): void {
+            material.setVector3('uCamDelta', delta);
         },
         setAmbient(ambient: Vector3): void {
             material.setVector3('uAmbient', ambient);
