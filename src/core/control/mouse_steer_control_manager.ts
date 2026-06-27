@@ -286,23 +286,23 @@ export class MouseSteerControlManager {
         // --- Keyboard ---
         const keyboardObserver: Observer<KeyboardInfo> | null =
             this.scene.onKeyboardObservable.add((kb) => {
-            if (kb.type !== KeyboardEventTypes.KEYDOWN && kb.type !== KeyboardEventTypes.KEYUP) return;
-            const down = kb.type === KeyboardEventTypes.KEYDOWN;
-            const k = kb.event.key.toLowerCase();
+                if (kb.type !== KeyboardEventTypes.KEYDOWN && kb.type !== KeyboardEventTypes.KEYUP) return;
+                const down = kb.type === KeyboardEventTypes.KEYDOWN;
+                const k = kb.event.key.toLowerCase();
 
-            if (k === "z") this.inputs.fwd = down ? 1 : (this.inputs.fwd === 1 ? 0 : this.inputs.fwd);
-            if (k === "s") this.inputs.fwd = down ? -1 : (this.inputs.fwd === -1 ? 0 : this.inputs.fwd);
-            if (k === "q") this.inputs.strafe = down ? -1 : (this.inputs.strafe === -1 ? 0 : this.inputs.strafe);
-            if (k === "d") this.inputs.strafe = down ? 1 : (this.inputs.strafe === 1 ? 0 : this.inputs.strafe);
-            if (k === "r") this.inputs.rise = down ? 1 : (this.inputs.rise === 1 ? 0 : this.inputs.rise);
-            if (k === "f") this.inputs.rise = down ? -1 : (this.inputs.rise === -1 ? 0 : this.inputs.rise);
+                if (k === "z") this.inputs.fwd = down ? 1 : (this.inputs.fwd === 1 ? 0 : this.inputs.fwd);
+                if (k === "s") this.inputs.fwd = down ? -1 : (this.inputs.fwd === -1 ? 0 : this.inputs.fwd);
+                if (k === "q") this.inputs.strafe = down ? -1 : (this.inputs.strafe === -1 ? 0 : this.inputs.strafe);
+                if (k === "d") this.inputs.strafe = down ? 1 : (this.inputs.strafe === 1 ? 0 : this.inputs.strafe);
+                if (k === "r") this.inputs.rise = down ? 1 : (this.inputs.rise === 1 ? 0 : this.inputs.rise);
+                if (k === "f") this.inputs.rise = down ? -1 : (this.inputs.rise === -1 ? 0 : this.inputs.rise);
 
-            if (k === "e") this.inputs.rollLeft = down ? 1 : 0;
-            if (k === "a") this.inputs.rollRight = down ? 1 : 0;
+                if (k === "e") this.inputs.rollLeft = down ? 1 : 0;
+                if (k === "a") this.inputs.rollRight = down ? 1 : 0;
 
-            if (k === "shift") this.inputs.boost = down ? 1 : 0;
-            if (k === "control") this.inputs.brake = down ? 1 : 0;
-        });
+                if (k === "shift") this.inputs.boost = down ? 1 : 0;
+                if (k === "control") this.inputs.brake = down ? 1 : 0;
+            });
         this.disposables.addBabylonObserver(this.scene.onKeyboardObservable, keyboardObserver);
     }
 

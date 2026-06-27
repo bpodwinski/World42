@@ -138,7 +138,7 @@ export async function bootstrapScene(
     camera.debugMode = true;
     camera.minZ = 0.1;
     camera.maxZ = 1e9;
-    camera.fov = 1.4;
+    camera.fov = 0.8;
     camera.applyGravity = false;
     camera.inertia = 0;
     camera.inputs.clear();
