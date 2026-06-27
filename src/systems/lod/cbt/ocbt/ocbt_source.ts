@@ -78,6 +78,9 @@ export class OcbtSource implements CbtGeometrySource {
     /** Frames left in a post-jump convergence burst (incremental topology needs ~SETTLE_FRAMES to
      *  fully refine a new view): force a re-bake every frame while > 0. */
     private convergeFrames = 0;
+    /** Frames since the last heavy re-bake — drives the Axe 3 throttle (re-bake 1 frame in N
+     *  under steady drift; the draw stays exact between via uCamDelta + the world rotation). */
+    private framesSinceRebake = 0;
     /** Live camera planet-local from the previous frame — used to detect discrete jumps (teleport). */
     private readonly lastFrameCamLocal = new Vector3(NaN, NaN, NaN);
     private readonly tmpDir = new Vector3();
@@ -106,6 +109,14 @@ export class OcbtSource implements CbtGeometrySource {
     /** Frames to keep refining AFTER a discrete jump, so the concurrent topology (bounded work/frame)
      *  fully converges for the new view before its passes are skipped. Reused as the burst length. */
     private static readonly SETTLE_FRAMES = 90;
+    /** Default df64->f32 noise cutoff (km) for the eval. Aggressive: df64 only within ~2 km of the
+     *  camera (where f32 dir quantization would band the relief); f32 beyond. Live-tunable via
+     *  globalThis.__ocbtDf64NearKm. Raise it if banding appears very close to the ground. */
+    private static readonly DF64_NEAR_KM_DEFAULT = 2.0;
+    /** Axe 3: re-bake the heavy OCBT pipeline only 1 frame in N under steady drift (the draw stays
+     *  exact between via uCamDelta). 1 = every frame (old behavior). Live-tunable via
+     *  globalThis.__ocbtRebakeEvery. Higher = cheaper motion, slightly more LOD latency. */
+    private static readonly REBAKE_EVERY_DEFAULT = 3;
 
     private ready = false;
     private disposed = false;
@@ -281,11 +292,26 @@ export class OcbtSource implements CbtGeometrySource {
             this.convergeFrames = OcbtSource.SETTLE_FRAMES;
         }
 
+        // Axe 3 — throttle the heavy re-bake. The full pipeline (topology classify/copy/reduce over
+        // the 1M pool + split/merge + eval + compact) costs ~31 ms/frame at ground and, profiled,
+        // DOMINATES the moving-ground GPU cost (the per-pixel fragment is cheap — 60 fps when still
+        // even at 5 MP supersampling). Since the DRAW stays exact between re-bakes (uCamDelta carries
+        // the translation, the world matrix R the rotation), we only need fresh POSITIONS for the
+        // classify METRIC, which tolerates a few frames of lag. So under steady drift/spin we re-bake
+        // only 1 frame in REBAKE_EVERY; the skipped frames just draw (cheap). Convergence bursts and
+        // the first bake always re-bake every frame (they must converge fast). Live-tunable.
+        const rebakeEvery = Math.max(
+            1,
+            Math.floor(
+                (globalThis as unknown as { __ocbtRebakeEvery?: number }).__ocbtRebakeEvery ??
+                    OcbtSource.REBAKE_EVERY_DEFAULT
+            )
+        );
+        const forcedRebake = !this.anchorValid || this.convergeFrames > 0;
+        const driftDriven = driftKm > driftThreshKm || viewRotated;
+        this.framesSinceRebake++;
         const needRebake =
-            !this.anchorValid ||
-            this.convergeFrames > 0 ||
-            driftKm > driftThreshKm ||
-            viewRotated;
+            forcedRebake || (driftDriven && this.framesSinceRebake >= rebakeEvery);
 
         // uCamDelta carries the residual so the draw is exact between re-bakes (0 on a re-bake frame).
         if (needRebake) this.tmpCamDelta.set(0, 0, 0);
@@ -308,7 +334,12 @@ export class OcbtSource implements CbtGeometrySource {
                 mergeThresholdPx: this.mergeThresholdPx,
                 cullMinDot: this.horizonCullMinDot(),
                 maxLevel: this.maxLevel,
-                minLevel: this.minLevel
+                minLevel: this.minLevel,
+                // df64->f32 noise cutoff (km), live-tunable via the global. Beyond it the eval uses the
+                // cheaper f32 noise twin (exact past the threshold — banding only shows very close).
+                df64NearKm:
+                    (globalThis as unknown as { __ocbtDf64NearKm?: number }).__ocbtDf64NearKm ??
+                    OcbtSource.DF64_NEAR_KM_DEFAULT
             });
 
             // Frustum cull: rotate each render-space plane normal into camera-relative
@@ -353,6 +384,7 @@ export class OcbtSource implements CbtGeometrySource {
             this.anchorRefLocal.copyFrom(this.tmpRefLocal);
             this.anchorValid = true;
             this.render.setCamAnchor(this.tmpCamLocal);
+            this.framesSinceRebake = 0;
             if (this.convergeFrames > 0) this.convergeFrames--;
         }
 
@@ -407,6 +439,18 @@ export class OcbtSource implements CbtGeometrySource {
         // anchor with a huge uCamDelta. The GPU engine re-derives all geometry from there.
         this.anchorValid = false;
         this.convergeFrames = OcbtSource.SETTLE_FRAMES;
+    }
+
+    /**
+     * Enable/disable the mesh draw. The OCBT template mesh has alwaysSelectAsActiveMesh = true
+     * (procedural bounds → Babylon never frustum-culls it), so an off-screen planet keeps
+     * drawing its full leaf set every frame. The scheduler calls this from its render-space
+     * frustum test to stop the draw of a planet the camera is not looking at (e.g. Earth while
+     * standing on the Moon). Disabling does NOT touch the topology/positions buffers, so the
+     * last-converged tree is still there when the planet re-enters the frustum.
+     */
+    setVisible(on: boolean): void {
+        this.mesh.setEnabled(on);
     }
 
     setWireframe(on: boolean): void {

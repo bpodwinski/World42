@@ -46,6 +46,8 @@ export interface CbtGeometrySource {
     setWireframe?(on: boolean): void;
     /** Optional: toggle per-LOD-level debug colors on a source that owns its material (GPU path). */
     setDebugLod?(on: boolean): void;
+    /** Optional: enable/disable the mesh draw (off-screen frustum cull on a source that owns its mesh). */
+    setVisible?(on: boolean): void;
     dispose(): void;
 }
 

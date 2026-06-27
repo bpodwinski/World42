@@ -24,7 +24,7 @@
 struct EvalParams {
     camRadius : vec4<f32>,
     thresh    : vec4<f32>,
-    limits    : vec4<f32>
+    limits    : vec4<f32>  // x = maxLevel, y = minLevel, z = DF64_NEAR_KM (df64->f32 cutoff, km)
 };
 
 // A vec3 in df64: each component carried as (hi, lo).
@@ -73,6 +73,21 @@ fn dv_face_corners(face : u32, a : ptr<function, DVec3>, l : ptr<function, DVec3
 
 fn narrow(a : DVec3) -> vec3<f32> {
     return vec3<f32>(df64_to_f32(a.x), df64_to_f32(a.y), df64_to_f32(a.z));
+}
+
+// Per-corner df64 -> f32 noise cutoff. df64 keeps the noise DOMAIN (p*freq) cell-precise to ~cm
+// near the viewer (f32 dir quantization bands the relief at ~1-30 m wavelength past depth ~24);
+// but that banding only shows VERY close, so beyond ep.limits.z (DF64_NEAR_KM, km) the f32 twin
+// cbtFbmHeightAt is bit-enough and far cheaper. WATERTIGHT: the predicate is the per-CORNER camera
+// distance, not the leaf level — a shared corner has a bit-identical df64 `v` (exact rational decode)
+// => identical distKm => the SAME branch on both adjacent leaves => no crack. cbtFbmHeightAt is the
+// exact f32 twin of cbtFbmHeightAt_df64 (same per-octave distance fade, same craters), so the only
+// difference is domain precision, invisible past the threshold.
+fn cornerHeight(v : DVec3, d : vec3<f32>, distKm : f32, radius : f32) -> f32 {
+    if (distKm < ep.limits.z) {
+        return cbtFbmHeightAt_df64(v.x, v.y, v.z, distKm, radius);
+    }
+    return cbtFbmHeightAt(d, distKm, radius);
 }
 
 @compute @workgroup_size(256)
@@ -146,9 +161,12 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>,
     // domain p*freq stays cell-precise to ~cm at depth (f32 dir banded the relief at
     // ~1-30 m). dir (d0/d1/d2) is output for the render fragment's per-pixel normal (smooth
     // — a per-vertex normal facets at coarse tessellation), and the classify metric.
-    let rel0 = base0 + d0 * cbtFbmHeightAt_df64(v0.x, v0.y, v0.z, length(base0), radius);
-    let rel1 = base1 + d1 * cbtFbmHeightAt_df64(v1.x, v1.y, v1.z, length(base1), radius);
-    let rel2 = base2 + d2 * cbtFbmHeightAt_df64(v2.x, v2.y, v2.z, length(base2), radius);
+    let dist0 = length(base0);
+    let dist1 = length(base1);
+    let dist2 = length(base2);
+    let rel0 = base0 + d0 * cornerHeight(v0, d0, dist0, radius);
+    let rel1 = base1 + d1 * cornerHeight(v1, d1, dist1, radius);
+    let rel2 = base2 + d2 * cornerHeight(v2, d2, dist2, radius);
 
     let b = id * 18u;
     positions[b + 0u] = rel0.x; positions[b + 1u] = rel0.y; positions[b + 2u] = rel0.z;

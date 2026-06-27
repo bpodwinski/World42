@@ -85,6 +85,7 @@ export class CbtPlanet {
     private debugLod = false;
     private pendingWireframe = false;
     private pendingDebugLod = false;
+    private _visible = true;
     private readonly stats: CbtStats = {
         leafCount: 0,
         splitsThisFrame: 0,
@@ -120,6 +121,7 @@ export class CbtPlanet {
             // Apply any debug flags that were toggled before this planet activated.
             this.source.setWireframe?.(this.pendingWireframe);
             this.source.setDebugLod?.(this.pendingDebugLod);
+            this.source.setVisible?.(this._visible);
         }
         return this.source;
     }
@@ -275,6 +277,28 @@ export class CbtPlanet {
 
     getStats(): Readonly<CbtStats> {
         return this.stats;
+    }
+
+    /** Whether the planet mesh is currently drawn (set by the scheduler frustum cull). */
+    get visible(): boolean {
+        return this._visible;
+    }
+
+    /** Bounding-sphere radius (sea level + max relief) for the render-space frustum test. */
+    get boundingRadiusSim(): number {
+        return this.radiusSim + this.noise.globalAmplitude;
+    }
+
+    /**
+     * Show/hide the planet mesh. Called by the scheduler when the planet leaves/enters the
+     * camera frustum: an off-screen OCBT mesh has procedural bounds (alwaysSelectAsActiveMesh)
+     * so Babylon never culls it — without this it keeps drawing its full leaf set every frame.
+     * No-op if unchanged; forwarded to the source (which disables the Babylon mesh) once created.
+     */
+    setVisible(on: boolean): void {
+        if (on === this._visible) return;
+        this._visible = on;
+        this.source?.setVisible?.(on);
     }
 
     update(deadline: number, frustumPlanes: ReadonlyArray<Plane> | null = null): void {
@@ -493,8 +517,35 @@ export class CbtScheduler {
         this.planets = [];
     }
 
-    // Scratch vector for distance checks — avoids per-frame allocation in tick().
+    // Scratch vectors for distance/visibility checks — avoid per-frame allocation in tick().
     private readonly tmpCamOffset = new Vector3();
+    private readonly tmpCenterRender = new Vector3();
+
+    /**
+     * Render-space bounding-sphere vs frustum test. Babylon never frustum-culls the OCBT mesh
+     * (alwaysSelectAsActiveMesh — procedural bounds), so an off-screen planet would otherwise
+     * keep drawing its full leaf set AND keep refining every frame. We do the cull here.
+     *
+     * Inward-normal convention (Babylon Frustum.GetPlanes): a point is inside when
+     * plane.dotCoordinate(p) >= 0; a sphere is fully outside a plane when dotCoordinate <= -r.
+     * Conservative: cull only when fully outside ONE plane. The body the camera is on/inside is
+     * always kept (its sphere surrounds the origin), so the ground planet never flickers off.
+     */
+    private isPlanetVisible(
+        planet: CbtPlanet,
+        planes: ReadonlyArray<Plane> | null
+    ): boolean {
+        if (!planes) return true;
+        const r = planet.boundingRadiusSim;
+        const c = this.camera.toRenderSpace(planet.entity.doublepos, this.tmpCenterRender);
+        // Camera inside / very near the planet (the body you are standing on): always visible.
+        const near = r * 1.5;
+        if (c.lengthSquared() < near * near) return true;
+        for (let i = 0; i < 6; i++) {
+            if (planes[i].dotCoordinate(c) <= -r) return false;
+        }
+        return true;
+    }
 
     private tick = (): void => {
         const count = this.planets.length;
@@ -508,6 +559,13 @@ export class CbtScheduler {
                 .multiplyToRef(this.camera.getProjectionMatrix(), this.tmpViewProj);
             Frustum.GetPlanesToRef(this.tmpViewProj, this.frustumPlanes);
             planes = this.frustumPlanes;
+        }
+
+        // Visibility pass (cheap, EVERY planet every frame, no budget gate): cull off-screen
+        // meshes so a planet the camera is not looking at stops drawing its (saturated) leaf
+        // set. An invisible planet is also frozen below — its topology/eval compute is skipped.
+        for (let i = 0; i < count; i++) {
+            this.planets[i].setVisible(this.isPlanetVisible(this.planets[i], planes));
         }
 
         // Per-frame SSE constant: converts world-space error to pixels.
@@ -527,6 +585,9 @@ export class CbtScheduler {
         for (let i = 0; i < count; i++) {
             if (performance.now() >= deadline) break;
             const planet = this.planets[(this.robin + i) % count];
+
+            // Off-screen → frozen: no topology/EvaluateLEB compute while the mesh is culled.
+            if (!planet.visible) continue;
 
             // Root-node SSE: error ≈ radius/2, distance = camera → planet center.
             const c = planet.entity.doublepos;

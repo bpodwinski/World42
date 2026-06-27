@@ -80,6 +80,9 @@ export interface OcbtCameraParams {
     maxLevel: number;
     /** Subdivision floor: force-refine to at least this level everywhere (keeps the planet round). */
     minLevel: number;
+    /** df64->f32 noise cutoff (km): the eval uses precise df64 noise for corners within this camera
+     *  distance, the cheaper f32 twin beyond it (watertight: per-corner distance, not level). */
+    df64NearKm: number;
 }
 
 /** Live topology snapshot read back from the GPU for the cross-check. */
@@ -707,7 +710,9 @@ export class OcbtTopologyKernel {
         }
         this.classifyParams.updateFloat4('camRadius', p.camLocal[0], p.camLocal[1], p.camLocal[2], p.radius);
         this.classifyParams.updateFloat4('thresh', p.focalPx, p.splitThresholdPx, p.mergeThresholdPx, p.cullMinDot);
-        this.classifyParams.updateFloat4('limits', p.maxLevel, p.minLevel, 0, 0);
+        // limits.z = DF64_NEAR_KM: the eval (which shares this UBO as `ep`) reads it as the df64->f32
+        // cutoff. The metric classify ignores limits.z (it only uses x = maxLevel, y = minLevel).
+        this.classifyParams.updateFloat4('limits', p.maxLevel, p.minLevel, p.df64NearKm, 0);
         this.classifyParams.update();
     }
 

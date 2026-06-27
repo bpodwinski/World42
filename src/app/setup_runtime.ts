@@ -179,6 +179,15 @@ export function setupRuntime({
             camera.doublepos.set(x, y, z);
             lod.resetNow();
         },
+        /** Dev-only: drift the camera WITHOUT a LOD reset (mimics steady keyboard piloting, so the
+         *  OCBT drift gate / re-bake throttle engages — unlike setCameraDoublePos which teleports). */
+        nudgeCameraDoublePos: (dx: number, dy: number, dz: number) => {
+            camera.doublepos.set(
+                camera.doublepos.x + dx,
+                camera.doublepos.y + dy,
+                camera.doublepos.z + dz
+            );
+        },
         /** Orient the camera toward a WorldDouble point (render-space target). */
         lookAtDoublePos: (x: number, y: number, z: number) => {
             tmpRenderTarget.set(
@@ -187,6 +196,11 @@ export function setupRuntime({
                 z - camera.doublepos.z
             );
             camera.setTarget(tmpRenderTarget);
+        },
+        /** Dev-only: force the engine render scale (1 = native, <1 = supersample). Lets a perf
+         *  probe saturate the GPU at a controlled internal resolution to measure fragment cost. */
+        setHardwareScaling: (level: number) => {
+            scene.getEngine().setHardwareScalingLevel(Math.max(0.05, level));
         },
     };
     (window as unknown as { __world42Perf?: typeof perfHook }).__world42Perf = perfHook;
