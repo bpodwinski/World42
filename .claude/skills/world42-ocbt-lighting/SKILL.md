@@ -248,6 +248,22 @@ finalColor = mix(uAtmoColor, finalColor, fogFactor);
 | 2 | crater rays |
 | 3 | curvature AO |
 | 4 | Cook-Torrance specular |
+| 6 (64) | zero the per-vertex crater gradient in the normals (visual A/B only — see note) |
+
+> **Crater gradient is computed PER VERTEX, not per pixel.** `craterField` (6 size-classes × a
+> 27-neighbor scan) is the dominant relief but **low-frequency** (cells ≥ 2 km), so the vertex shader
+> evaluates it (`vCraterGrad` at the real per-vertex distance for the main/df64 normals;
+> `vCraterGradSlope` at `CBT_SLOPE_DIST` for the splat/AO normal) and the fragment reads the
+> interpolated varyings. This measured **−55 % ground GPU power** (271→123 W on an RTX 5080, util
+> 98→36 %) vs the old per-pixel scan, with no quality loss expected (low-freq → interpolates smoothly;
+> shared edge verts → watertight). The high-frequency FBM detail **stays per-pixel** (that part DID
+> facet when moved per-vertex — see [[ocbt-integration]] §4.2d). The fragment normals are built via
+> `cbtNoiseNormalAtShared` / `cbtNoiseNormalAtShared_df64` (FBM per-pixel + crater varying) and
+> `cbtNoiseNormalSlope` (macro FBM + slope crater varying). bit6 zeroes the crater term in shading for
+> visual A/B; it no longer changes fragment compute (the crater now lives in the vertex).
+>
+> **Visual check after touching this:** fly ground→orbit and watch crater walls for triangle faceting
+> (per-vertex normals faceted before; this is mitigated by moving only the low-freq crater, but verify).
 
 ## Workflow
 

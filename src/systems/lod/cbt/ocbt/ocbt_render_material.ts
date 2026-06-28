@@ -155,6 +155,11 @@ function vertexSource(opts: OcbtRenderOptions): string {
         'varying vRel : vec3<f32>;',
         'varying vFragmentDepth : f32;',
         'varying vLevel : f32;',
+        // Crater gradient (dominant, LOW-FREQUENCY relief) evaluated PER VERTEX + interpolated, instead
+        // of re-scanning the 6x27 crater field per pixel in each normal. vCraterGrad: real per-vertex
+        // camera distance (main + df64 normals); vCraterGradSlope: CBT_SLOPE_DIST (smooth splat/AO).
+        'varying vCraterGrad : vec3<f32>;',
+        'varying vCraterGradSlope : vec3<f32>;',
         'attribute position : vec3<f32>;',
         '@vertex',
         'fn main(input : VertexInputs) -> FragmentInputs {',
@@ -170,6 +175,8 @@ function vertexSource(opts: OcbtRenderOptions): string {
         '        vertexOutputs.vRel = vec3<f32>(0.0, 0.0, 0.0);',
         '        vertexOutputs.vFragmentDepth = 1.0;',
         '        vertexOutputs.vLevel = 0.0;',
+        '        vertexOutputs.vCraterGrad = vec3<f32>(0.0);',
+        '        vertexOutputs.vCraterGradSlope = vec3<f32>(0.0);',
         '        return vertexOutputs;',
         '    }',
         '    let vi = vertexInputs.vertexIndex;',
@@ -192,6 +199,14 @@ function vertexSource(opts: OcbtRenderOptions): string {
         '    // Camera-relative position (sim units = km): its length is the per-vertex',
         '    // distance to camera that drives the detail-octave fade in the fragment normal.',
         '    vertexOutputs.vRel = localRel;',
+        '    // Per-vertex crater gradient (the dominant, LOW-FREQUENCY relief): evaluated here and',
+        '    // interpolated instead of re-scanning the 6x27 crater field per pixel in each normal.',
+        '    // Same per-vertex camera distance the fragment uses; shared edge vertices have identical',
+        '    // dir + distance, so the interpolated gradient is watertight (no shading seam). Slope',
+        '    // variant at CBT_SLOPE_DIST feeds the smooth splat/AO normal (stable across altitude).',
+        '    let camDistKmV = length(localRel + uniforms.uCamDelta);',
+        '    vertexOutputs.vCraterGrad = craterField(dir, CBT_RADIUS, camDistKmV, true, 0.0).yzw;',
+        '    vertexOutputs.vCraterGradSlope = craterField(dir, CBT_RADIUS, CBT_SLOPE_DIST, true, 0.0).yzw;',
         '    // Tree depth = firstLeadingBit(heap); faces are depth 3 => level = depth - 3.',
         '    var depth : u32;',
         '    if (hi != 0u) { depth = 32u + firstLeadingBit(hi); } else { depth = firstLeadingBit(lo); }',
@@ -219,7 +234,9 @@ function fragmentSource(opts: OcbtRenderOptions): string {
         'uniform uDebugLod : i32;',
         // Fragment perf-profiling mask (debug): skip heavy blocks to measure each one s GPU cost
         // via the P-HUD gpuMs. bit0 = skip the slope normal; bit1 = skip the df64 near-ground
-        // detail block; bit2 = skip the crater rays; bit3 = skip AO; bit4 = skip GGX specular.
+        // detail block; bit2 = skip the crater rays; bit3 = skip AO; bit4 = skip GGX specular;
+        // bit6 (64) = zero the per-vertex crater gradient in the normals (visual A/B; the crater
+        // compute now lives in the vertex shader, so this no longer changes fragment cost).
         'uniform uPerfMask : i32;',
         // Camera position in planet-local sim units (= the SAME f32 value the df64 eval
         // subtracted to make `rel`). world = uCamAnchor + rel reconstructs the surface point
@@ -245,6 +262,10 @@ function fragmentSource(opts: OcbtRenderOptions): string {
         'varying vRel : vec3<f32>;',
         'varying vFragmentDepth : f32;',
         'varying vLevel : f32;',
+        // Per-vertex crater gradient (see vertex shader): the dominant low-frequency relief, interpolated
+        // instead of re-scanned per pixel. vCraterGrad = main/df64 normals; vCraterGradSlope = splat/AO.
+        'varying vCraterGrad : vec3<f32>;',
+        'varying vCraterGradSlope : vec3<f32>;',
         // Procedural world-anchored albedo (no texture samplers). Driven by slope + altitude:
         // regolith on flats, rock on slopes, highland tint up high. `slope01` = 1 - dot(landform
         // normal, up) (0 flat) from the SMOOTH normal so rock follows landforms, not micro-bumps.
@@ -299,12 +320,19 @@ function fragmentSource(opts: OcbtRenderOptions): string {
         '    // = uCamAnchor + rel (f32 is fine here: textures tile and the scales stay coarse).',
         '    let worldHi = uniforms.uCamAnchor + rel;',
         '    let altKm = length(worldHi) - CBT_RADIUS;',
-        '    var nLocal = cbtNoiseNormalAt(dir, CBT_RADIUS, camDistKm, fpKm);',
+        '    // Crater field is the dominant relief and LOW-FREQUENCY (cells >= 2 km), so it is evaluated',
+        '    // PER VERTEX (see vertex shader) and read here as an interpolated varying instead of a per-',
+        '    // pixel 6x27 scan inside each of the up-to-3 normals. bit6 zeroes it (visual A/B; the crater',
+        '    // compute now lives in the vertex, so this isolates the FBM-only normal cost in the fragment).',
+        '    let craterOff = (uniforms.uPerfMask & 64) != 0;',
+        '    let craterGrad = select(fragmentInputs.vCraterGrad, vec3<f32>(0.0), craterOff);',
+        '    let craterGradSlope = select(fragmentInputs.vCraterGradSlope, vec3<f32>(0.0), craterOff);',
+        '    var nLocal = cbtNoiseNormalAtShared(dir, CBT_RADIUS, camDistKm, fpKm, craterGrad);',
         '    // Landform slope for material splatting: a SMOOTH normal at a medium camera distance',
         '    // (CBT_SLOPE_DIST) so the cm micro-relief is faded out and rock follows 30m+ hills /',
         '    // crater walls instead of speckling every per-pixel bump.',
         '    var nSlope = dir;',
-        '    if ((uniforms.uPerfMask & 1) == 0) { nSlope = cbtNoiseNormalAt(dir, CBT_RADIUS, CBT_SLOPE_DIST, 0.0); }',
+        '    if ((uniforms.uPerfMask & 1) == 0) { nSlope = cbtNoiseNormalSlope(dir, CBT_RADIUS, CBT_SLOPE_DIST, craterGradSlope); }',
         '    let slope01 = clamp(1.0 - dot(nSlope, dir), 0.0, 1.0);',
         '    // Near-ground WORLD-ANCHORED micro-relief. Reconstruct the surface direction in',
         '    // df64: world = uCamAnchor + rel (the eval subtracted the SAME f32 uCamAnchor, so',
@@ -323,7 +351,7 @@ function fragmentSource(opts: OcbtRenderOptions): string {
         '        let dyD = df64_mul(wy, inv);',
         '        let dzD = df64_mul(wz, inv);',
         '        // Macro+detail normal in df64 (kills the ~1-30 m f32 banding), blended in by the fade.',
-        '        let nDf = cbtNoiseNormalAt_df64(dxD, dyD, dzD, CBT_RADIUS, camDistKm);',
+        '        let nDf = cbtNoiseNormalAtShared_df64(dxD, dyD, dzD, CBT_RADIUS, camDistKm, craterGrad);',
         '        nLocal = normalize(mix(nLocal, nDf, dFade));',
         '        // Extra high-frequency micro-relief octaves (df64 high freq -> no banding).',
         '        let dgrad = cbtGroundDetailGrad_df64(dxD, dyD, dzD, CBT_GROUND_BASE_FREQ, CBT_GROUND_DETAIL_OCTAVES);',

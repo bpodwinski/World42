@@ -92,6 +92,12 @@ export class OcbtSource implements CbtGeometrySource {
     private readonly tmpLightLocal = new Vector3();
     /** 6 frustum planes packed as (nx,ny,nz,d) in camera-relative planet-local space. */
     private readonly frustumF32 = new Float32Array(24);
+    /** 6 frustum plane normals (nx,ny,nz) in RENDER space, captured at the last re-bake. Under floating
+     *  origin the camera sits at the render origin, so these depend on camera ORIENTATION + fov only
+     *  (not position) — comparing the live frustum against them detects mouse-look, which neither the
+     *  position drift nor the planet-spin signal catches (so the cull used to freeze when looking around
+     *  from a stationary camera). */
+    private readonly anchorViewNormals = new Float32Array(18);
     /** Anti-pop guard band, in leaf-edge multiples (off-screen kept fine within this band). */
     private static readonly FRUSTUM_GUARD = 1.5;
     /** forcedInstanceCount = min(capacity, liveCount*SAFETY + FLOOR) — absorbs readback lag. */
@@ -270,6 +276,26 @@ export class OcbtSource implements CbtGeometrySource {
             this.tmpCamDelta.set(0, 0, 0);
         }
 
+        // Camera ORIENTATION (mouse-look) change since the anchor. Under floating origin the camera is
+        // at the render origin, so the render-space frustum normals depend on view orientation + fov
+        // only (position-independent). This is the signal the drift + planet-spin gate was MISSING:
+        // without it, looking around from a PARKED camera never re-baked, so the frustum cull and the
+        // prefetch froze ("camera at rest, culling stops"). Translation is still caught by driftKm.
+        let viewDirChanged = false;
+        const fp = frame.frustumPlanes;
+        if (this.anchorValid && fp && fp.length >= 6) {
+            let minDot = 1;
+            for (let i = 0; i < 6; i++) {
+                const n = fp[i].normal;
+                const d =
+                    n.x * this.anchorViewNormals[i * 3] +
+                    n.y * this.anchorViewNormals[i * 3 + 1] +
+                    n.z * this.anchorViewNormals[i * 3 + 2];
+                if (d < minDot) minDot = d;
+            }
+            viewDirChanged = minDot < OcbtSource.ROT_EPS_COS;
+        }
+
         // LOD-aware coverage threshold: the finest visible leaf edge projects to ~splitThresholdPx, so
         // its world size ~ splitThresholdPx*altitude/focalPx. Re-bake before lateral drift crosses half
         // the prefetch guard band. This is SCREEN-projected, so a near-ground planet gets a tight (m)
@@ -308,7 +334,7 @@ export class OcbtSource implements CbtGeometrySource {
             )
         );
         const forcedRebake = !this.anchorValid || this.convergeFrames > 0;
-        const driftDriven = driftKm > driftThreshKm || viewRotated;
+        const driftDriven = driftKm > driftThreshKm || viewRotated || viewDirChanged;
         this.framesSinceRebake++;
         const needRebake =
             forcedRebake || (driftDriven && this.framesSinceRebake >= rebakeEvery);
@@ -355,6 +381,10 @@ export class OcbtSource implements CbtGeometrySource {
                     this.frustumF32[i * 4 + 1] = this.tmpNormal.y;
                     this.frustumF32[i * 4 + 2] = this.tmpNormal.z;
                     this.frustumF32[i * 4 + 3] = pl.d;
+                    // Anchor the RENDER-space normal for next frame's mouse-look detection.
+                    this.anchorViewNormals[i * 3 + 0] = pl.normal.x;
+                    this.anchorViewNormals[i * 3 + 1] = pl.normal.y;
+                    this.anchorViewNormals[i * 3 + 2] = pl.normal.z;
                 }
                 // heightMargin = 0: positions are terrain-displaced now, so the frustum is exact.
                 this.kernel.setFrustum(this.frustumF32, OcbtSource.FRUSTUM_GUARD, true, 0);

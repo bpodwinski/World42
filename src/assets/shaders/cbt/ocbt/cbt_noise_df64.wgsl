@@ -168,6 +168,68 @@ fn cbtNoiseNormalAt_df64(dx : vec2<f32>, dy : vec2<f32>, dz : vec2<f32>, radius 
     return normalize(pn);
 }
 
+// df64 fbm GRADIENT only (no craters), normalized -> = cbtFbm_d_at_df64(...).yzw minus the crater add.
+// Lets the fragment SHARE one craterField across the f32 main normal and this df64 near-ground normal:
+// the crater field is low-frequency (cells >= ~20 km), identical in f32 and df64 to f32 precision, so
+// the f32 craterGrad the fragment already computed on `dir` is reused here verbatim. The detail loop is
+// kept (the df64 normal exists precisely to carry the near-ground micro-relief the f32 path bands on).
+fn cbtFbmGradAt_df64_noCrater(dx : vec2<f32>, dy : vec2<f32>, dz : vec2<f32>, camDistKm : f32, radiusKm : f32) -> vec3<f32> {
+    var maxMacro : f32 = 0.0;
+    var grad : vec3<f32> = vec3<f32>(0.0);
+    var freq : f32 = CBT_BASE_FREQ;
+    var amp : f32 = CBT_BASE_AMP;
+
+    for (var i : i32 = 0; i < CBT_MAX_OCTAVES; i = i + 1) {
+        if (i >= CBT_OCTAVES) { break; }
+        let wlKm = radiusKm / freq;
+        let onKm = CBT_DETAIL_RANGE * wlKm;
+        let fade = 1.0 - smoothstep(onKm, onKm * 2.0, camDistKm);
+        let sd = cbtSimplex3_df64_d(df64_mul_f32(dx, freq), df64_mul_f32(dy, freq), df64_mul_f32(dz, freq));
+        grad = grad + sd.yzw * (amp * freq * fade);
+        maxMacro = maxMacro + amp;
+        freq = freq * CBT_LACUNARITY;
+        amp = amp * CBT_PERSISTENCE;
+    }
+
+    if (maxMacro <= 1e-12) {
+        return vec3<f32>(0.0);
+    }
+
+    for (var j : i32 = 0; j < CBT_MAX_DETAIL; j = j + 1) {
+        if (j >= CBT_DETAIL_OCTAVES) { break; }
+        let wlKm = radiusKm / freq;
+        let onKm = CBT_DETAIL_RANGE * wlKm;
+        let fade = 1.0 - smoothstep(onKm, onKm * 2.0, camDistKm);
+        if (fade > 0.0) {
+            let sd = cbtSimplex3_df64_d(df64_mul_f32(dx, freq), df64_mul_f32(dy, freq), df64_mul_f32(dz, freq));
+            grad = grad + sd.yzw * (amp * freq * fade);
+        }
+        freq = freq * CBT_LACUNARITY;
+        amp = amp * CBT_PERSISTENCE;
+    }
+
+    let inv = CBT_GLOBAL_AMP / maxMacro;
+    return grad * inv;
+}
+
+// Twin of cbtNoiseNormalAt_df64 that takes a PRE-COMPUTED crater gradient (shared with the f32 main
+// normal) instead of running craterField again. Bit-identical to cbtNoiseNormalAt_df64 to f32 crater
+// precision when craterGrad is the f32 main normal's crater term.
+fn cbtNoiseNormalAtShared_df64(dx : vec2<f32>, dy : vec2<f32>, dz : vec2<f32>, radius : f32, camDistKm : f32, craterGrad : vec3<f32>) -> vec3<f32> {
+    let nrm = normalize(vec3<f32>(df64_to_f32(dx), df64_to_f32(dy), df64_to_f32(dz)));
+    var tang : vec3<f32>;
+    var bitan : vec3<f32>;
+    cbtSphereTangents(nrm, &tang, &bitan);
+
+    let grad = cbtFbmGradAt_df64_noCrater(dx, dy, dz, camDistKm, radius) + craterGrad;
+    let dhdt = dot(grad, tang);
+    let dhdb = dot(grad, bitan);
+
+    let sc = 1.0 / radius;
+    let pn = nrm - dhdt * sc * tang - dhdb * sc * bitan;
+    return normalize(pn);
+}
+
 // Extra high-frequency micro-relief gradient for the near-ground band (df64 domain, so
 // the very high freq on the unit dir does NOT band as it would in f32). `baseFreq` is the
 // first octave's frequency on the unit direction (= radius / wavelength); octaves double

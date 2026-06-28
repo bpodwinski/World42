@@ -460,3 +460,91 @@ fn cbtNoiseNormalAt(dir: vec3<f32>, radius: f32, camDistKm: f32, footprintKm: f3
     let pn = nrm - dhdt * sc * tang - dhdb * sc * bitan;
     return normalize(pn);
 }
+
+// fbm GRADIENT only (no craters), normalized -> = cbtFbm_d_at(...).yzw minus the crater add. Lets a
+// caller evaluate craterField ONCE per pixel and SHARE its gradient across several normals instead
+// of recomputing the full 6x27 crater scan inside each (the per-pixel normal was built up to 3x).
+// macroOnly skips the continued-detail loop (the slope/AO normal wants a smooth landform only);
+// maxMacro (the normalization) sums only the macro amps either way, so the macro gradient is
+// identical with or without the detail octaves.
+fn cbtFbmGradAt_core(p: vec3<f32>, camDistKm: f32, radiusKm: f32, footprintKm: f32, macroOnly: bool) -> vec3<f32> {
+    var maxMacro: f32 = 0.0;
+    var grad: vec3<f32> = vec3<f32>(0.0);
+    var freq: f32 = CBT_BASE_FREQ;
+    var amp: f32 = CBT_BASE_AMP;
+
+    for (var i: i32 = 0; i < CBT_MAX_OCTAVES; i = i + 1) {
+        if i >= CBT_OCTAVES { break; }
+        let wlKm = radiusKm / freq;
+        let onKm = CBT_DETAIL_RANGE * wlKm;
+        let fade = 1.0 - smoothstep(onKm, onKm * 2.0, camDistKm);
+        let fpFade = select(1.0, smoothstep(footprintKm * CBT_NORMAL_FP_LO, footprintKm * CBT_NORMAL_FP_HI, wlKm), footprintKm > 0.0);
+        let sd = cbtSimplex3_d(p * freq);
+        grad = grad + sd.yzw * (amp * freq * fade * fpFade);
+        maxMacro = maxMacro + amp;
+        freq = freq * CBT_LACUNARITY;
+        amp = amp * CBT_PERSISTENCE;
+    }
+
+    if maxMacro <= 1e-12 {
+        return vec3<f32>(0.0);
+    }
+
+    if !macroOnly {
+        for (var j: i32 = 0; j < CBT_MAX_DETAIL; j = j + 1) {
+            if j >= CBT_DETAIL_OCTAVES { break; }
+            let wlKm = radiusKm / freq;
+            let onKm = CBT_DETAIL_RANGE * wlKm;
+            let fade = 1.0 - smoothstep(onKm, onKm * 2.0, camDistKm);
+            if fade > 0.0 {
+                let fpFade = select(1.0, smoothstep(footprintKm * CBT_NORMAL_FP_LO, footprintKm * CBT_NORMAL_FP_HI, wlKm), footprintKm > 0.0);
+                let sd = cbtSimplex3_d(p * freq);
+                grad = grad + sd.yzw * (amp * freq * fade * fpFade);
+            }
+            freq = freq * CBT_LACUNARITY;
+            amp = amp * CBT_PERSISTENCE;
+        }
+    }
+
+    let inv = CBT_GLOBAL_AMP / maxMacro;
+    return grad * inv;
+}
+
+// Twin of cbtNoiseNormalAt that takes a PRE-COMPUTED crater gradient (craterGrad) instead of running
+// craterField internally. Bit-identical to cbtNoiseNormalAt when
+//   craterGrad = craterField(dir, radius, camDistKm, true, footprintKm).yzw
+// — it just lets the fragment compute that ONCE and reuse it for the main + df64 normals.
+fn cbtNoiseNormalAtShared(dir: vec3<f32>, radius: f32, camDistKm: f32, footprintKm: f32, craterGrad: vec3<f32>) -> vec3<f32> {
+    let nrm = normalize(dir);
+    var tang: vec3<f32>;
+    var bitan: vec3<f32>;
+    cbtSphereTangents(nrm, &tang, &bitan);
+
+    let grad = cbtFbmGradAt_core(nrm, camDistKm, radius, footprintKm, false) + craterGrad;
+    let dhdt = dot(grad, tang);
+    let dhdb = dot(grad, bitan);
+
+    let sc = 1.0 / radius;
+    let pn = nrm - dhdt * sc * tang - dhdb * sc * bitan;
+    return normalize(pn);
+}
+
+// Smooth landform normal for material splatting + curvature AO. MACRO octaves only (the cm detail is
+// irrelevant to a slope-driven splat / AO and was mostly faded out at the slope distance anyway). The
+// crater term is the DOMINANT relief and is low-frequency (cells >= 2 km), so it is evaluated PER
+// VERTEX and passed in as craterGrad (interpolated) rather than re-scanned per pixel — crater walls
+// still drive rock-on-slope, at a fraction of the cost.
+fn cbtNoiseNormalSlope(dir: vec3<f32>, radius: f32, camDistKm: f32, craterGrad: vec3<f32>) -> vec3<f32> {
+    let nrm = normalize(dir);
+    var tang: vec3<f32>;
+    var bitan: vec3<f32>;
+    cbtSphereTangents(nrm, &tang, &bitan);
+
+    let grad = cbtFbmGradAt_core(nrm, camDistKm, radius, 0.0, true) + craterGrad;
+    let dhdt = dot(grad, tang);
+    let dhdb = dot(grad, bitan);
+
+    let sc = 1.0 / radius;
+    let pn = nrm - dhdt * sc * tang - dhdb * sc * bitan;
+    return normalize(pn);
+}
