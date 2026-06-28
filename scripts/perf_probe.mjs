@@ -18,10 +18,15 @@
  *   node scripts/perf_probe.mjs --scenario ground-still  --knob hwScale=1,0.7,0.5
  *   node scripts/perf_probe.mjs --scenario ground-drift  --knob df64NearKm=0.05,2,20
  *   node scripts/perf_probe.mjs --scenario ground-still  --knob perfMask=0,2,31
+ *   node scripts/perf_probe.mjs --scenario ground-still  --freeze --knob perfMask=0,4,8,16
  *   node scripts/perf_probe.mjs --scenario orbit --planet 1 --window 6
  *
+ * --freeze pins OCBT topology (after the initial convergence) so a perfMask sweep runs at a CONSTANT
+ * leaf count — the clean way to attribute per-block FRAGMENT cost. The leaf min–max spread is reported
+ * so you can confirm the freeze held (spread ~0). Use it with --scenario ground-still.
+ *
  * Flags: --url, --planet <i>, --scenario, --knob <name=v1,v2,..>, --window <sec>, --hwScale <base>,
- *        --headless, --keep (don't close the browser at the end).
+ *        --freeze, --headless, --keep (don't close the browser at the end).
  *
  * Requires: a running dev server (npm run serve), an NVIDIA GPU (nvidia-smi on PATH), Windows
  * PowerShell for the CPU-app counter. See .claude/skills/world42-perf-probe/SKILL.md.
@@ -32,7 +37,7 @@ import os from 'node:os';
 
 // ---- CLI -------------------------------------------------------------------------------------
 function parseArgs(argv) {
-    const a = { url: 'http://localhost:19000/?system=Dev&planet=Moon', planet: 0, scenario: 'ground-drift', knob: null, window: 5, hwScale: 1, headless: false, keep: false };
+    const a = { url: 'http://localhost:19000/?system=Dev&planet=Moon', planet: 0, scenario: 'ground-drift', knob: null, window: 5, hwScale: 1, headless: false, keep: false, freeze: false };
     for (let i = 2; i < argv.length; i++) {
         const k = argv[i];
         const next = () => argv[++i];
@@ -42,6 +47,7 @@ function parseArgs(argv) {
         else if (k === '--knob') a.knob = next();
         else if (k === '--window') a.window = parseFloat(next());
         else if (k === '--hwScale') a.hwScale = parseFloat(next());
+        else if (k === '--freeze') a.freeze = true;
         else if (k === '--headless') a.headless = true;
         else if (k === '--keep') a.keep = true;
     }
@@ -96,7 +102,11 @@ function median(a) { const s = a.slice().sort((x, y) => x - y); return s[s.lengt
 function pct(a, p) { const s = a.slice().sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.floor(s.length * p))]; }
 
 // ---- main ------------------------------------------------------------------------------------
-const browser = await chromium.launch({ headless: args.headless, args: ['--enable-unsafe-webgpu'] });
+// vsync off → the GPU runs flat-out so util/power reflect TRUE load (vsync would let it idle between presents).
+const browser = await chromium.launch({
+    headless: args.headless,
+    args: ['--enable-unsafe-webgpu', '--disable-gpu-vsync', '--disable-frame-rate-limit']
+});
 const page = await browser.newPage({ viewport: { width: 1500, height: 950 } });
 const cdp = await browser.newBrowserCDPSession().catch(() => null);
 const pageCdp = await page.context().newCDPSession(page);
@@ -141,7 +151,15 @@ await page.evaluate((s) => window.__world42Perf.setHardwareScaling(s), args.hwSc
 await park();
 await sleep(3000);
 
-console.log(`\n${(knobName || 'baseline').padEnd(14)} | GPU%(med/p90/max)  Gmem%  Vram  Pwr  Clk | CPUapp%  CPUrndr% | fps  leaves  draws`);
+// --freeze: pin the topology AFTER the initial convergence so the perfMask sweep below runs at a
+// constant leaf count (clean fragment attribution). The leaf min–max spread reported per row confirms
+// the freeze held. Released at the end so the dev session isn't left frozen.
+if (args.freeze) {
+    await page.evaluate(() => { window.__ocbtFreezeTopology = true; });
+    console.log('  (topology FROZEN — leaf set pinned; spread should read ~0 below)');
+}
+
+console.log(`\n${(knobName || 'baseline').padEnd(14)} | GPU%(med/p90/max)  Gmem%  Vram  Pwr  Clk | CPUapp%  CPUrndr% | fps  leaves±spread  draws`);
 console.log('-'.repeat(104));
 
 for (const v of values) {
@@ -156,8 +174,14 @@ for (const v of values) {
     const rndrStart = await rendererTaskSec();
     const tStart = Date.now();
     const gu = [];
+    const lv = []; // leaf-count samples across the window → exposes topology drift (spread ~0 when frozen)
     const ticks = Math.max(8, Math.round((args.window * 1000) / 250));
-    for (let i = 0; i < ticks; i++) { const g = gpuSample(); if (g) gu.push(g); await sleep(250); }
+    for (let i = 0; i < ticks; i++) {
+        const g = gpuSample(); if (g) gu.push(g);
+        const lf = await page.evaluate(() => window.__world42Perf.getStats().cbt?.leafCount ?? 0);
+        if (lf) lv.push(lf);
+        await sleep(250);
+    }
     const wallSec = (Date.now() - tStart) / 1000;
     const cpuEnd = cpuAppSeconds();
     const rndrEnd = await rendererTaskSec();
@@ -170,14 +194,20 @@ for (const v of values) {
     const cpuRndr = rndrStart != null && rndrEnd != null ? ((rndrEnd - rndrStart) / wallSec) * 100 : null;
     const f = (x, d = 0) => (x == null ? '  - ' : x.toFixed(d));
     const last = gu[gu.length - 1] || {};
+    // Leaf count med + min–max spread across the window: a non-trivial spread means topology drifted
+    // during the sample, so any power delta is partly leaf-count, not the swept knob. ~0 when --freeze.
+    const lMed = lv.length ? median(lv) : snap.leaves;
+    const lSpread = lv.length ? Math.max(...lv) - Math.min(...lv) : 0;
     console.log(
         `${String(v ?? '-').padEnd(14)} | ${f(median(U))}/${f(pct(U, 0.9))}/${f(Math.max(...U))}`.padEnd(34) +
         `   ${f(median(gu.map((x) => x.mu)))}   ${f(last.mem)}MB ${f(last.pw, 0)}W ${f(last.clk, 0)} | ` +
-        `${f(cpuApp, 0).padStart(5)}    ${f(cpuRndr, 0).padStart(5)} | ${f(snap.fps, 0)}  ${String(snap.leaves).padStart(7)}  ${snap.draws}`
+        `${f(cpuApp, 0).padStart(5)}    ${f(cpuRndr, 0).padStart(5)} | ${f(snap.fps, 0)}  ${String(lMed).padStart(7)}±${lSpread}  ${snap.draws}`
     );
 }
 
+if (args.freeze) await page.evaluate(() => { window.__ocbtFreezeTopology = false; });
 console.log('\nNotes: GPU% from nvidia-smi (whole-GPU). CPUapp% = Playwright-Chromium CPU / (wall*cores).');
 console.log('CPUrndr% = renderer main-thread busy (CDP TaskDuration). fps is vsync-capped at 60 — read GPU%/CPU% for headroom.');
+console.log('leaves±spread: med ± (max−min) over the window; a spread >~1% means topology drifted (use --freeze for a clean fragment sweep).');
 if (!args.keep) await browser.close();
 console.log('done');

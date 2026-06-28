@@ -534,17 +534,26 @@ fn cbtNoiseNormalAtShared(dir: vec3<f32>, radius: f32, camDistKm: f32, footprint
 // crater term is the DOMINANT relief and is low-frequency (cells >= 2 km), so it is evaluated PER
 // VERTEX and passed in as craterGrad (interpolated) rather than re-scanned per pixel — crater walls
 // still drive rock-on-slope, at a fraction of the cost.
-fn cbtNoiseNormalSlope(dir: vec3<f32>, radius: f32, camDistKm: f32, craterGrad: vec3<f32>) -> vec3<f32> {
+// Reconstruct a sphere surface normal from a PRECOMPUTED height gradient (no fbm/crater eval). Used by
+// the per-vertex slope normal: the macro fbm gradient + crater gradient are evaluated PER VERTEX and
+// interpolated, so the fragment only does the cheap tangent projection here (kills the 2nd per-pixel
+// macro fbm). The slope normal is a fixed-footprint (CBT_SLOPE_DIST) SMOOTH landform normal, so the
+// per-vertex-then-interpolate approximation is invisible (shared edge verts share dir -> watertight).
+fn cbtNormalFromGrad(dir: vec3<f32>, radius: f32, grad: vec3<f32>) -> vec3<f32> {
     let nrm = normalize(dir);
     var tang: vec3<f32>;
     var bitan: vec3<f32>;
     cbtSphereTangents(nrm, &tang, &bitan);
-
-    let grad = cbtFbmGradAt_core(nrm, camDistKm, radius, 0.0, true) + craterGrad;
     let dhdt = dot(grad, tang);
     let dhdb = dot(grad, bitan);
-
     let sc = 1.0 / radius;
     let pn = nrm - dhdt * sc * tang - dhdb * sc * bitan;
     return normalize(pn);
+}
+
+// Per-PIXEL variant (kept for reference / fallback): evaluates the macro fbm gradient inline. The render
+// path uses the per-vertex `vSlopeFbmGrad` + cbtNormalFromGrad instead.
+fn cbtNoiseNormalSlope(dir: vec3<f32>, radius: f32, camDistKm: f32, craterGrad: vec3<f32>) -> vec3<f32> {
+    let grad = cbtFbmGradAt_core(normalize(dir), camDistKm, radius, 0.0, true) + craterGrad;
+    return cbtNormalFromGrad(dir, radius, grad);
 }

@@ -123,10 +123,15 @@ export class OcbtSource implements CbtGeometrySource {
      *  exact between via uCamDelta). 1 = every frame (old behavior). Live-tunable via
      *  globalThis.__ocbtRebakeEvery. Higher = cheaper motion, slightly more LOD latency. */
     private static readonly REBAKE_EVERY_DEFAULT = 3;
+    /** Warn once when the live leaf count (pool_tree[1]) crosses this fraction of the pool: beyond it
+     *  the Allocate pass starts dropping splits → the limb silently under-tessellates. */
+    private static readonly POOL_SATURATION_FRAC = 0.9;
 
+    private readonly key: string;
     private ready = false;
     private disposed = false;
     private liveLeafCount = 0;
+    private poolSaturationWarned = false;
     private statsReadPending = false;
     private wantWireframe = false;
     private wantDebugLod = false;
@@ -138,6 +143,7 @@ export class OcbtSource implements CbtGeometrySource {
         listener: CbtGeometryListener
     ) {
         this.listener = listener;
+        this.key = opts.key;
         this.starPos = opts.starPosWorldDouble;
         this.starIntensity = opts.starIntensity;
         this.radius = opts.radiusSim;
@@ -336,8 +342,18 @@ export class OcbtSource implements CbtGeometrySource {
         const forcedRebake = !this.anchorValid || this.convergeFrames > 0;
         const driftDriven = driftKm > driftThreshKm || viewRotated || viewDirChanged;
         this.framesSinceRebake++;
+        // Bench/profiling override: pin the topology (skip ALL rebakes) so a fragment perf-mask A/B
+        // sweep runs at a CONSTANT leaf count — the clean way to attribute per-block fragment cost
+        // (the old in-flight sweep was confounded by leaf-count variance). PRECONDITION: converge the
+        // view FIRST (this hard-freezes even the forced/burst rebake), then set the flag. The draw stays
+        // exact between frames (uCamDelta keeps carrying the residual) and setPerfMask below still
+        // applies each frame, so toggling blocks takes effect while the leaf set is held.
+        const freezeTopology = !!(
+            globalThis as unknown as { __ocbtFreezeTopology?: boolean | number }
+        ).__ocbtFreezeTopology;
         const needRebake =
-            forcedRebake || (driftDriven && this.framesSinceRebake >= rebakeEvery);
+            !freezeTopology &&
+            (forcedRebake || (driftDriven && this.framesSinceRebake >= rebakeEvery));
 
         // uCamDelta carries the residual so the draw is exact between re-bakes (0 on a re-bake frame).
         if (needRebake) this.tmpCamDelta.set(0, 0, 0);
@@ -439,6 +455,21 @@ export class OcbtSource implements CbtGeometrySource {
                     this.statsReadPending = false;
                     if (this.disposed) return;
                     this.liveLeafCount = count;
+                    // Pool-saturation guard (pool_tree[1] vs capacity): if the live leaf set ever
+                    // approaches the fixed pool, the Allocate pass starts dropping splits and the limb
+                    // silently under-tessellates. Warn ONCE so a too-small OCBT_CAPACITY (or a planet
+                    // that needs more than Dev/Moon's ~401k) is visible, not mistaken for a LOD bug.
+                    if (
+                        !this.poolSaturationWarned &&
+                        count > OcbtSource.POOL_SATURATION_FRAC * this.kernel.capacity
+                    ) {
+                        this.poolSaturationWarned = true;
+                        console.warn(
+                            `[OCBT] ${this.key}: live leaves ${count} > ` +
+                                `${Math.round(OcbtSource.POOL_SATURATION_FRAC * 100)}% of pool ` +
+                                `${this.kernel.capacity} — raise OCBT_CAPACITY (limb may under-tessellate).`
+                        );
+                    }
                     // Bound the draw to the live count (= compaction count = pool_tree[1]),
                     // over-estimated to absorb readback latency + growth. Jump UP instantly,
                     // ramp DOWN slowly so a single stale-small read can't pop holes.

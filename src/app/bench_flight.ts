@@ -1,17 +1,23 @@
-import { Matrix, Quaternion, Vector3, type Scene, type TransformNode } from '@babylonjs/core';
+import { Matrix, Vector3, type Scene, type TransformNode } from '@babylonjs/core';
 import type { OriginCamera } from '../core/camera/camera_manager';
 import { ScaleManager } from '../core/scale/scale_manager';
 
 /**
- * Deterministic camera-flight bench (dev-only). Replays the SAME ground→orbit trajectory every run so
- * optimizations can be compared apples-to-apples. Exposed as `window.__world42Bench`.
+ * Deterministic camera-flight bench (dev-only). Replays the SAME path every run so optimizations can be
+ * compared apples-to-apples. Exposed as `window.__world42Bench`.
+ *
+ * Path: starts at the planet's NORTH POLE, does a short ground roll RECEDING from the sun (camera looks
+ * back at the star), then climbs PROGRESSIVELY like an airplane (gentle continuous ascent that levels off
+ * at a low cruise orbit), rotating the view from the star down toward the planet (nadir) during the climb
+ * so you can eyeball the frustum cull as the body re-frames.
  *
  * Determinism: the camera pose is a pure function of the FRAME INDEX (not wall-clock), one keyframe per
  * rendered frame, so the path is identical regardless of fps. The target planet's spin is FROZEN for the
- * duration (rotation.y re-imposed each frame), so the relief under the path does not drift between runs.
- * The pose observer is registered FIRST (insertFirst) so visibility cull + the OCBT compute + the render
- * all see the bench pose the same frame. Per-frame metrics are captured via the injected stats sampler;
- * whole-GPU power is sampled externally (nvidia-smi) by scripts/bench_flight.mjs and aligned by timestamp.
+ * duration (rotation.y re-imposed each frame). The pose observer is registered FIRST (insertFirst) so
+ * cull + compute + render all see the bench pose the same frame. Each run also RESETS OCBT topology
+ * (resetLod) up front, so the convergence transient — and thus the leaf-count trajectory — is identical
+ * run-to-run (no state leak from a previous flight). Per-frame metrics come from the injected stats
+ * sampler; whole-GPU power is sampled externally (nvidia-smi) by scripts/bench_flight.mjs.
  */
 
 export type BenchPlanet = {
@@ -26,17 +32,12 @@ export type BenchFrameSample = {
     frameMs: number;
     gpuMs: number;
     drawCalls: number;
-    cbt: {
-        leafCount: number;
-        ocbtTopoMs: number;
-        ocbtEvalMs: number;
-        ocbtCompactMs: number;
-    };
+    cbt: { leafCount: number; ocbtTopoMs: number; ocbtEvalMs: number; ocbtCompactMs: number };
 };
 
 type BenchFrame = {
     i: number;
-    t: number; // performance.now() at capture (for nvidia-smi alignment)
+    t: number;
     phase: 'ground' | 'climb';
     altKm: number;
     leaves: number;
@@ -49,12 +50,27 @@ type BenchFrame = {
 };
 
 export type BenchRunOptions = {
-    /** Total rendered frames to replay (default 720 ≈ 12 s at 60 fps). */
+    /** Total rendered frames to replay (default 2000 ≈ 33 s at 60 fps). */
     frames?: number;
     /** Target planet key suffix (e.g. "Moon"); default = nearest planet to the camera at call time. */
     planet?: string;
-    /** Fraction of the run spent skimming the ground before the climb (default 0.45). */
+    /** Fraction of the run spent on the ground roll before the airplane climb starts (default 0.25). */
     groundFrac?: number;
+    /** Top altitude as a multiple of the planet radius (default 1 → final distance 2×R, a low slow climb). */
+    topAltR?: number;
+    /** Lock the internal render resolution for the run so profiling is comparable (default 1920×1080). */
+    renderWidth?: number;
+    renderHeight?: number;
+    /** Cap the bench to this frame rate (default 60) so the deterministic test runs at the SAME rate on
+     *  any display (a 120 Hz screen would otherwise play the path twice as fast). Ignored if uncapped. */
+    fpsCap?: number;
+    /** Fixed planet spin phase (rad) frozen for the run (default 0) — makes the terrain under the path
+     *  identical on every run, independent of when the bench is launched. */
+    spinPhase?: number;
+    /** Uncap the frame rate (swap the rAF loop for a non-rAF one) so the GPU runs flat-out (default FALSE:
+     *  it makes the browser unresponsive — flat-out on the main thread. Only exceeds the display refresh
+     *  when Chrome was launched with --disable-gpu-vsync). Power deltas are measurable WITHOUT this. */
+    uncapped?: boolean;
 };
 
 const smoothstep = (e0: number, e1: number, x: number): number => {
@@ -66,22 +82,71 @@ export function installBenchFlight(
     scene: Scene,
     camera: OriginCamera,
     planets: BenchPlanet[],
-    sampleStats: () => BenchFrameSample
+    sampleStats: () => BenchFrameSample,
+    starPositions: Vector3[] = [],
+    resetLod: () => void = () => {}
 ): void {
     let running = false;
 
     const api = {
         isRunning: () => running,
 
-        /** Replay the deterministic ground→orbit+yaw flight; resolves with the per-frame metric log. */
+        /** Replay the deterministic north-pole → low-orbit flight (star-locked); resolves with the log. */
         run: (opts: BenchRunOptions = {}): Promise<{ meta: object; frames: BenchFrame[] }> => {
             if (running) return Promise.reject(new Error('bench already running'));
             if (!planets.length) return Promise.reject(new Error('no bench planets'));
 
-            const N = Math.max(60, Math.floor(opts.frames ?? 720));
-            const groundFrac = Math.min(0.9, Math.max(0.1, opts.groundFrac ?? 0.45));
+            const N = Math.max(60, Math.floor(opts.frames ?? 2000));
+            const groundFrac = Math.min(0.9, Math.max(0.05, opts.groundFrac ?? 0.25));
+            const topAltR = Math.max(0.1, opts.topAltR ?? 1);
 
-            // Pick the target planet: by key suffix, else nearest to the camera now.
+            // Lock the internal render resolution to 1080p for the whole run so the fragment cost (and
+            // thus the GPU power/util) is comparable across runs/machines regardless of window size. The
+            // CSS canvas keeps its size (the 1080p buffer just stretches to fit); restored at the end.
+            const engine = scene.getEngine();
+            const lockW = Math.max(64, Math.floor(opts.renderWidth ?? 1920));
+            const lockH = Math.max(64, Math.floor(opts.renderHeight ?? 1080));
+            engine.setSize(lockW, lockH, true);
+
+            // Render-loop control for the run. DEFAULT: a rAF loop TIME-GATED to fpsCap (60) so the test is
+            // deterministic on any display (a 120 Hz screen would otherwise play the path twice as fast) and
+            // stays smooth. uncapped:true → a non-rAF MessageChannel loop running flat-out (GPU saturated)
+            // but the browser goes UNRESPONSIVE, so it is opt-in. beginFrame/endFrame wrap scene.render()
+            // exactly like Babylon's own loop — endFrame PRESENTS the swapchain AND resets the GPU-timestamp
+            // query pool (without it: timestamp "index out of range" + "Destroyed texture used in a submit").
+            const uncapped = opts.uncapped ?? false;
+            const fpsCap = Math.max(1, opts.fpsCap ?? 60);
+            let restoreLoop: () => void = () => {};
+            engine.stopRenderLoop();
+            if (uncapped) {
+                const mc = new MessageChannel();
+                let stopped = false;
+                mc.port1.onmessage = () => {
+                    if (stopped) return;
+                    engine.beginFrame();
+                    scene.render();
+                    engine.endFrame();
+                    mc.port2.postMessage(0);
+                };
+                mc.port2.postMessage(0); // kick off the loop
+                restoreLoop = () => { stopped = true; engine.runRenderLoop(() => scene.render()); };
+            } else {
+                const targetMs = 1000 / fpsCap;
+                let last = 0;
+                let raf = 0;
+                const loop = (now: number): void => {
+                    raf = requestAnimationFrame(loop);
+                    if (now - last < targetMs - 1) return; // gate to fpsCap (skip the extra refresh ticks)
+                    last = now;
+                    engine.beginFrame();
+                    scene.render();
+                    engine.endFrame();
+                };
+                raf = requestAnimationFrame(loop);
+                restoreLoop = () => { cancelAnimationFrame(raf); engine.runRenderLoop(() => scene.render()); };
+            }
+
+            // Target planet: by key suffix, else nearest to the camera now.
             let target = planets[0];
             if (opts.planet) {
                 const m = planets.find((p) => p.key.toLowerCase().endsWith(opts.planet!.toLowerCase()));
@@ -98,29 +163,61 @@ export function installBenchFlight(
             const R = target.radiusSim;
             const node = target.node;
 
-            // Freeze spin: capture rotation.y, re-impose it each frame (the catalog spin observer ran
-            // earlier this frame; we override it). Capture the frozen world rotation for local→world.
-            const frozenYaw = node.rotation.y;
-            node.rotation.y = frozenYaw;
+            // Nearest star to the planet → the camera locks onto it (WorldDouble; null = horizon fallback).
+            let starPos: Vector3 | null = null;
+            let bestStar = Infinity;
+            for (const s of starPositions) {
+                const d = Vector3.DistanceSquared(s, C);
+                if (d < bestStar) { bestStar = d; starPos = s; }
+            }
+
+            // Freeze spin to a FIXED phase (default 0) — NOT the current phase — so the terrain under the
+            // path is identical on every run regardless of when the bench is launched (the catalog spin
+            // observer has been advancing rotation.y since load). Re-imposed each frame; the ORIGINAL phase
+            // is restored at the end so the user's continued view is not disturbed.
+            const originalYaw = node.rotation.y;
+            const benchYaw = opts.spinPhase ?? 0;
+            node.rotation.y = benchYaw;
             node.computeWorldMatrix(true);
             const Rw = new Matrix();
             node.getWorldMatrix().getRotationMatrixToRef(Rw);
 
-            // Fixed planet-local path basis (constant while frozen): a non-polar ground anchor + a
-            // tangent travel direction + the great-circle binormal.
-            const a = new Vector3(1, 0.5, 0.25).normalize();
-            const t = Vector3.Cross(a, Vector3.Up()).normalize(); // travel direction (⊥ a)
+            // Path basis (planet-local, constant while frozen): START AT THE NORTH POLE (+Y). Travel heads
+            // AWAY FROM THE SUN — `t` = MINUS the star direction projected onto the pole's tangent plane —
+            // so the camera RECEDES from the sub-solar point while LOOKING BACK at the star (no strafe).
+            const a = new Vector3(0, 1, 0);
+            let t: Vector3;
+            if (starPos) {
+                const RwInv = new Matrix();
+                Rw.invertToRef(RwInv);
+                const sunLocal = Vector3.TransformNormalToRef(
+                    starPos.subtract(C).normalize(),
+                    RwInv,
+                    new Vector3()
+                );
+                // -(horizontal component of the sun dir): the surface tangent pointing AWAY from the sun.
+                const tang = a.scale(Vector3.Dot(sunLocal, a)).subtractInPlace(sunLocal);
+                t = tang.lengthSquared() > 1e-6
+                    ? tang.normalize()
+                    : Vector3.Cross(a, new Vector3(1, 0, 0)).normalize();
+            } else {
+                const ref = Math.abs(a.x) < 0.9 ? new Vector3(1, 0, 0) : new Vector3(0, 0, 1);
+                t = Vector3.Cross(a, ref).normalize();
+            }
 
-            // Path scalars per normalized param u∈[0,1].
-            const ARC_GROUND = 0.012; // rad swept along the surface while skimming (~21 km on the Moon)
-            const ARC_CLIMB = 0.008; // extra arc during the climb
-            const LOOK_AHEAD = 0.03; // grazing-horizon look-ahead (rad)
+            const ARC_GROUND = 0.012; // rad swept along the surface while skimming
+            const ARC_CLIMB = 0.004;
             const ALT_GROUND = 0.03; // km (30 m)
-            const ALT_TOP = 2 * R; // final distance = R + 2R = 3R (matches the xR waypoint convention)
-            const YAW_AMP = 0.45; // rad — slow look sweep to exercise frustum cull / mouse-look wake
+            const ALT_TOP = topAltR * R; // final distance = R + topAltR*R
+
+            const dirL = new Vector3();
+            const camLocal = new Vector3();
+            const camWorld = new Vector3();
+            const tgtWorld = new Vector3();
+            const lookDir = new Vector3();
+            const renderTarget = new Vector3();
 
             const dirAt = (theta: number, out: Vector3): Vector3 => {
-                // Great-circle: a*cos + t*sin (unit).
                 out.set(
                     a.x * Math.cos(theta) + t.x * Math.sin(theta),
                     a.y * Math.cos(theta) + t.y * Math.sin(theta),
@@ -129,76 +226,66 @@ export function installBenchFlight(
                 return out.normalize();
             };
 
-            const dirL = new Vector3();
-            const aheadL = new Vector3();
-            const camLocal = new Vector3();
-            const tgtLocal = new Vector3();
-            const camWorld = new Vector3();
-            const tgtWorld = new Vector3();
-            const lookDir = new Vector3();
-            const renderTarget = new Vector3();
-            const yawQ = new Quaternion();
-
             const frames: BenchFrame[] = [];
             let i = 0;
+
+            // Confound B (profiling bilan): re-bake topology from scratch so EVERY flight starts from
+            // the same un-converged state and replays an identical leaf-count trajectory. Without this,
+            // back-to-back flights (--repeat) inherit the previous flight's converged tree → different
+            // transient → noisy power/leaf deltas mistaken for optimization signal.
+            resetLod();
 
             return new Promise((resolve) => {
                 const poseFor = (idx: number): 'ground' | 'climb' => {
                     const u = idx / (N - 1);
                     const climbing = u >= groundFrac;
-                    const cu = climbing ? (u - groundFrac) / (1 - groundFrac) : 0; // climb param 0..1
+                    const cu = climbing ? (u - groundFrac) / (1 - groundFrac) : 0;
 
-                    const theta =
-                        ARC_GROUND * smoothstep(0, groundFrac, u) + ARC_CLIMB * (climbing ? cu : 0);
-                    const altKm = climbing
-                        ? ALT_GROUND + (ALT_TOP - ALT_GROUND) * smoothstep(0, 1, cu)
-                        : ALT_GROUND;
+                    const theta = ARC_GROUND * smoothstep(0, groundFrac, u) + ARC_CLIMB * cu;
+                    // LOG/exponential climb: equal time per altitude OCTAVE across the huge 30m→~1000s-km
+                    // range, so the ascent stays smooth (a linear ramp blows through the low altitudes in a
+                    // few frames = abrupt). smoothstep(cu) eases the takeoff + levels off at cruise on top.
+                    const climb01 = smoothstep(0, 1, cu); // 0 on the ground roll, 1 at cruise
+                    const altKm = ALT_GROUND * Math.pow(ALT_TOP / ALT_GROUND, climb01);
 
                     dirAt(theta, dirL);
                     camLocal.copyFrom(dirL).scaleInPlace(R + altKm);
-
-                    // Look target: grazing-horizon point ahead at ground; blend toward nadir (center) on climb.
-                    dirAt(theta + LOOK_AHEAD, aheadL);
-                    aheadL.scaleInPlace(R); // surface point ahead
-                    const nadirBlend = climbing ? smoothstep(0, 1, cu) : 0;
-                    tgtLocal.copyFrom(aheadL).scaleInPlace(1 - nadirBlend); // → (0,0,0)=center as blend→1
-
-                    // Local → world (frozen rotation).
                     Vector3.TransformCoordinatesToRef(camLocal, Rw, camWorld);
                     camWorld.addInPlace(C);
-                    Vector3.TransformCoordinatesToRef(tgtLocal, Rw, tgtWorld);
-                    tgtWorld.addInPlace(C);
 
-                    // Yaw the look direction around the radial (world up) axis — steady sweep both ways.
-                    lookDir.copyFrom(tgtWorld).subtractInPlace(camWorld);
-                    const yaw = YAW_AMP * Math.sin(u * Math.PI * 2);
-                    Vector3.TransformNormalToRef(dirL, Rw, renderTarget); // reuse: world radial up
-                    Quaternion.RotationAxisToRef(renderTarget.normalize(), yaw, yawQ);
-                    lookDir.rotateByQuaternionToRef(yawQ, lookDir);
+                    // GROUND: lock onto the star (fixed sun at the start). CLIMB: rotate the view from the
+                    // star toward the PLANET (nadir, planet center) so the rising camera frames the whole
+                    // body — lets you eyeball the frustum cull / prefetch as terrain leaves & re-enters view.
+                    if (starPos) {
+                        lookDir.copyFrom(starPos).subtractInPlace(camWorld).normalize();
+                        if (climbing) {
+                            tgtWorld.copyFrom(C).subtractInPlace(camWorld).normalize(); // nadir
+                            const b = smoothstep(0, 1, cu);
+                            lookDir.scaleInPlace(1 - b).addInPlace(tgtWorld.scaleInPlace(b)).normalize();
+                        }
+                    } else {
+                        // No star: look at the planet center the whole time.
+                        lookDir.copyFrom(C).subtractInPlace(camWorld).normalize();
+                    }
 
-                    // Impose absolute pose: doublepos = path point, zero render-space drift, set look target.
                     camera.doublepos.copyFrom(camWorld);
                     camera.position.set(0, 0, 0);
-                    renderTarget.copyFrom(lookDir); // render-space target (camera sits at render origin)
+                    renderTarget.copyFrom(lookDir); // render-space target (camera at render origin)
                     camera.setTarget(renderTarget);
                     return climbing ? 'climb' : 'ground';
                 };
 
                 const observer = scene.onBeforeRenderObservable.add(
                     () => {
-                        node.rotation.y = frozenYaw; // re-freeze spin (override the catalog observer)
+                        node.rotation.y = benchYaw; // re-freeze to the FIXED bench phase
                         const phase = poseFor(i);
-                        // Capture LAST frame's metrics (this frame's pose drives next frame's measured cost,
-                        // but the smoothed counters make the 1-frame offset immaterial for aggregation).
                         const s = sampleStats();
-                        const u = i / (N - 1);
                         const altKm = phase === 'climb'
-                            ? ScaleManager.toRealUnits(
-                                Math.max(0, camera.doublepos.subtract(C).length() - R))
+                            ? ScaleManager.toRealUnits(Math.max(0, camera.doublepos.subtract(C).length() - R))
                             : ALT_GROUND;
                         frames.push({
                             i,
-                            t: Date.now(), // wall clock — aligns with the external nvidia-smi sampler
+                            t: Date.now(),
                             phase,
                             altKm,
                             leaves: s.cbt.leafCount,
@@ -212,16 +299,12 @@ export function installBenchFlight(
                         i++;
                         if (i >= N) {
                             scene.onBeforeRenderObservable.remove(observer);
-                            node.rotation.y = frozenYaw; // leave the planet where it started (spin resumes)
+                            node.rotation.y = originalYaw; // restore the original phase (spin resumes from there)
+                            restoreLoop(); // back to the rAF render loop
+                            engine.resize(); // restore the window-driven render resolution
                             running = false;
                             resolve({
-                                meta: {
-                                    planet: target.key,
-                                    radiusSim: R,
-                                    frames: N,
-                                    groundFrac,
-                                    u: `0..1`
-                                },
+                                meta: { planet: target.key, radiusSim: R, frames: N, groundFrac, topAltR, starLocked: !!starPos },
                                 frames
                             });
                         }

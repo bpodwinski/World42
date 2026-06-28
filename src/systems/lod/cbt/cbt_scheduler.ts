@@ -136,7 +136,12 @@ export class CbtPlanet {
         const engine = this.scene.getEngine();
         // OCBT (pool-CBT, HPG 2024): cost decoupled from subdivision depth via fixed
         // pool capacity. Owns its own mesh/material; the listener is telemetry-only.
-        const OCBT_CAPACITY = 1 << 20; // 1 048 576 slots
+        // Right-sized to the measured ground peak (~401k live leaves at the grazing pole on Dev/Moon,
+        // split 16px): 1<<19 = 524 288 slots holds it with ~24% headroom while halving the O(capacity)
+        // topology passes (copy_neighbors / reduce / classify) and freeing ~190 MB VRAM per planet vs
+        // 1<<20. Do NOT drop to 1<<18 (262k < the 401k peak → the limb under-tessellates). The readback
+        // saturation guard in OcbtSource warns once if any planet's live count approaches this pool.
+        const OCBT_CAPACITY = 1 << 19; // 524 288 slots
         const OCBT_MAX_LEVEL = 32; // u64 hard cap; df64 cracks well before
         // Subdivision FLOOR: the whole sphere is force-refined to at least this level so it never
         // shows the bare 8 octahedron faces (faceted limb) when far or merging. Cost is fixed and

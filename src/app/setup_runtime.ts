@@ -177,6 +177,13 @@ export function setupRuntime({
         setPerfMask: (mask: number) => {
             (globalThis as unknown as { __ocbtPerfMask?: number }).__ocbtPerfMask = mask | 0;
         },
+        /** Dev-only: pin OCBT topology (freeze the leaf set) so a fragment perf-mask sweep runs at a
+         *  CONSTANT leaf count — the clean way to attribute per-block fragment cost. Converge the view
+         *  FIRST, then freeze. Leaf-count variance confounded the old in-flight perfMask sweep. */
+        setFreezeTopology: (on: boolean) => {
+            (globalThis as unknown as { __ocbtFreezeTopology?: boolean }).__ocbtFreezeTopology =
+                !!on;
+        },
         getStats: () => sampleStats(),
         getPlanets: () => lod.getCbtPlanetInfo(),
         setCameraDoublePos: (x: number, y: number, z: number) => {
@@ -226,7 +233,17 @@ export function setupRuntime({
             });
         }
     }
-    installBenchFlight(scene, camera, benchPlanets, sampleStats);
+    // resetLod per flight: each bench flight re-bakes from a clean (un-converged) topology so the
+    // convergence transient — hence the leaf-count trajectory — is identical run-to-run (else flight 2
+    // inherits flight 1's converged tree). Confound B from the profiling bilan.
+    installBenchFlight(
+        scene,
+        camera,
+        benchPlanets,
+        sampleStats,
+        stars.map((s) => s.posWorldDouble),
+        () => lod.resetNow()
+    );
     disposables.add(() => {
         delete (window as unknown as { __world42Bench?: unknown }).__world42Bench;
     });

@@ -160,6 +160,9 @@ function vertexSource(opts: OcbtRenderOptions): string {
         // camera distance (main + df64 normals); vCraterGradSlope: CBT_SLOPE_DIST (smooth splat/AO).
         'varying vCraterGrad : vec3<f32>;',
         'varying vCraterGradSlope : vec3<f32>;',
+        // Macro fbm gradient for the SMOOTH slope/AO normal, evaluated PER VERTEX (was a 2nd per-pixel
+        // 8-octave fbm in cbtNoiseNormalSlope ~21W). Read back in the fragment via cbtNormalFromGrad.
+        'varying vSlopeFbmGrad : vec3<f32>;',
         'attribute position : vec3<f32>;',
         '@vertex',
         'fn main(input : VertexInputs) -> FragmentInputs {',
@@ -177,6 +180,7 @@ function vertexSource(opts: OcbtRenderOptions): string {
         '        vertexOutputs.vLevel = 0.0;',
         '        vertexOutputs.vCraterGrad = vec3<f32>(0.0);',
         '        vertexOutputs.vCraterGradSlope = vec3<f32>(0.0);',
+        '        vertexOutputs.vSlopeFbmGrad = vec3<f32>(0.0);',
         '        return vertexOutputs;',
         '    }',
         '    let vi = vertexInputs.vertexIndex;',
@@ -207,6 +211,10 @@ function vertexSource(opts: OcbtRenderOptions): string {
         '    let camDistKmV = length(localRel + uniforms.uCamDelta);',
         '    vertexOutputs.vCraterGrad = craterField(dir, CBT_RADIUS, camDistKmV, true, 0.0).yzw;',
         '    vertexOutputs.vCraterGradSlope = craterField(dir, CBT_RADIUS, CBT_SLOPE_DIST, true, 0.0).yzw;',
+        '    // Macro fbm gradient for the smooth slope/AO normal at the fixed CBT_SLOPE_DIST footprint:',
+        '    // evaluated here (per vertex) instead of a 2nd per-pixel 8-octave fbm. Low-frequency, so the',
+        '    // interpolation is watertight (shared edge verts share dir); the fragment only projects it.',
+        '    vertexOutputs.vSlopeFbmGrad = cbtFbmGradAt_core(normalize(dir), CBT_SLOPE_DIST, CBT_RADIUS, 0.0, true);',
         '    // Tree depth = firstLeadingBit(heap); faces are depth 3 => level = depth - 3.',
         '    var depth : u32;',
         '    if (hi != 0u) { depth = 32u + firstLeadingBit(hi); } else { depth = firstLeadingBit(lo); }',
@@ -266,6 +274,7 @@ function fragmentSource(opts: OcbtRenderOptions): string {
         // instead of re-scanned per pixel. vCraterGrad = main/df64 normals; vCraterGradSlope = splat/AO.
         'varying vCraterGrad : vec3<f32>;',
         'varying vCraterGradSlope : vec3<f32>;',
+        'varying vSlopeFbmGrad : vec3<f32>;',
         // Procedural world-anchored albedo (no texture samplers). Driven by slope + altitude:
         // regolith on flats, rock on slopes, highland tint up high. `slope01` = 1 - dot(landform
         // normal, up) (0 flat) from the SMOOTH normal so rock follows landforms, not micro-bumps.
@@ -332,7 +341,9 @@ function fragmentSource(opts: OcbtRenderOptions): string {
         '    // (CBT_SLOPE_DIST) so the cm micro-relief is faded out and rock follows 30m+ hills /',
         '    // crater walls instead of speckling every per-pixel bump.',
         '    var nSlope = dir;',
-        '    if ((uniforms.uPerfMask & 1) == 0) { nSlope = cbtNoiseNormalSlope(dir, CBT_RADIUS, CBT_SLOPE_DIST, craterGradSlope); }',
+        '    // Slope/AO normal from the PER-VERTEX macro fbm gradient + crater gradient (interpolated):',
+        '    // only the tangent projection runs per pixel now (the 2nd per-pixel macro fbm is gone).',
+        '    if ((uniforms.uPerfMask & 1) == 0) { nSlope = cbtNormalFromGrad(dir, CBT_RADIUS, fragmentInputs.vSlopeFbmGrad + craterGradSlope); }',
         '    let slope01 = clamp(1.0 - dot(nSlope, dir), 0.0, 1.0);',
         '    // Near-ground WORLD-ANCHORED micro-relief. Reconstruct the surface direction in',
         '    // df64: world = uCamAnchor + rel (the eval subtracted the SAME f32 uCamAnchor, so',
