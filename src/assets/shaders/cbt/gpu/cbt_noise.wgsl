@@ -479,8 +479,14 @@ fn cbtFbmGradAt_core(p: vec3<f32>, camDistKm: f32, radiusKm: f32, footprintKm: f
         let onKm = CBT_DETAIL_RANGE * wlKm;
         let fade = 1.0 - smoothstep(onKm, onKm * 2.0, camDistKm);
         let fpFade = select(1.0, smoothstep(footprintKm * CBT_NORMAL_FP_LO, footprintKm * CBT_NORMAL_FP_HI, wlKm), footprintKm > 0.0);
-        let sd = cbtSimplex3_d(p * freq);
-        grad = grad + sd.yzw * (amp * freq * fade * fpFade);
+        // OPT-3: skip the simplex eval for a fully-faded / sub-footprint octave (its grad add is 0
+        // either way). maxMacro MUST stay OUTSIDE the guard — it normalizes the gradient and must sum
+        // EVERY octave's amp regardless of fade, or the normal magnitude (and seam watertightness)
+        // breaks. Bit-identical output to the unguarded loop; just drops a no-op simplex per faded octave.
+        if fade * fpFade > 0.0 {
+            let sd = cbtSimplex3_d(p * freq);
+            grad = grad + sd.yzw * (amp * freq * fade * fpFade);
+        }
         maxMacro = maxMacro + amp;
         freq = freq * CBT_LACUNARITY;
         amp = amp * CBT_PERSISTENCE;
