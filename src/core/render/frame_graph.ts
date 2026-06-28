@@ -164,10 +164,13 @@ export function attachFrameGraph(
     const fg = new FrameGraph(scene, false);
     const tm = fg.textureManager;
 
-    // Full-screen HDR color + depth render targets (1:1 with the canvas).
-    // MSAA 4x on the scene pass (color + depth MUST share sample count). The object renderer resolves
-    // both to single-sample outputs (resolveMSAADepth below) so the star/post tasks can sample them.
-    const MSAA_SAMPLES = 4;
+    // Full-screen HDR color + depth render targets (1:1 with the canvas). SINGLE-SAMPLE: geometric
+    // edge AA is handled by the always-on TAA (16x) + FXAA below, not MSAA. Reason we dropped MSAA:
+    // WebGPU cannot resolve a DEPTH attachment via a render-pass resolveTarget, so Babylon resolved the
+    // MSAA depth with a COMPUTE shader whose bind-group layout is invalid (multisampled depth declared
+    // sampleType Float) — 7 validation errors/frame AND a garbage resolved depth (star terrain-occlusion
+    // broken). Single-sample depth is sampled directly by the star, so there is nothing to resolve.
+    const MSAA_SAMPLES = 1;
     const sceneColor = tm.createRenderTargetTexture('sceneColor', {
         size: 100,
         sizeIsPercentage: true,
@@ -208,8 +211,8 @@ export function attachFrameGraph(
     objRenderer.depthTexture = clear.outputDepthTexture;
     objRenderer.isMainObjectRenderer = true;
     objRenderer.disableImageProcessing = true; // tonemap is a dedicated task AFTER bloom
-    objRenderer.resolveMSAAColors = true; // resolve MSAA color -> single-sample for post tasks
-    objRenderer.resolveMSAADepth = true; // resolve MSAA depth so the star task can sample it
+    objRenderer.resolveMSAAColors = false; // single-sample: nothing to resolve
+    objRenderer.resolveMSAADepth = false; // single-sample: star samples sceneDepth directly
     const objectList = new FrameGraphObjectList();
     objectList.meshes = scene.meshes;
     objectList.particleSystems = scene.particleSystems;
