@@ -81,6 +81,10 @@ export class OcbtSource implements CbtGeometrySource {
     /** Frames since the last heavy re-bake — drives the Axe 3 throttle (re-bake 1 frame in N
      *  under steady drift; the draw stays exact between via uCamDelta + the world rotation). */
     private framesSinceRebake = 0;
+    /** Consecutive frames of STEADY translation-only drift (no rotation / jump / burst) — drives the
+     *  OPT-4 adaptive throttle that stretches the re-bake interval base->2x->3x while motion stays slow
+     *  and rotation-free. Reset to 0 the moment a rotation or jump appears (cull responsiveness). */
+    private steadyDriftFrames = 0;
     /** Live camera planet-local from the previous frame — used to detect discrete jumps (teleport). */
     private readonly lastFrameCamLocal = new Vector3(NaN, NaN, NaN);
     private readonly tmpDir = new Vector3();
@@ -123,6 +127,10 @@ export class OcbtSource implements CbtGeometrySource {
      *  exact between via uCamDelta). 1 = every frame (old behavior). Live-tunable via
      *  globalThis.__ocbtRebakeEvery. Higher = cheaper motion, slightly more LOD latency. */
     private static readonly REBAKE_EVERY_DEFAULT = 3;
+    /** OPT-4 adaptive throttle ramp (frames of sustained steady drift). After RAMP1 the re-bake interval
+     *  doubles (base->2x), after RAMP2 it triples (base->3x). ~0.5 s / ~1.5 s at 60 fps. */
+    private static readonly ADAPT_RAMP1 = 30;
+    private static readonly ADAPT_RAMP2 = 90;
     /** Warn once when the live leaf count (pool_tree[1]) crosses this fraction of the pool: beyond it
      *  the Allocate pass starts dropping splits → the limb silently under-tessellates. */
     private static readonly POOL_SATURATION_FRAC = 0.9;
@@ -332,7 +340,7 @@ export class OcbtSource implements CbtGeometrySource {
         // classify METRIC, which tolerates a few frames of lag. So under steady drift/spin we re-bake
         // only 1 frame in REBAKE_EVERY; the skipped frames just draw (cheap). Convergence bursts and
         // the first bake always re-bake every frame (they must converge fast). Live-tunable.
-        const rebakeEvery = Math.max(
+        const baseRebakeEvery = Math.max(
             1,
             Math.floor(
                 (globalThis as unknown as { __ocbtRebakeEvery?: number }).__ocbtRebakeEvery ??
@@ -340,8 +348,33 @@ export class OcbtSource implements CbtGeometrySource {
             )
         );
         const forcedRebake = !this.anchorValid || this.convergeFrames > 0;
-        const driftDriven = driftKm > driftThreshKm || viewRotated || viewDirChanged;
+        const rotating = viewRotated || viewDirChanged;
+        const driftDriven = driftKm > driftThreshKm || rotating;
         this.framesSinceRebake++;
+
+        // OPT-4: adaptive re-bake throttle. Under STEADY translation-only drift (converged, no rotation,
+        // no jump) the classify metric tolerates more lag, so stretch the interval base->2x->3x to further
+        // amortize the heavy topology/eval passes. ANY rotation, jump, or convergence burst snaps it back
+        // to the base interval the SAME frame, so the frustum cull + prefetch stay responsive (a throttled
+        // cull during mouse-look pops leaves in — the failure mode the profiling bilan flagged). The draw
+        // is exact between re-bakes either way (uCamDelta), so this only adds a little LOD-metric latency
+        // to slow steady motion — never a visual change. Disable via globalThis.__ocbtAdaptiveRebake=false.
+        if (rotating || forcedRebake) {
+            this.steadyDriftFrames = 0;
+        } else {
+            this.steadyDriftFrames++;
+        }
+        const adaptiveOn =
+            (globalThis as unknown as { __ocbtAdaptiveRebake?: boolean }).__ocbtAdaptiveRebake ??
+            true;
+        let rebakeEvery = baseRebakeEvery;
+        if (adaptiveOn && !rotating && !forcedRebake) {
+            if (this.steadyDriftFrames > OcbtSource.ADAPT_RAMP2) {
+                rebakeEvery = baseRebakeEvery * 3;
+            } else if (this.steadyDriftFrames > OcbtSource.ADAPT_RAMP1) {
+                rebakeEvery = baseRebakeEvery * 2;
+            }
+        }
         // Bench/profiling override: pin the topology (skip ALL rebakes) so a fragment perf-mask A/B
         // sweep runs at a CONSTANT leaf count — the clean way to attribute per-block fragment cost
         // (the old in-flight sweep was confounded by leaf-count variance). PRECONDITION: converge the

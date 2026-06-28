@@ -68,11 +68,12 @@ const SCENARIOS = {
 };
 
 // Supported knob names (applied in-page by applyKnob()).
-const KNOBS = ['perfMask', 'rebakeEvery', 'df64NearKm', 'hwScale'];
+const KNOBS = ['perfMask', 'rebakeEvery', 'df64NearKm', 'hwScale', 'adaptiveRebake'];
 const applyKnob = (page, name, v) =>
     page.evaluate(({ name, v }) => {
         switch (name) {
             case 'perfMask': window.__ocbtPerfMask = v | 0; break;
+            case 'adaptiveRebake': window.__ocbtAdaptiveRebake = !!v; break;
             case 'rebakeEvery': window.__ocbtRebakeEvery = v; break;
             case 'df64NearKm': window.__ocbtDf64NearKm = v; break;
             case 'hwScale': window.__world42Perf.setHardwareScaling(v); break;

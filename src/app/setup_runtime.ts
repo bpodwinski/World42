@@ -184,6 +184,12 @@ export function setupRuntime({
             (globalThis as unknown as { __ocbtFreezeTopology?: boolean }).__ocbtFreezeTopology =
                 !!on;
         },
+        /** Dev-only A/B: toggle the OPT-4 adaptive re-bake throttle (default on). Off = fixed base
+         *  interval (the pre-OPT-4 behavior) so before/after compute cost can be measured directly. */
+        setAdaptiveRebake: (on: boolean) => {
+            (globalThis as unknown as { __ocbtAdaptiveRebake?: boolean }).__ocbtAdaptiveRebake =
+                !!on;
+        },
         getStats: () => sampleStats(),
         getPlanets: () => lod.getCbtPlanetInfo(),
         setCameraDoublePos: (x: number, y: number, z: number) => {
