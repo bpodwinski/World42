@@ -10,6 +10,7 @@ import { teleportToEntity } from '../core/camera/teleport_entity';
 import { GuiManager } from '../core/gui/gui_manager';
 import { DisposableRegistry } from '../core/lifecycle/disposable_registry';
 import { attachFrameGraph } from '../core/render/frame_graph';
+import { installBenchFlight, type BenchPlanet } from './bench_flight';
 import type { StarGlowSource, StarOccluder } from '../core/render/star_raymarch_postprocess';
 import {
     pickNearestAtmosphere,
@@ -209,6 +210,25 @@ export function setupRuntime({
     (window as unknown as { __world42Perf?: typeof perfHook }).__world42Perf = perfHook;
     disposables.add(() => {
         delete (window as unknown as { __world42Perf?: typeof perfHook }).__world42Perf;
+    });
+
+    // Deterministic camera-flight bench (dev-only): window.__world42Bench.run() replays a fixed
+    // ground→orbit+yaw path with the planet spin frozen, for apples-to-apples optimization comparison.
+    const benchPlanets: BenchPlanet[] = [];
+    for (const system of loadedSystems.values()) {
+        for (const [name, body] of system.bodies) {
+            if (body.bodyType === 'star' || !body.node || !body.entity) continue;
+            benchPlanets.push({
+                key: `${system.systemId}:${name}`,
+                node: body.node,
+                center: body.entity.doublepos,
+                radiusSim: body.radiusSim
+            });
+        }
+    }
+    installBenchFlight(scene, camera, benchPlanets, sampleStats);
+    disposables.add(() => {
+        delete (window as unknown as { __world42Bench?: unknown }).__world42Bench;
     });
 
     // Physically-based starfield from the HYG catalog (replaces the static cubemap skybox).

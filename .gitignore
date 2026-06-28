@@ -32,3 +32,6 @@ output/playwright/
 .playwright-mcp/
 # dev-only GPU HUD bridge output (scripts/gpu_hud_bridge.ps1)
 public/gpu_stats.json
+
+# perf bench flight run artifacts
+scripts/.bench/

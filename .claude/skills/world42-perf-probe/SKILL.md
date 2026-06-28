@@ -1,6 +1,6 @@
 ---
 name: world42-perf-probe
-description: Profile and diagnose World42 GPU/CPU performance with a headed Playwright harness plus nvidia-smi and OS counters. Use when a request mentions GPU at 100%, perf profiling, frame drops/hitches, gpuMs, GPU/CPU utilization, terrain/OCBT cost, fragment-vs-compute bottleneck, or "why is it slow at ground/orbit". Covers scripts/perf_probe.mjs, the window.__world42Perf debug API, and the webgpu-inspector MCP for structural captures.
+description: Profile and diagnose World42 GPU/CPU performance with a headed Playwright harness plus nvidia-smi and OS counters. Use when a request mentions GPU at 100%, perf profiling, frame drops/hitches, gpuMs, GPU/CPU utilization, terrain/OCBT cost, fragment-vs-compute bottleneck, before/after optimization comparison, a repeatable bench scene/camera path, or "why is it slow at ground/orbit". Covers scripts/perf_probe.mjs (knob sweeps), scripts/bench_flight.mjs (deterministic ground→orbit flight for before/after diff), the window.__world42Perf / __world42Bench debug APIs, and the webgpu-inspector MCP for structural captures.
 ---
 
 # World42 Perf Probe
@@ -142,6 +142,34 @@ instance counts, validation errors) use the **webgpu-inspector** plugin (separat
 | `setPerfMask(mask)` | fragment perf-mask (or set `window.__ocbtPerfMask`) |
 
 `nudgeCameraDoublePos` and `setHardwareScaling` exist specifically for this harness; keep them.
+
+## Deterministic flight bench (before/after comparison) — `scripts/bench_flight.mjs`
+
+For comparing an optimization apples-to-apples, `perf_probe.mjs` (static poses) is noisy because the
+camera/terrain differ between runs. Use the **flight bench** instead: it replays a FIXED ground→orbit+yaw
+camera path, FRAME-INDEXED in-page (one pose per rendered frame, not wall-clock) with the planet spin
+FROZEN, so the trajectory — and the terrain under it — is identical every run.
+
+```bash
+npm run bench:flight -- --label before                  # baseline → scripts/.bench/before.json
+# … make the optimization, confirm fresh bundle …
+npm run bench:flight -- --label after --baseline before  # writes after.json + prints a DIFF table
+```
+Flags: `--planet <suffix>` (default Moon), `--frames <n>` (default 720), `--label`, `--baseline`, `--keep`.
+Output: per-phase (ground / climb) medians of whole-GPU power (nvidia-smi, sampled in parallel), util,
+leaf count, frame ms, and the **Phase-2 OCBT compute buckets** `topo / eval / compact` ms (these come from
+in-engine WebGPU timestamps and ARE reliable under Playwright, unlike `gpuMs`). The diff marks negatives
+as improvements.
+
+- In-page driver: `window.__world42Bench.run({frames, planet, groundFrac})` (src/app/bench_flight.ts),
+  installed alongside `__world42Perf`. The pose observer is `insertFirst` so cull + compute + render all
+  see the bench pose the same frame.
+- **Reliability:** the path is deterministic by construction — leaf counts match <1% between runs (proof
+  the camera is identical). POWER and LEAVES are rock-solid (±1%); the per-bucket ms carry ~5-10% noise
+  (lastSecAverage smoothing + per-frame LOD budget convergence) — use medians and ≥300 frames.
+- **Caveat:** the first ~1 s can read low power while the GPU clocks ramp; the 5 s warm-up before the
+  flight mostly covers it. Native res (TDR-safe); a long ground phase at high leaf count can still TDR
+  (environmental) — the probe catches the device-lost and reports partial.
 
 ## Prerequisites & gotchas
 
