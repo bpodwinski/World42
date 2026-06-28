@@ -67,6 +67,12 @@ export type CbtAggregateStats = {
     /** Worst-case rebuild ms across planets. */
     rebuildMs: number;
     vertexCount: number;
+    /** OCBT compute GPU time (ms, last-second average), summed across planets — topology bucket. */
+    ocbtTopoMs: number;
+    /** OCBT EvaluateLEB (df64 noise) GPU time (ms), summed across planets. */
+    ocbtEvalMs: number;
+    /** OCBT draw-compaction GPU time (ms), summed across planets. */
+    ocbtCompactMs: number;
 };
 
 export class CbtPlanet {
@@ -279,6 +285,11 @@ export class CbtPlanet {
         return this.stats;
     }
 
+    /** OCBT compute GPU timings (ms) for the perf HUD; zeros until the source is created. */
+    getGpuTimings(): { topoMs: number; evalMs: number; compactMs: number } {
+        return this.source?.getGpuTimings?.() ?? { topoMs: 0, evalMs: 0, compactMs: 0 };
+    }
+
     /** Whether the planet mesh is currently drawn (set by the scheduler frustum cull). */
     get visible(): boolean {
         return this._visible;
@@ -345,6 +356,14 @@ export class CbtScheduler {
     private readonly frustumCull: boolean;
     private readonly tmpViewProj = new Matrix();
     private readonly frustumPlanes: Plane[] = Frustum.GetPlanes(Matrix.Identity());
+    /** Render-space frustum planes stashed by runVisibility() for runCompute() (same frame). */
+    private framePlanes: ReadonlyArray<Plane> | null = null;
+    /**
+     * While false, the onBeforeRender observer drives the heavy compute loop — the startup transient
+     * before the Frame Graph is built. Once the graph's OCBT compute task takes ownership it is flipped
+     * true, so the heavy loop runs ONLY from the graph task (no double-tick). See setGraphOwnsCompute.
+     */
+    private graphOwnsCompute = false;
     private readonly onKeyDown: (e: KeyboardEvent) => void;
 
     constructor(
@@ -389,6 +408,9 @@ export class CbtScheduler {
             classifyMs: 0,
             rebuildMs: 0,
             vertexCount: 0,
+            ocbtTopoMs: 0,
+            ocbtEvalMs: 0,
+            ocbtCompactMs: 0,
         };
         for (const planet of this.planets) {
             const s = planet.getStats();
@@ -398,6 +420,10 @@ export class CbtScheduler {
             agg.classifyMs = Math.max(agg.classifyMs, s.classifyMs);
             agg.rebuildMs = Math.max(agg.rebuildMs, s.rebuildMs);
             agg.vertexCount += s.leafCount * 3;
+            const t = planet.getGpuTimings();
+            agg.ocbtTopoMs += t.topoMs;
+            agg.ocbtEvalMs += t.evalMs;
+            agg.ocbtCompactMs += t.compactMs;
         }
         return agg;
     }
@@ -547,10 +573,30 @@ export class CbtScheduler {
         return true;
     }
 
+    /**
+     * onBeforeRender observer. Always runs the cheap visibility cull (must precede Babylon's
+     * active-mesh evaluation so the FrameGraphObjectList sees this frame's enabled set). The heavy
+     * compute loop runs here ONLY during the startup transient before the Frame Graph takes over —
+     * once {@link setGraphOwnsCompute} is flipped, the graph's OCBT compute task drives runCompute().
+     */
     private tick = (): void => {
-        const count = this.planets.length;
-        if (!count) return;
+        this.runVisibility();
+        if (!this.graphOwnsCompute) this.runCompute();
+    };
 
+    /**
+     * Cheap per-frame pass: compute this frame's render-space frustum planes and cull off-screen
+     * planet meshes (an off-screen OCBT mesh has procedural bounds → Babylon never frustum-culls it).
+     * An invisible planet is also frozen in runCompute(). Stashes the planes for runCompute() to reuse;
+     * under floating origin those render-space planes are orientation-only, so they remain valid after
+     * the camera fold that runs between this pass and the compute task.
+     */
+    runVisibility(): void {
+        const count = this.planets.length;
+        if (!count) {
+            this.framePlanes = null;
+            return;
+        }
         let planes: ReadonlyArray<Plane> | null = null;
         if (this.frustumCull) {
             // Render-space frustum planes for this frame (camera is at the render origin).
@@ -560,13 +606,21 @@ export class CbtScheduler {
             Frustum.GetPlanesToRef(this.tmpViewProj, this.frustumPlanes);
             planes = this.frustumPlanes;
         }
-
-        // Visibility pass (cheap, EVERY planet every frame, no budget gate): cull off-screen
-        // meshes so a planet the camera is not looking at stops drawing its (saturated) leaf
-        // set. An invisible planet is also frozen below — its topology/eval compute is skipped.
+        this.framePlanes = planes;
         for (let i = 0; i < count; i++) {
             this.planets[i].setVisible(this.isPlanetVisible(this.planets[i], planes));
         }
+    }
+
+    /**
+     * Heavy per-frame pass: the budgeted, round-robin OCBT topology/eval/compact compute. Driven by
+     * the Frame Graph compute task (or, before the graph is ready, by tick()). Reads the planes stashed
+     * by runVisibility().
+     */
+    runCompute(): void {
+        const count = this.planets.length;
+        if (!count) return;
+        const planes = this.framePlanes;
 
         // Per-frame SSE constant: converts world-space error to pixels.
         // Same formula as the GPU classifier: ssePx = error * K / dist,
@@ -599,5 +653,14 @@ export class CbtScheduler {
             planet.update(deadline, planes);
         }
         this.robin = (this.robin + 1) % Math.max(1, count);
-    };
+    }
+
+    /**
+     * Hand ownership of the heavy compute loop to the Frame Graph's OCBT compute task. Called once the
+     * graph has been built (see attachFrameGraph's onGraphReady). Until then tick() runs runCompute()
+     * itself so the startup transient (before scene.frameGraph is installed) is not frozen.
+     */
+    setGraphOwnsCompute(owned: boolean): void {
+        this.graphOwnsCompute = owned;
+    }
 }

@@ -48,6 +48,8 @@ export interface CbtGeometrySource {
     setDebugLod?(on: boolean): void;
     /** Optional: enable/disable the mesh draw (off-screen frustum cull on a source that owns its mesh). */
     setVisible?(on: boolean): void;
+    /** Optional: per-bucket GPU compute time (ms) for the perf HUD on a GPU-compute source. */
+    getGpuTimings?(): { topoMs: number; evalMs: number; compactMs: number };
     dispose(): void;
 }
 

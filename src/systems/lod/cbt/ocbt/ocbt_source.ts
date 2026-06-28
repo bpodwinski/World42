@@ -483,6 +483,11 @@ export class OcbtSource implements CbtGeometrySource {
         this.mesh.setEnabled(on);
     }
 
+    /** OCBT compute GPU timings (ms, last-second average) for the perf HUD. Delegates to the kernel. */
+    getGpuTimings(): { topoMs: number; evalMs: number; compactMs: number } {
+        return this.kernel.getGpuTimings();
+    }
+
     setWireframe(on: boolean): void {
         this.wantWireframe = on;
         this.render.material.wireframe = on;

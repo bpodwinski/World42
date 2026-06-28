@@ -852,6 +852,28 @@ export class OcbtTopologyKernel {
         this.evalLeb.dispatch(full[0], full[1], 1);
     }
 
+    /**
+     * Per-bucket GPU compute time for the perf HUD (ms, last-second average). Each pass exposes a
+     * `gpuTimeInFrame` counter automatically when the engine has the `timestamp-query` feature and
+     * `enableGPUTimingMeasurements = true` (both armed in EngineManager); 0 when unavailable. Buckets:
+     * `topoMs` = split/merge topology + pool reduce, `evalMs` = EvaluateLEB (df64 noise — the dominant
+     * cost), `compactMs` = draw compaction.
+     */
+    getGpuTimings(): { topoMs: number; evalMs: number; compactMs: number } {
+        // lastSecAverage is NaN when a pass took no GPU samples in the last second (still camera →
+        // the re-bake gate skipped all dispatches): guard it so the HUD reads 0.00, not NaN.
+        const ms = (cs: ComputeShader | null): number => {
+            const ns = cs?.gpuTimeInFrame?.counter.lastSecAverage ?? 0;
+            return Number.isFinite(ns) ? ns / 1e6 : 0;
+        };
+        const topoMs =
+            ms(this.reset) + ms(this.classify) + ms(this.split) + ms(this.allocate) +
+            ms(this.copy) + ms(this.bisect) + ms(this.propagateBisect) +
+            ms(this.prepareSimplify) + ms(this.simplify) + ms(this.propagateSimplify) +
+            ms(this.reduce) + ms(this.prepareIndirect);
+        return { topoMs, evalMs: ms(this.evalLeb), compactMs: ms(this.compact) };
+    }
+
     /** Read the positions buffer back (capacity * 9 f32: c0.xyz,c1.xyz,c2.xyz per slot). */
     async readPositions(): Promise<Float32Array> {
         const bytes = (await this.positions.read(0, undefined, undefined, true)) as Uint8Array;

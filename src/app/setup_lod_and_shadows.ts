@@ -44,6 +44,10 @@ export type LodController = {
         groundRSim: number;
         radiusSim: number;
     } | null;
+    /** Drives the heavy OCBT compute loop — invoked by the Frame Graph's OCBT compute task. */
+    runOcbtCompute: () => void;
+    /** Hand the OCBT compute loop to the Frame Graph (called once the graph is built). */
+    setComputeOwnedByGraph: (owned: boolean) => void;
 };
 
 export type LodSetupResult = {
@@ -101,6 +105,9 @@ export function setupLodAndShadows(
         resolveGroundCollision: (clearanceSim: number) =>
             cbtScheduler.resolveGroundCollision(clearanceSim),
         getCbtGroundInfo: () => cbtScheduler.getNearestGroundInfo(),
+        runOcbtCompute: () => cbtScheduler.runCompute(),
+        setComputeOwnedByGraph: (owned: boolean) =>
+            cbtScheduler.setGraphOwnsCompute(owned),
     };
 
     const mergedShadowPlanets = new Map<string, PlanetShadowSource>();

@@ -155,6 +155,9 @@ export function setupRuntime({
             `cbt leaves ${s.cbt.leafCount}  verts ${s.cbt.vertexCount}`,
             `split/f ${s.cbt.splitsThisFrame}  merge/f ${s.cbt.mergesThisFrame}`,
             `classify ${f(s.cbt.classifyMs, 2)}ms  rebuild ${f(s.cbt.rebuildMs, 2)}ms`,
+            // OCBT compute GPU time (the graph's compute task), split by bucket. 0 when the re-bake
+            // gate is disengaged (still camera) or the timestamp-query feature is unavailable.
+            `ocbt topo ${f(s.cbt.ocbtTopoMs, 2)} eval ${f(s.cbt.ocbtEvalMs, 2)} compact ${f(s.cbt.ocbtCompactMs, 2)}ms`,
         ].join('\n');
     };
 
@@ -324,7 +327,16 @@ export function setupRuntime({
     // Render pipeline as a Frame Graph (replaces the imperative camera post-process stack:
     // DefaultRenderingPipeline + TAA pipeline + star post-process). The graph governs only the
     // render passes; OCBT compute / LOD / floating-origin keep running in their scene observables.
-    const fg = attachFrameGraph(scene, camera, { stars, occluders, atmospheres, gui: gui.advancedTexture });
+    const fg = attachFrameGraph(scene, camera, {
+        stars,
+        occluders,
+        atmospheres,
+        gui: gui.advancedTexture,
+        // OCBT compute runs as a graph task (before the scene-render task). Until the graph is built
+        // it is driven by the scheduler's startup observer; onGraphReady hands ownership to the task.
+        runCompute: lod.runOcbtCompute,
+        onGraphReady: () => lod.setComputeOwnedByGraph(true)
+    });
     disposables.add(() => fg.dispose());
 
     // Under a Frame Graph, scene.render() fires onBeforeRenderObservable but NOT

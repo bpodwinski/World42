@@ -4,6 +4,7 @@
   "scripts": {
     "serve": "rspack serve",
     "dev": "rspack serve",
+    "gpu:hud": "powershell -ExecutionPolicy Bypass -File scripts/gpu_hud_bridge.ps1",
     "build": "rspack --mode=production --node-env=production",
     "deploy": "gh-pages -d dist",
     "test": "vitest",

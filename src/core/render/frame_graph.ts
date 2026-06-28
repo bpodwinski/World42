@@ -20,6 +20,7 @@ import {
     type Scene,
 } from '@babylonjs/core';
 import { ThinCustomPostProcess } from '@babylonjs/core/PostProcesses/thinCustomPostProcess';
+import { FrameGraphOcbtComputeTask } from './ocbt_compute_task';
 import { FrameGraphGUITask } from '@babylonjs/gui';
 import type { AdvancedDynamicTexture } from '@babylonjs/gui';
 import type { OriginCamera } from '../camera/camera_manager';
@@ -140,6 +141,10 @@ export type FrameGraphOptions = {
     atmospheres: AtmosphereSource[];
     /** Fullscreen GUI texture (must be created with useStandalone: true) for the HUD overlay. */
     gui: AdvancedDynamicTexture;
+    /** Drives the OCBT terrain compute as a graph task (runs before the scene-render task). */
+    runCompute: () => void;
+    /** Called once the graph is built and installed, so the caller can hand compute ownership to it. */
+    onGraphReady?: () => void;
 };
 
 /**
@@ -203,6 +208,13 @@ export function attachFrameGraph(
     clear.targetTexture = sceneColor;
     clear.depthTexture = sceneDepth;
     fg.addTask(clear);
+
+    // 1b. OCBT terrain compute (topology + EvaluateLEB + draw compaction). MUST be added before the
+    // scene-render task: it writes the storage buffers that task's vertex shader reads, and the graph
+    // orders tasks only by texture dependencies (it cannot see the storage-buffer handoff), so task
+    // order is the contract. Both record into the same WebGPU command encoder → dispatch before draw.
+    const ocbtCompute = new FrameGraphOcbtComputeTask('ocbtCompute', fg, options.runCompute);
+    fg.addTask(ocbtCompute);
 
     // 2. Render the scene meshes (OCBT terrain + skybox) into HDR color + depth.
     const objRenderer = new FrameGraphObjectRendererTask('sceneRender', fg, scene, {});
@@ -290,6 +302,10 @@ export function attachFrameGraph(
     // falls back to the normal (post-less) render — a brief transient at startup.
     void fg.buildAsync().then(() => {
         scene.frameGraph = fg;
+        // Graph (and its OCBT compute task) is now live — hand the heavy compute loop to the task so it
+        // stops running in the startup observer (no double-tick). Runs in a microtask before the next
+        // scene.render(), so there is no frame where both drive the compute.
+        options.onGraphReady?.();
     });
 
     return {
