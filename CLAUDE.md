@@ -303,10 +303,26 @@ The `Dev` system in `data.json` is the **reference target** for all terrain/shad
 
 ## Deployment
 
-```bash
-npm run build        # → /dist
-npm run deploy       # gh-pages -d dist
-# Demo: https://bpodwinski.github.io/World42/
+**Automated via GitHub Actions** — `.github/workflows/deploy.yml` ("Build and Deploy") runs on
+**push to `main`** (or manual `workflow_dispatch`). There is no `npm run deploy` / `gh-pages`
+step anymore. The workflow:
+
+1. `npm ci` + `npm run build` → the app (Rspack) into `dist/`
+2. `npm ci` + `npm run build` in `website/` → the Rspress docs into `website/doc_build/`
+3. Assembles `_site/` = **app at root, docs at `/docs/`**, then publishes via `actions/deploy-pages`
+
+```
+Demo: https://bpodwinski.github.io/World42/        (app)
+Docs: https://bpodwinski.github.io/World42/docs/    (Rspress)
 ```
 
-Assets (KTX2 skybox) are loaded from `process.env.ASSETS_URL` — configure in `.env`.
+CI requirements (do not break these or the deploy fails):
+- **`package-lock.json` (root + `website/`) must be committed** — `npm ci` needs them. They are
+  intentionally tracked (see `.gitignore`).
+- **`.npmrc` sets `legacy-peer-deps=true`** — required for the html-webpack-plugin × `@rspack/core@2`
+  peer conflict, honored by CI's plain `npm ci`.
+- **`npm run build` must exit 0** — the BabylonJS Inspector is gated out of production via the
+  build-time `__DEV__` flag, so a green local `npm run build` matches CI.
+
+`main` is the published line; **`CBT` is the active development branch** and does not deploy on its own.
+Assets (KTX2 skybox) load from `process.env.ASSETS_URL` — configure in `.env`.
