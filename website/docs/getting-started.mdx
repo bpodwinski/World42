@@ -1,0 +1,84 @@
+# Getting Started
+
+World42 is a static single-page application. There is no server or database — everything runs in the browser.
+
+## Prerequisites
+
+| Tool | Version |
+|------|---------|
+| Node.js | 22 LTS or later |
+| npm | bundled with Node |
+| Rust + `wasm-pack` | for terrain WASM builds |
+| A WebGPU-capable browser | Chrome 113+, Edge 113+ |
+
+## Clone and Install
+
+```bash
+git clone https://github.com/bpodwinski/World42.git
+cd World42
+npm install
+```
+
+## Environment Variables
+
+Create a `.env` file at the repo root (not committed):
+
+```bash
+# URL prefix for KTX2 skybox assets
+ASSETS_URL=https://your-cdn.example.com/assets
+
+# Simulation scale factor (km → sim units)
+SCALE_FACTOR=0.001
+```
+
+`SCALE_FACTOR` controls the km-to-sim-unit ratio used by `ScaleManager`. The default value keeps planet radii in a comfortable float range for BabylonJS.
+
+## Dev Server
+
+```bash
+npm run serve        # → http://localhost:19000
+```
+
+The dev server uses Rspack HMR. Shader files (`.glsl`, `.wgsl`) are hot-reloaded via `ts-shader-loader`.
+
+## Production Build
+
+```bash
+npm run build        # output → dist/
+```
+
+## Build the Terrain WASM
+
+The Rust crate under `terrain/` must be compiled to WebAssembly before the app can generate terrain geometry. Run from the `terrain/` directory:
+
+```bash
+# Development (faster build, larger binary)
+wasm-pack build --dev --target web --out-dir pkg
+
+# Production (optimized)
+wasm-pack build --release --target web --out-dir pkg
+```
+
+The compiled `pkg/` directory is imported by the worker (`src/systems/lod/workers/terrain_mesh_worker.ts`).
+
+## Tests
+
+```bash
+npm test             # Vitest watch mode
+npm run coverage     # Coverage report → /coverage/index.html
+```
+
+## Keyboard Controls
+
+| Key | Action |
+|-----|--------|
+| Z / S | Forward / Backward |
+| Q / D | Strafe left / right |
+| R / F | Move up / down |
+| E / A | Roll |
+| Shift | Speed boost |
+| Ctrl | Brake |
+| L | Toggle LOD visualization |
+| ² | BabylonJS Inspector |
+| T | Teleport to Alpha Centauri |
+| Mouse | Yaw / Pitch (50 px dead zone) |

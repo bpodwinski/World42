@@ -1,0 +1,27 @@
+// TERRAIN sum-reduction — one level per dispatch. Reduces depth `passDepth` from its
+// children at `passDepth + 1`. The driver dispatches levels D-1 .. 0 in order
+// (each level depends on the one below). Composed after a `const TERRAIN_MAX_DEPTH`
+// line and the read/write heap core (terrain_heap_rw.wgsl), which owns binding(0).
+
+// data.x = passDepth (packed as vec4<u32> to dodge UBO scalar-alignment surprises).
+struct TerrainReduceParams {
+    data : vec4<u32>,
+};
+
+@group(0) @binding(1) var<uniform> reduceParams : TerrainReduceParams;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups) nwg : vec3<u32>) {
+    let depth = reduceParams.data.x;
+    let count = 1u << depth;          // number of nodes at this level
+    // 2D grid linear index: dispatch X is capped at 65535 workgroups (WebGPU limit)
+    // and the overflow spills into Y. For 1D dispatches (Y=1) this is just gid.x.
+    let t = gid.x + gid.y * nwg.x * 256u;
+    if (t >= count) {
+        return;
+    }
+    let id = count + t;               // heap id at this depth
+    let x0 = terrain_heapRead(id << 1u, depth + 1u);
+    let x1 = terrain_heapRead((id << 1u) | 1u, depth + 1u);
+    terrain_heapWrite(id, depth, x0 + x1);
+}

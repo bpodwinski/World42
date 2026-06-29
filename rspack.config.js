@@ -1,6 +1,7 @@
 require('dotenv').config();
 
 const path = require('path');
+const rspack = require('@rspack/core');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const { TsCheckerRspackPlugin } = require('ts-checker-rspack-plugin');
 const Dotenv = require('dotenv-webpack');
@@ -9,9 +10,23 @@ const devHost = process.env.HOST || 'localhost';
 const devPort = process.env.PORT || 19000;
 const devHot = process.env.DEV_HOT === '1';
 
-const config = {
+// Dev-only OCBT pool GPU cross-check page. Excluded from production builds (gh-pages)
+// so the public demo never ships the test harness. Gated on the build mode only:
+// .env sets NODE_ENV=production for DefinePlugin, so process.env.NODE_ENV is not a
+// reliable signal here. `rspack serve` => development; `rspack build` => production.
+const isProd = (argv) => !argv || argv.mode === 'production';
+
+const config = (env, argv) => ({
     entry: {
-        index: './src/index.ts'
+        index: './src/index.ts',
+        ...(isProd(argv)
+            ? {}
+            : {
+                  ocbtTest:
+                      './src/systems/lod/terrain/gpu/terrain_pool_gpu_test_main.ts',
+                  ocbtTopoTest:
+                      './src/systems/lod/terrain/gpu/terrain_topology_gpu_test_main.ts'
+              })
     },
     output: {
         path: path.resolve(__dirname, 'dist'),
@@ -47,10 +62,33 @@ const config = {
         ]
     },
     plugins: [
+        // chunks pins each page to its own entry (default injects every chunk into
+        // every HTML page once there is more than one entry).
         new HtmlWebpackPlugin({
-            template: './index.html'
+            template: './index.html',
+            chunks: ['index']
         }),
+        ...(isProd(argv)
+            ? []
+            : [
+                  new HtmlWebpackPlugin({
+                      template: './ocbt-test.html',
+                      filename: 'ocbt-test.html',
+                      chunks: ['ocbtTest']
+                  }),
+                  new HtmlWebpackPlugin({
+                      template: './ocbt-topo-test.html',
+                      filename: 'ocbt-topo-test.html',
+                      chunks: ['ocbtTopoTest']
+                  })
+              ]),
         new TsCheckerRspackPlugin(),
+        // Build-time dev flag. `.env` forces NODE_ENV=production, so app code uses __DEV__
+        // (true under `rspack serve`, false in production) to gate dev-only imports such as
+        // the BabylonJS Inspector — keeping it out of the public gh-pages bundle.
+        new rspack.DefinePlugin({
+            __DEV__: JSON.stringify(!isProd(argv))
+        }),
         new Dotenv({
             path: './.env',
             systemvars: true,
@@ -62,6 +100,6 @@ const config = {
         topLevelAwait: true,
         lazyCompilation: false
     }
-};
+});
 
 module.exports = config;

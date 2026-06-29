@@ -1,19 +1,14 @@
 import type {
-    LodAlgorithm,
     StellarCatalogJSON,
     StellarSystemJSON,
     SystemJSON,
 } from './stellar_catalog_loader';
+import type { PlanetLightingParams } from './planet_lighting';
 
 function canonicalType(typeRaw: unknown): string {
     let type = (typeof typeRaw === 'string' ? typeRaw : 'planet').toLowerCase().trim();
     if (type === 'sun') type = 'star';
     return type;
-}
-
-function canonicalLodAlgorithm(value: unknown): LodAlgorithm {
-    if (typeof value !== 'string') return 'cdlod';
-    return value.toLowerCase().trim() === 'cbt' ? 'cbt' : 'cdlod';
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -92,13 +87,22 @@ export function normalizeSystemJSON(raw: unknown): SystemJSON {
             position_km: position,
             diameter_km: diameterKm,
             rotation_period_days: rotationPeriodDays,
-            lod_algorithm: canonicalLodAlgorithm(body.lod_algorithm ?? body.lodAlgorithm),
             star: starRecord
                 ? {
                     temperature_k: asFiniteNumber(starRecord.temperature_k),
                     intensity: asFiniteNumber(starRecord.intensity),
                     color_rgb: colorRGB,
                 }
+                : undefined,
+            // Terrain archetype id (planet_profiles.ts). MUST be passed through or the body never
+            // gets its profile (noise + craters + lighting) and the options menu's hot-rebuild can't
+            // match it — same drop-bug class as `lighting` below.
+            profile: typeof body.profile === 'string' ? body.profile : undefined,
+            // Pass per-planet lighting overrides through verbatim (resolveLighting fills any gaps from
+            // defaults). Previously dropped here, which silently discarded ALL data.json `lighting`
+            // blocks (albedo/brdf/atmosphere) — bodies fell back to global defaults.
+            lighting: asRecord(body.lighting)
+                ? (body.lighting as PlanetLightingParams)
                 : undefined,
         };
     }

@@ -2,7 +2,8 @@ node_modules/
 dist/
 coverage/
 
-package-lock.json
+# package-lock.json is intentionally tracked: the CI deploy (.github/workflows/deploy.yml)
+# runs `npm ci`, which requires a committed lockfile.
 
 *.jpg
 *.png
@@ -29,3 +30,16 @@ terrain/target/
 Cargo.lock
 output/playwright/
 .playwright-cli/
+.playwright-mcp/
+# dev-only GPU HUD bridge output (scripts/gpu_hud_bridge.ps1)
+public/gpu_stats.json
+
+# perf bench flight run artifacts
+scripts/.bench/
+
+# Rspress docs build output and dependencies
+website/node_modules/
+website/doc_build/
+
+# GitHub Pages staging directory (local dry-run)
+_site/

@@ -4,7 +4,9 @@ name = "terrain_generator"
 version = "0.1.0"
 
 [lib]
-crate-type = ["cdylib"]
+# rlib so `cargo test` can build a host test harness for the pure-numeric CBT
+# modules; cdylib is still what wasm-pack emits as the .wasm.
+crate-type = ["cdylib", "rlib"]
 
 [features]
 default = ["console_error_panic_hook"]

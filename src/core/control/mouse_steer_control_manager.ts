@@ -125,11 +125,11 @@ export class MouseSteerControlManager {
             maxYawRate: opts.maxYawRate ?? 0.75,
             maxPitchRate: opts.maxPitchRate ?? 0.75,
             invertY: opts.invertY ?? false,
-            acceleration: opts.acceleration ?? 2,
-            strafeAcceleration: opts.strafeAcceleration ?? 2,
-            maxSpeed: opts.maxSpeed ?? 5000,
-            damping: opts.damping ?? 0.02,
-            boostMultiplier: opts.boostMultiplier ?? 50,
+            acceleration: opts.acceleration ?? 10,
+            strafeAcceleration: opts.strafeAcceleration ?? 10,
+            maxSpeed: opts.maxSpeed ?? 1000,
+            damping: opts.damping ?? 0.05,
+            boostMultiplier: opts.boostMultiplier ?? 10,
             brakeDamping: opts.brakeDamping ?? 0.3,
             yawAcceleration: opts.yawAcceleration ?? 10,
             pitchAcceleration: opts.pitchAcceleration ?? 10,
@@ -286,23 +286,23 @@ export class MouseSteerControlManager {
         // --- Keyboard ---
         const keyboardObserver: Observer<KeyboardInfo> | null =
             this.scene.onKeyboardObservable.add((kb) => {
-            if (kb.type !== KeyboardEventTypes.KEYDOWN && kb.type !== KeyboardEventTypes.KEYUP) return;
-            const down = kb.type === KeyboardEventTypes.KEYDOWN;
-            const k = kb.event.key.toLowerCase();
+                if (kb.type !== KeyboardEventTypes.KEYDOWN && kb.type !== KeyboardEventTypes.KEYUP) return;
+                const down = kb.type === KeyboardEventTypes.KEYDOWN;
+                const k = kb.event.key.toLowerCase();
 
-            if (k === "z") this.inputs.fwd = down ? 1 : (this.inputs.fwd === 1 ? 0 : this.inputs.fwd);
-            if (k === "s") this.inputs.fwd = down ? -1 : (this.inputs.fwd === -1 ? 0 : this.inputs.fwd);
-            if (k === "q") this.inputs.strafe = down ? -1 : (this.inputs.strafe === -1 ? 0 : this.inputs.strafe);
-            if (k === "d") this.inputs.strafe = down ? 1 : (this.inputs.strafe === 1 ? 0 : this.inputs.strafe);
-            if (k === "r") this.inputs.rise = down ? 1 : (this.inputs.rise === 1 ? 0 : this.inputs.rise);
-            if (k === "f") this.inputs.rise = down ? -1 : (this.inputs.rise === -1 ? 0 : this.inputs.rise);
+                if (k === "z") this.inputs.fwd = down ? 1 : (this.inputs.fwd === 1 ? 0 : this.inputs.fwd);
+                if (k === "s") this.inputs.fwd = down ? -1 : (this.inputs.fwd === -1 ? 0 : this.inputs.fwd);
+                if (k === "q") this.inputs.strafe = down ? -1 : (this.inputs.strafe === -1 ? 0 : this.inputs.strafe);
+                if (k === "d") this.inputs.strafe = down ? 1 : (this.inputs.strafe === 1 ? 0 : this.inputs.strafe);
+                if (k === "r") this.inputs.rise = down ? 1 : (this.inputs.rise === 1 ? 0 : this.inputs.rise);
+                if (k === "f") this.inputs.rise = down ? -1 : (this.inputs.rise === -1 ? 0 : this.inputs.rise);
 
-            if (k === "e") this.inputs.rollLeft = down ? 1 : 0;
-            if (k === "a") this.inputs.rollRight = down ? 1 : 0;
+                if (k === "e") this.inputs.rollLeft = down ? 1 : 0;
+                if (k === "a") this.inputs.rollRight = down ? 1 : 0;
 
-            if (k === "shift") this.inputs.boost = down ? 1 : 0;
-            if (k === "control") this.inputs.brake = down ? 1 : 0;
-        });
+                if (k === "shift") this.inputs.boost = down ? 1 : 0;
+                if (k === "control") this.inputs.brake = down ? 1 : 0;
+            });
         this.disposables.addBabylonObserver(this.scene.onKeyboardObservable, keyboardObserver);
     }
 
@@ -414,7 +414,7 @@ export class MouseSteerControlManager {
         const dampFactor = Math.exp(-damping * dt * 60);
         this.velocity.scaleInPlace(dampFactor);
 
-        if (this.velocity.lengthSquared() < 1e-6) this.velocity.set(0, 0, 0);
+        if (this.velocity.lengthSquared() < 0.01) this.velocity.set(0, 0, 0);
 
         // Clamp total speed
         const speed = this.velocity.length();

@@ -33,8 +33,11 @@ export class PostProcess {
         // Enable and configure bloom effect
         this.pipeline.bloomEnabled = true;
         this.pipeline.bloomThreshold = 0;
-        this.pipeline.bloomKernel = 90;
-        this.pipeline.bloomWeight = 0.4;
+        // Bloom kernel drives the blur width = several blur passes whose cost scales with the
+        // kernel. 90 was a large always-on GPU cost (the dominant post-processing pass); 32 keeps
+        // a soft glow at a fraction of the cost. Raise again only if the bloom looks too tight.
+        this.pipeline.bloomKernel = 32;
+        this.pipeline.bloomWeight = 0.25; // reduced: pipeline now receives real HDR (no prior tone-map clamp)
 
         // Enable and configure sharpening effect
         this.pipeline.sharpenEnabled = true;

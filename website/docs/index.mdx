@@ -1,0 +1,28 @@
+---
+pageType: home
+title: World42
+hero:
+  name: World42
+  text: "Planetary Rendering at 1:1 Scale"
+  tagline: "TypeScript · WebGPU · BabylonJS · Rust/WASM — from ground level to interplanetary distances with centimeter-precision terrain."
+  actions:
+    - theme: brand
+      text: Get Started
+      link: /getting-started
+    - theme: alt
+      text: Live Demo
+      link: https://bpodwinski.github.io/World42/
+features:
+  - title: Floating-Origin Camera
+    details: OriginCamera keeps the GPU vertex shader at (0,0,0) each frame while accumulating absolute position in double-precision WorldDouble coordinates — no precision drift at 1:1 planetary scale.
+  - title: GPU OCBT Terrain LOD
+    details: A pool-CBT (OCBT) engine inspired by Benyoub & Dupuy (HPG 2024) — fully GPU-driven adaptive triangulation with screen-space error control, crack-free from orbit to ground.
+  - title: Rust / WASM Pipeline
+    details: Procedural terrain noise and geometry generated in a Rust crate compiled to WebAssembly, dispatched from a Web Worker pool so the main thread is never blocked.
+  - title: WebGPU Render Pipeline
+    details: Frame Graph architecture with star ray-marching, single-scattering Rayleigh+Mie atmosphere, FXAA, and ACES tone mapping. WebGL2 fallback included.
+  - title: Three Coordinate Spaces
+    details: WorldDouble, render-space, and planet-local — enforced at every system boundary. ScaleManager is the sole km ↔ sim-unit conversion point.
+  - title: Stellar Catalog
+    details: Declarative JSON catalog — Sol, Alpha Centauri, and the Dev system — with per-planet terrain profiles, lighting overrides, and procedural surface archetypes.
+---

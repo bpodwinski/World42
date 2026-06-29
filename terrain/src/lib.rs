@@ -1,8 +1,129 @@
 use js_sys::{Array, Float32Array, Object, Reflect, Uint16Array, Uint32Array};
-use noise::{NoiseFn, OpenSimplex};
 use wasm_bindgen::prelude::*;
 
+pub mod cbt;
+
 const PI: f64 = core::f64::consts::PI;
+
+// ---------------------------------------------------------------------------
+// Gustavson 3D simplex noise — a VERBATIM port of src/systems/lod/cbt/cbt_noise.ts
+// (which the CBT/OCBT GPU shaders mirror in cbt_noise.wgsl). CDLOD previously used
+// `noise::OpenSimplex`, a different algorithm, so the same planet had a different
+// topology under CDLOD vs CBT/OCBT. Sharing this primitive (and the same noise
+// params, see DEFAULT_NOISE / noiseForQuality) makes the terrain identical across
+// all backends and lets the analytic CPU collision (cbt_noise.fbmNoise) match the
+// CDLOD ground too. Keep this in lockstep with cbt_noise.ts.
+// ---------------------------------------------------------------------------
+
+#[rustfmt::skip]
+const GRAD3: [[f64; 3]; 12] = [
+    [1.0, 1.0, 0.0], [-1.0, 1.0, 0.0], [1.0, -1.0, 0.0], [-1.0, -1.0, 0.0],
+    [1.0, 0.0, 1.0], [-1.0, 0.0, 1.0], [1.0, 0.0, -1.0], [-1.0, 0.0, -1.0],
+    [0.0, 1.0, 1.0], [0.0, -1.0, 1.0], [0.0, 1.0, -1.0], [0.0, -1.0, -1.0],
+];
+
+const F3: f64 = 1.0 / 3.0;
+const G3: f64 = 1.0 / 6.0;
+
+/// Seeded permutation table (512 entries = 256 doubled for wrap-around), matching
+/// `buildPerm` in cbt_noise.ts (same LCG Fisher-Yates shuffle).
+fn build_perm(seed: i32) -> [u8; 512] {
+    let mut p = [0u8; 512];
+    for i in 0..256 {
+        p[i] = i as u8;
+    }
+    let mut s: i32 = seed;
+    for i in (1..256).rev() {
+        s = s.wrapping_mul(1664525).wrapping_add(1013904223);
+        let j = ((s as u32) % ((i as u32) + 1)) as usize;
+        p.swap(i, j);
+    }
+    for i in 0..256 {
+        p[i + 256] = p[i];
+    }
+    p
+}
+
+#[inline]
+fn dot3(g: &[f64; 3], x: f64, y: f64, z: f64) -> f64 {
+    g[0] * x + g[1] * y + g[2] * z
+}
+
+/// 3D simplex noise in approximately [-1, 1] — verbatim port of `simplex3`.
+fn simplex3(perm: &[u8; 512], x: f64, y: f64, z: f64) -> f64 {
+    let s = (x + y + z) * F3;
+    let i = (x + s).floor();
+    let j = (y + s).floor();
+    let k = (z + s).floor();
+
+    let t = (i + j + k) * G3;
+    let x0 = x - (i - t);
+    let y0 = y - (j - t);
+    let z0 = z - (k - t);
+
+    let (i1, j1, k1, i2, j2, k2);
+    if x0 >= y0 {
+        if y0 >= z0 {
+            i1 = 1; j1 = 0; k1 = 0; i2 = 1; j2 = 1; k2 = 0;
+        } else if x0 >= z0 {
+            i1 = 1; j1 = 0; k1 = 0; i2 = 1; j2 = 0; k2 = 1;
+        } else {
+            i1 = 0; j1 = 0; k1 = 1; i2 = 1; j2 = 0; k2 = 1;
+        }
+    } else if y0 < z0 {
+        i1 = 0; j1 = 0; k1 = 1; i2 = 0; j2 = 1; k2 = 1;
+    } else if x0 < z0 {
+        i1 = 0; j1 = 1; k1 = 0; i2 = 0; j2 = 1; k2 = 1;
+    } else {
+        i1 = 0; j1 = 1; k1 = 0; i2 = 1; j2 = 1; k2 = 0;
+    }
+
+    let x1 = x0 - i1 as f64 + G3;
+    let y1 = y0 - j1 as f64 + G3;
+    let z1 = z0 - k1 as f64 + G3;
+    let x2 = x0 - i2 as f64 + 2.0 * G3;
+    let y2 = y0 - j2 as f64 + 2.0 * G3;
+    let z2 = z0 - k2 as f64 + 2.0 * G3;
+    let x3 = x0 - 1.0 + 3.0 * G3;
+    let y3 = y0 - 1.0 + 3.0 * G3;
+    let z3 = z0 - 1.0 + 3.0 * G3;
+
+    let ii = (i as i64 & 255) as usize;
+    let jj = (j as i64 & 255) as usize;
+    let kk = (k as i64 & 255) as usize;
+
+    let mut n = 0.0;
+
+    let mut t0 = 0.6 - x0 * x0 - y0 * y0 - z0 * z0;
+    if t0 > 0.0 {
+        t0 *= t0;
+        let gi0 = (perm[ii + perm[jj + perm[kk] as usize] as usize] % 12) as usize;
+        n += t0 * t0 * dot3(&GRAD3[gi0], x0, y0, z0);
+    }
+
+    let mut t1 = 0.6 - x1 * x1 - y1 * y1 - z1 * z1;
+    if t1 > 0.0 {
+        t1 *= t1;
+        let gi1 = (perm[ii + i1 + perm[jj + j1 + perm[kk + k1] as usize] as usize] % 12) as usize;
+        n += t1 * t1 * dot3(&GRAD3[gi1], x1, y1, z1);
+    }
+
+    let mut t2 = 0.6 - x2 * x2 - y2 * y2 - z2 * z2;
+    if t2 > 0.0 {
+        t2 *= t2;
+        let gi2 = (perm[ii + i2 + perm[jj + j2 + perm[kk + k2] as usize] as usize] % 12) as usize;
+        n += t2 * t2 * dot3(&GRAD3[gi2], x2, y2, z2);
+    }
+
+    let mut t3 = 0.6 - x3 * x3 - y3 * y3 - z3 * z3;
+    if t3 > 0.0 {
+        t3 *= t3;
+        let gi3 = (perm[ii + 1 + perm[jj + 1 + perm[kk + 1] as usize] as usize] % 12) as usize;
+        n += t3 * t3 * dot3(&GRAD3[gi3], x3, y3, z3);
+    }
+
+    32.0 * n
+}
 
 // fn saturate(x: f64) -> f64 {
 //     if x < 0.0 {
@@ -72,93 +193,14 @@ fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
 }
 
 fn tri_normal(v0: [f64; 3], v1: [f64; 3], v2: [f64; 3]) -> [f64; 3] {
+    // JS: edge1 = v1 - v0, edge2 = v2 - v0, normal = edge2.cross(edge1)
     let e1 = sub3(v1, v0);
     let e2 = sub3(v2, v0);
     normalize3(cross(e2, e1))
 }
 
-/// Max possible amplitude for an octave sub-range `[start, end)`.
-/// Used to correct the per-band normalisation so that `sg_coarse + sg_detail`
-/// equals the gradient of `fractal_noise(0..total_octaves)`.
-fn max_possible_amplitude(
-    octave_start: u32,
-    octave_end: u32,
-    base_amplitude: f64,
-    persistence: f64,
-) -> f64 {
-    let mut mp = 0.0;
-    let mut amp = base_amplitude * persistence.powi(octave_start as i32);
-    for _ in octave_start..octave_end {
-        mp += amp;
-        amp *= persistence;
-    }
-    mp
-}
-
-/// Surface gradient via 3D Cartesian gradient of the noise for a given
-/// octave range, projected onto the sphere tangent plane.
-/// Returns grad_t (tangent-plane gradient), NOT a final normal.
-/// Surface gradients are additive: the fragment shader composites bands
-/// and reconstructs the normal as `normalize(radial - totalSG / pr)`.
-///
-/// `total_octaves` is the full octave count used for elevation — needed to
-/// correct the per-band normalisation so that `sg_coarse + sg_detail` gives
-/// the correct total gradient.
-fn surface_gradient(
-    simplex: &OpenSimplex,
-    unit: [f64; 3],
-    octave_start: u32,
-    octave_end: u32,
-    total_octaves: u32,
-    base_frequency: f64,
-    base_amplitude: f64,
-    lacunarity: f64,
-    persistence: f64,
-    global_amp: f64,
-) -> [f64; 3] {
-    if octave_end <= octave_start {
-        return [0.0, 0.0, 0.0];
-    }
-
-    let eps = 1e-5;
-
-    // 3D gradient via central differences along each Cartesian axis
-    let mut grad = [0.0f64; 3];
-    for axis in 0..3usize {
-        let mut p_plus = unit;
-        let mut p_minus = unit;
-        p_plus[axis] += eps;
-        p_minus[axis] -= eps;
-        grad[axis] = (fractal_noise_range(simplex, p_plus[0], p_plus[1], p_plus[2],
-                                          octave_start, octave_end,
-                                          base_frequency, base_amplitude,
-                                          lacunarity, persistence)
-                    - fractal_noise_range(simplex, p_minus[0], p_minus[1], p_minus[2],
-                                          octave_start, octave_end,
-                                          base_frequency, base_amplitude,
-                                          lacunarity, persistence))
-                     / (2.0 * eps) * global_amp;
-    }
-
-    // Correct for per-band normalisation:
-    // fractal_noise_range divides by mp_band, but the true contribution to
-    // the total elevation gradient requires division by mp_total instead.
-    // Scale factor = mp_band / mp_total.
-    let mp_band = max_possible_amplitude(octave_start, octave_end, base_amplitude, persistence);
-    let mp_total = max_possible_amplitude(0, total_octaves, base_amplitude, persistence);
-    let scale = if mp_total > 1e-12 { mp_band / mp_total } else { 1.0 };
-
-    // Apply correction and project onto sphere tangent plane
-    let dot = grad[0] * unit[0] + grad[1] * unit[1] + grad[2] * unit[2];
-    [
-        (grad[0] - dot * unit[0]) * scale,
-        (grad[1] - dot * unit[1]) * scale,
-        (grad[2] - dot * unit[2]) * scale,
-    ]
-}
-
 fn fractal_noise(
-    simplex: &OpenSimplex,
+    perm: &[u8; 512],
     x: f64,
     y: f64,
     z: f64,
@@ -174,42 +216,7 @@ fn fractal_noise(
     let mut amp = base_amplitude;
 
     for _ in 0..octaves {
-        let v = simplex.get([x * freq, y * freq, z * freq]); // [-1..1]
-        sum += v * amp;
-        max_possible += amp;
-        freq *= lacunarity;
-        amp *= persistence;
-    }
-
-    if max_possible <= 1e-12 {
-        0.0
-    } else {
-        sum / max_possible
-    }
-}
-
-/// Fractal noise summing only octaves in `[octave_start, octave_end)`.
-/// Normalisation uses the max possible amplitude of that sub-range only,
-/// keeping the output in [-1, 1].
-fn fractal_noise_range(
-    simplex: &OpenSimplex,
-    x: f64,
-    y: f64,
-    z: f64,
-    octave_start: u32,
-    octave_end: u32,
-    base_frequency: f64,
-    base_amplitude: f64,
-    lacunarity: f64,
-    persistence: f64,
-) -> f64 {
-    let mut sum = 0.0;
-    let mut max_possible = 0.0;
-    let mut freq = base_frequency * lacunarity.powi(octave_start as i32);
-    let mut amp = base_amplitude * persistence.powi(octave_start as i32);
-
-    for _ in octave_start..octave_end {
-        let v = simplex.get([x * freq, y * freq, z * freq]);
+        let v = simplex3(perm, x * freq, y * freq, z * freq); // [-1..1]
         sum += v * amp;
         max_possible += amp;
         freq *= lacunarity;
@@ -247,7 +254,7 @@ pub fn build_chunk(
     let vert_count = (res + 1) * (res + 1);
     let index_count = res * res * 6;
 
-    let simplex = OpenSimplex::new(seed as u32);
+    let perm = build_perm(seed);
 
     // angles (bounds en tan-space)
     let a_u_min = u_min.atan();
@@ -266,18 +273,15 @@ pub fn build_chunk(
     let dir = normalize3(center_local);
 
     let mut positions_f = vec![0f32; vert_count * 3];
-    let mut sg_coarse_f = vec![0f32; vert_count * 3];
-    let mut sg_detail_f = vec![0f32; vert_count * 3];
+    let mut normals_f = vec![0f32; vert_count * 3];
     let mut morph_deltas_f = vec![0f32; vert_count * 3];
     let mut uvs_f = vec![0f32; vert_count * 2];
     let mut verts = vec![[0.0f64; 3]; vert_count];
 
-    let coarse_cutoff = octaves.min(6);
-
     let mut min_pr = f64::INFINITY;
     let mut max_pr = -f64::INFINITY;
 
-    // PASS 1: vertices + surface gradients (coarse & detail bands)
+    // PASS 1: vertices
     for i in 0..=res {
         let t_v = (i as f64) / (res as f64);
         let angle_v = a_v_min + (a_v_max - a_v_min) * t_v;
@@ -292,7 +296,7 @@ pub fn build_chunk(
             let unit = normalize3(cube);
 
             let f = fractal_noise(
-                &simplex,
+                &perm,
                 unit[0],
                 unit[1],
                 unit[2],
@@ -323,27 +327,10 @@ pub fn build_chunk(
             positions_f[p_off + 1] = pos[1] as f32;
             positions_f[p_off + 2] = pos[2] as f32;
 
-            // Surface gradients: coarse band (octaves 0..coarse_cutoff)
-            let sg_c = surface_gradient(
-                &simplex, unit, 0, coarse_cutoff, octaves,
-                base_frequency, base_amplitude, lacunarity, persistence,
-                global_amp,
-            );
-            sg_coarse_f[p_off]     = sg_c[0] as f32;
-            sg_coarse_f[p_off + 1] = sg_c[1] as f32;
-            sg_coarse_f[p_off + 2] = sg_c[2] as f32;
-
-            // Surface gradients: detail band (octaves coarse_cutoff..octaves)
-            if octaves > coarse_cutoff {
-                let sg_d = surface_gradient(
-                    &simplex, unit, coarse_cutoff, octaves, octaves,
-                    base_frequency, base_amplitude, lacunarity, persistence,
-                    global_amp,
-                );
-                sg_detail_f[p_off]     = sg_d[0] as f32;
-                sg_detail_f[p_off + 1] = sg_d[1] as f32;
-                sg_detail_f[p_off + 2] = sg_d[2] as f32;
-            }
+            // radial normal initial
+            normals_f[p_off] = (pos[0] / pr) as f32;
+            normals_f[p_off + 1] = (pos[1] / pr) as f32;
+            normals_f[p_off + 2] = (pos[2] / pr) as f32;
 
             // spherical UV
             let uu = ((pos[0].atan2(pos[2]) + PI) / (2.0 * PI)) as f32;
@@ -408,6 +395,10 @@ pub fn build_chunk(
     }
     let bounding_radius = max_d2.sqrt();
 
+    // normals averaged
+    let mut acc = vec![[0.0f64; 3]; vert_count];
+    let mut cnt = vec![0u32; vert_count];
+
     let use_u16 = vert_count <= 65535;
 
     if use_u16 {
@@ -429,6 +420,7 @@ pub fn build_chunk(
                 let d2 = length3(sub3(v1, v2));
 
                 if d1 < d2 {
+                    // (0,3,1) + (0,2,3)
                     indices.extend_from_slice(&[
                         index0 as u16,
                         index3 as u16,
@@ -437,7 +429,20 @@ pub fn build_chunk(
                         index2 as u16,
                         index3 as u16,
                     ]);
+
+                    let n1 = tri_normal(v0, v3, v1);
+                    let n2 = tri_normal(v0, v2, v3);
+
+                    for &k in &[index0, index3, index1] {
+                        acc[k] = add3(acc[k], n1);
+                        cnt[k] += 1;
+                    }
+                    for &k in &[index0, index2, index3] {
+                        acc[k] = add3(acc[k], n2);
+                        cnt[k] += 1;
+                    }
                 } else {
+                    // (0,2,1) + (1,2,3)
                     indices.extend_from_slice(&[
                         index0 as u16,
                         index2 as u16,
@@ -446,7 +451,30 @@ pub fn build_chunk(
                         index2 as u16,
                         index3 as u16,
                     ]);
+
+                    let n1 = tri_normal(v0, v2, v1);
+                    let n2 = tri_normal(v1, v2, v3);
+
+                    for &k in &[index0, index2, index1] {
+                        acc[k] = add3(acc[k], n1);
+                        cnt[k] += 1;
+                    }
+                    for &k in &[index1, index2, index3] {
+                        acc[k] = add3(acc[k], n2);
+                        cnt[k] += 1;
+                    }
                 }
+            }
+        }
+
+        for i in 0..vert_count {
+            if cnt[i] > 0 {
+                let inv = 1.0 / (cnt[i] as f64);
+                let n = normalize3(scale3(acc[i], inv));
+                let off = i * 3;
+                normals_f[off] = n[0] as f32;
+                normals_f[off + 1] = n[1] as f32;
+                normals_f[off + 2] = n[2] as f32;
             }
         }
 
@@ -457,13 +485,9 @@ pub fn build_chunk(
         pos_js.copy_from(&positions_f);
         Reflect::set(&out, &"positions".into(), &pos_js)?;
 
-        let sgc_js = Float32Array::new_with_length(sg_coarse_f.len() as u32);
-        sgc_js.copy_from(&sg_coarse_f);
-        Reflect::set(&out, &"sgCoarse".into(), &sgc_js)?;
-
-        let sgd_js = Float32Array::new_with_length(sg_detail_f.len() as u32);
-        sgd_js.copy_from(&sg_detail_f);
-        Reflect::set(&out, &"sgDetail".into(), &sgd_js)?;
+        let nor_js = Float32Array::new_with_length(normals_f.len() as u32);
+        nor_js.copy_from(&normals_f);
+        Reflect::set(&out, &"normals".into(), &nor_js)?;
 
         let morph_js = Float32Array::new_with_length(morph_deltas_f.len() as u32);
         morph_js.copy_from(&morph_deltas_f);
@@ -522,9 +546,48 @@ pub fn build_chunk(
 
                 if d1 < d2 {
                     indices.extend_from_slice(&[index0, index3, index1, index0, index2, index3]);
+
+                    let n1 = tri_normal(v0, v3, v1);
+                    let n2 = tri_normal(v0, v2, v3);
+
+                    for &k in &[index0, index3, index1] {
+                        let kk = k as usize;
+                        acc[kk] = add3(acc[kk], n1);
+                        cnt[kk] += 1;
+                    }
+                    for &k in &[index0, index2, index3] {
+                        let kk = k as usize;
+                        acc[kk] = add3(acc[kk], n2);
+                        cnt[kk] += 1;
+                    }
                 } else {
                     indices.extend_from_slice(&[index0, index2, index1, index1, index2, index3]);
+
+                    let n1 = tri_normal(v0, v2, v1);
+                    let n2 = tri_normal(v1, v2, v3);
+
+                    for &k in &[index0, index2, index1] {
+                        let kk = k as usize;
+                        acc[kk] = add3(acc[kk], n1);
+                        cnt[kk] += 1;
+                    }
+                    for &k in &[index1, index2, index3] {
+                        let kk = k as usize;
+                        acc[kk] = add3(acc[kk], n2);
+                        cnt[kk] += 1;
+                    }
                 }
+            }
+        }
+
+        for i in 0..vert_count {
+            if cnt[i] > 0 {
+                let inv = 1.0 / (cnt[i] as f64);
+                let n = normalize3(scale3(acc[i], inv));
+                let off = i * 3;
+                normals_f[off] = n[0] as f32;
+                normals_f[off + 1] = n[1] as f32;
+                normals_f[off + 2] = n[2] as f32;
             }
         }
 
@@ -534,13 +597,9 @@ pub fn build_chunk(
         pos_js.copy_from(&positions_f);
         Reflect::set(&out, &"positions".into(), &pos_js)?;
 
-        let sgc_js = Float32Array::new_with_length(sg_coarse_f.len() as u32);
-        sgc_js.copy_from(&sg_coarse_f);
-        Reflect::set(&out, &"sgCoarse".into(), &sgc_js)?;
-
-        let sgd_js = Float32Array::new_with_length(sg_detail_f.len() as u32);
-        sgd_js.copy_from(&sg_detail_f);
-        Reflect::set(&out, &"sgDetail".into(), &sgd_js)?;
+        let nor_js = Float32Array::new_with_length(normals_f.len() as u32);
+        nor_js.copy_from(&normals_f);
+        Reflect::set(&out, &"normals".into(), &nor_js)?;
 
         let morph_js = Float32Array::new_with_length(morph_deltas_f.len() as u32);
         morph_js.copy_from(&morph_deltas_f);
@@ -579,295 +638,5 @@ pub fn build_chunk(
         Reflect::set(&out, &"boundsInfo".into(), &bounds)?;
 
         Ok(out.into())
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Triangular patch generation for CBT leaves
-// ---------------------------------------------------------------------------
-
-/// Row start index in the triangular vertex grid.
-/// Row `i` of resolution `N` has `(N + 1 - i)` vertices.
-fn tri_row_start(n: usize) -> Vec<usize> {
-    let mut starts = Vec::with_capacity(n + 2);
-    let mut acc = 0usize;
-    for i in 0..=n {
-        starts.push(acc);
-        acc += n + 1 - i;
-    }
-    starts.push(acc); // sentinel
-    starts
-}
-
-fn build_triangle_js_output(
-    positions_f: &[f32],
-    sg_coarse_f: &[f32],
-    sg_detail_f: &[f32],
-    morph_deltas_f: &[f32],
-    uvs_f: &[f32],
-    indices_u16: Option<&[u16]>,
-    indices_u32: Option<&[u32]>,
-    center_local: [f64; 3],
-    bounding_radius: f64,
-    min_pr: f64,
-    max_pr: f64,
-) -> Result<JsValue, JsValue> {
-    let out = Object::new();
-
-    let pos_js = Float32Array::new_with_length(positions_f.len() as u32);
-    pos_js.copy_from(positions_f);
-    Reflect::set(&out, &"positions".into(), &pos_js)?;
-
-    let sgc_js = Float32Array::new_with_length(sg_coarse_f.len() as u32);
-    sgc_js.copy_from(sg_coarse_f);
-    Reflect::set(&out, &"sgCoarse".into(), &sgc_js)?;
-
-    let sgd_js = Float32Array::new_with_length(sg_detail_f.len() as u32);
-    sgd_js.copy_from(sg_detail_f);
-    Reflect::set(&out, &"sgDetail".into(), &sgd_js)?;
-
-    let morph_js = Float32Array::new_with_length(morph_deltas_f.len() as u32);
-    morph_js.copy_from(morph_deltas_f);
-    Reflect::set(&out, &"morphDeltas".into(), &morph_js)?;
-
-    let uvs_js = Float32Array::new_with_length(uvs_f.len() as u32);
-    uvs_js.copy_from(uvs_f);
-    Reflect::set(&out, &"uvs".into(), &uvs_js)?;
-
-    if let Some(idx) = indices_u16 {
-        let idx_js = Uint16Array::new_with_length(idx.len() as u32);
-        idx_js.copy_from(idx);
-        Reflect::set(&out, &"indices".into(), &idx_js)?;
-    } else if let Some(idx) = indices_u32 {
-        let idx_js = Uint32Array::new_with_length(idx.len() as u32);
-        idx_js.copy_from(idx);
-        Reflect::set(&out, &"indices".into(), &idx_js)?;
-    }
-
-    let bounds = Object::new();
-    let center_arr = Array::new();
-    center_arr.push(&JsValue::from_f64(center_local[0]));
-    center_arr.push(&JsValue::from_f64(center_local[1]));
-    center_arr.push(&JsValue::from_f64(center_local[2]));
-    Reflect::set(&bounds, &"centerLocal".into(), &center_arr)?;
-    Reflect::set(&bounds, &"boundingRadius".into(), &JsValue::from_f64(bounding_radius))?;
-    Reflect::set(&bounds, &"minPlanetRadius".into(), &JsValue::from_f64(min_pr))?;
-    Reflect::set(&bounds, &"maxPlanetRadius".into(), &JsValue::from_f64(max_pr))?;
-    Reflect::set(&out, &"boundsInfo".into(), &bounds)?;
-
-    Ok(out.into())
-}
-
-#[wasm_bindgen]
-pub fn build_triangle_chunk(
-    v0_x: f64, v0_y: f64, v0_z: f64,
-    v1_x: f64, v1_y: f64, v1_z: f64,
-    v2_x: f64, v2_y: f64, v2_z: f64,
-    resolution: u32,
-    radius: f64,
-    seed: i32,
-    octaves: u32,
-    base_frequency: f64,
-    base_amplitude: f64,
-    lacunarity: f64,
-    persistence: f64,
-    global_amp: f64,
-) -> Result<JsValue, JsValue> {
-    console_error_panic_hook::set_once();
-
-    let n = resolution as usize;
-    let vert_count = (n + 1) * (n + 2) / 2;
-    let tri_count = n * n;
-    let index_count = tri_count * 3;
-
-    let simplex = OpenSimplex::new(seed as u32);
-    let row_start = tri_row_start(n);
-
-    let tv0 = [v0_x, v0_y, v0_z];
-    let tv1 = [v1_x, v1_y, v1_z];
-    let tv2 = [v2_x, v2_y, v2_z];
-
-    let mut positions_f = vec![0f32; vert_count * 3];
-    let mut sg_coarse_f = vec![0f32; vert_count * 3];
-    let mut sg_detail_f = vec![0f32; vert_count * 3];
-    let mut morph_deltas_f = vec![0f32; vert_count * 3];
-    let mut uvs_f = vec![0f32; vert_count * 2];
-    let mut verts = vec![[0.0f64; 3]; vert_count];
-
-    let coarse_cutoff = octaves.min(6);
-
-    let mut min_pr = f64::INFINITY;
-    let mut max_pr = -f64::INFINITY;
-
-    // PASS 1: vertices + surface gradients (coarse & detail bands)
-    for i in 0..=n {
-        let cols = n - i;
-        for j in 0..=cols {
-            let a = i as f64 / n as f64; // weight for v1
-            let b = j as f64 / n as f64; // weight for v2
-            let c = 1.0 - a - b;         // weight for v0
-
-            // Interpolate on the flat triangle
-            let interp = add3(add3(scale3(tv0, c), scale3(tv1, a)), scale3(tv2, b));
-
-            // Project onto unit sphere
-            let unit = normalize3(interp);
-
-            // Fractal noise displacement
-            let f = fractal_noise(
-                &simplex, unit[0], unit[1], unit[2],
-                octaves, base_frequency, base_amplitude, lacunarity, persistence,
-            );
-            let elevation = f * global_amp;
-            let pr = radius + elevation;
-
-            if pr < min_pr { min_pr = pr; }
-            if pr > max_pr { max_pr = pr; }
-
-            let pos = scale3(unit, pr);
-            let idx = row_start[i] + j;
-            verts[idx] = pos;
-
-            let p_off = idx * 3;
-            positions_f[p_off]     = pos[0] as f32;
-            positions_f[p_off + 1] = pos[1] as f32;
-            positions_f[p_off + 2] = pos[2] as f32;
-
-            // Surface gradients: coarse band (octaves 0..coarse_cutoff)
-            let sg_c = surface_gradient(
-                &simplex, unit, 0, coarse_cutoff, octaves,
-                base_frequency, base_amplitude, lacunarity, persistence,
-                global_amp,
-            );
-            sg_coarse_f[p_off]     = sg_c[0] as f32;
-            sg_coarse_f[p_off + 1] = sg_c[1] as f32;
-            sg_coarse_f[p_off + 2] = sg_c[2] as f32;
-
-            // Surface gradients: detail band (octaves coarse_cutoff..octaves)
-            if octaves > coarse_cutoff {
-                let sg_d = surface_gradient(
-                    &simplex, unit, coarse_cutoff, octaves, octaves,
-                    base_frequency, base_amplitude, lacunarity, persistence,
-                    global_amp,
-                );
-                sg_detail_f[p_off]     = sg_d[0] as f32;
-                sg_detail_f[p_off + 1] = sg_d[1] as f32;
-                sg_detail_f[p_off + 2] = sg_d[2] as f32;
-            }
-
-            // Spherical UV
-            let uu = ((pos[0].atan2(pos[2]) + PI) / (2.0 * PI)) as f32;
-            let vv = ((pos[1] / pr).acos() / PI) as f32;
-            let uv_off = idx * 2;
-            uvs_f[uv_off]     = uu;
-            uvs_f[uv_off + 1] = vv;
-        }
-    }
-
-    // PASS 2: morph deltas — snap to even barycentric grid (half resolution)
-    for i in 0..=n {
-        let cols = n - i;
-        for j in 0..=cols {
-            let idx = row_start[i] + j;
-
-            let i0 = (i / 2) * 2;
-            let j0 = (j / 2) * 2;
-
-            // Clamp to valid triangle range
-            let i1 = (i0 + 2).min(n);
-            let j1_max = n - i0;
-            let j1 = (j0 + 2).min(j1_max);
-
-            let fx = if j1 == j0 { 0.0 } else { (j - j0) as f64 / (j1 - j0) as f64 };
-            let fy = if i1 == i0 { 0.0 } else { (i - i0) as f64 / (i1 - i0) as f64 };
-
-            // Bilinear from coarse corners (clamped to valid indices)
-            let j0c = j0.min(n - i0);
-            let j1c = j1.min(n - i0);
-            let j0c1 = j0.min(n - i1);
-            let j1c1 = j1.min(n - i1);
-
-            let v00 = verts[row_start[i0] + j0c];
-            let v10 = verts[row_start[i0] + j1c];
-            let v01 = verts[row_start[i1] + j0c1];
-            let v11 = verts[row_start[i1] + j1c1];
-
-            let row0 = lerp3(v00, v10, fx);
-            let row1 = lerp3(v01, v11, fx);
-            let coarse = lerp3(row0, row1, fy);
-            let delta = sub3(coarse, verts[idx]);
-
-            let p_off = idx * 3;
-            morph_deltas_f[p_off]     = delta[0] as f32;
-            morph_deltas_f[p_off + 1] = delta[1] as f32;
-            morph_deltas_f[p_off + 2] = delta[2] as f32;
-        }
-    }
-
-    // Bounding sphere
-    let centroid = scale3(add3(add3(tv0, tv1), tv2), 1.0 / 3.0);
-    let dir = normalize3(centroid);
-    let center_r = 0.5 * (min_pr + max_pr);
-    let center_local = scale3(dir, center_r);
-
-    let mut max_d2 = 0.0f64;
-    for v in &verts {
-        let d = sub3(*v, center_local);
-        let d2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
-        if d2 > max_d2 { max_d2 = d2; }
-    }
-    let bounding_radius = max_d2.sqrt();
-
-    // PASS 3: indices only (surface gradients already computed in PASS 1)
-    let use_u16 = vert_count <= 65535;
-
-    if use_u16 {
-        let mut indices: Vec<u16> = Vec::with_capacity(index_count);
-
-        for i in 0..n {
-            let cols = n - i;
-            for j in 0..cols {
-                let a = (row_start[i] + j) as u16;
-                let b = (row_start[i] + j + 1) as u16;
-                let d = (row_start[i + 1] + j) as u16;
-
-                indices.extend_from_slice(&[a, b, d]);
-
-                if j < cols - 1 {
-                    let e = (row_start[i + 1] + j + 1) as u16;
-                    indices.extend_from_slice(&[b, e, d]);
-                }
-            }
-        }
-
-        build_triangle_js_output(
-            &positions_f, &sg_coarse_f, &sg_detail_f, &morph_deltas_f, &uvs_f,
-            Some(&indices), None,
-            center_local, bounding_radius, min_pr, max_pr,
-        )
-    } else {
-        let mut indices: Vec<u32> = Vec::with_capacity(index_count);
-
-        for i in 0..n {
-            let cols = n - i;
-            for j in 0..cols {
-                let a = (row_start[i] + j) as u32;
-                let b = (row_start[i] + j + 1) as u32;
-                let d = (row_start[i + 1] + j) as u32;
-
-                indices.extend_from_slice(&[a, b, d]);
-
-                if j < cols - 1 {
-                    let e = (row_start[i + 1] + j + 1) as u32;
-                    indices.extend_from_slice(&[b, e, d]);
-                }
-            }
-        }
-
-        build_triangle_js_output(
-            &positions_f, &sg_coarse_f, &sg_detail_f, &morph_deltas_f, &uvs_f,
-            None, Some(&indices),
-            center_local, bounding_radius, min_pr, max_pr,
-        )
     }
 }

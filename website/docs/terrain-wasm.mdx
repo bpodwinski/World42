@@ -1,0 +1,96 @@
+# Terrain & WASM Pipeline
+
+Terrain geometry is generated **off the main thread** using a Rust crate compiled to WebAssembly and invoked from a pool of Web Workers.
+
+## Rust Crate
+
+The crate lives at `terrain/src/lib.rs` and is compiled with `wasm-pack`.
+
+### Main Export
+
+```rust
+#[wasm_bindgen]
+pub fn build_chunk(/* patch params */) -> ChunkResult {
+    // Returns positions (Float32Array), normals (Float32Array),
+    // uvs (Float32Array), indices (Uint32Array), bounding sphere
+}
+```
+
+`build_chunk()` generates the full mesh for one terrain patch:
+- Vertex positions, normals, and UVs from procedural noise (`noise` crate — Perlin/Simplex, edition 2024)
+- Index buffer (triangle list)
+- Bounding sphere (center + radius) for culling and SSE computation
+
+### Building
+
+Run from the `terrain/` directory:
+
+```bash
+# Dev build (faster, larger binary, debug symbols)
+wasm-pack build --dev --target web --out-dir pkg
+
+# Release build (optimized, ~3–5x smaller)
+wasm-pack build --release --target web --out-dir pkg
+```
+
+Output lands in `terrain/pkg/` which is imported directly by the worker entry point.
+
+## Web Worker Pool
+
+`src/systems/lod/workers/worker_pool.ts` manages a pool of `hardwareConcurrency - 1` workers. One CPU core is reserved for the main thread / renderer.
+
+Workers are initialized once at startup with the WASM module and shared `ArrayBuffer`s. After init, they accept `build_chunk` requests via `postMessage`.
+
+## Worker Protocol (`mesh-kernel/1`)
+
+All messages are typed in `src/systems/lod/workers/worker_protocol.ts`.
+
+### Handshake
+
+```
+Main → Worker:  { type: 'init', wasmModule, sharedBuffer }
+Worker → Main:  { type: 'ready' }
+```
+
+### Build Request
+
+```
+Main → Worker:  {
+  type: 'build_chunk',
+  id: string,           // chunkKey
+  face: number,         // cube face 0–5
+  level: number,        // LOD depth
+  x: number, y: number  // patch coordinates
+}
+
+Worker → Main:  {
+  type: 'chunk_result',
+  id: string,
+  positions: Float32Array,
+  normals: Float32Array,
+  uvs: Float32Array,
+  indices: Uint32Array,
+  boundingSphere: { center: [x, y, z], radius: number }
+}
+```
+
+### Cancellation
+
+```
+Main → Worker:  { type: 'cancel', id: string }
+```
+
+The worker discards the in-progress `build_chunk` for that `id` if it has not yet started WASM execution. Already-running WASM calls complete and the result is silently dropped on the main thread.
+
+## Priority Queue
+
+`src/systems/lod/lod_priority_queue.ts` implements a min-heap keyed by camera distance. Pending `build_chunk` requests are sorted so the closest (highest visual impact) patches are dispatched first. The queue is rescored every `rescoreMs` ms to account for camera movement.
+
+## Chunk Forge
+
+Once a `chunk_result` arrives on the main thread, `src/systems/lod/chunks/chunk_forge.ts` builds the BabylonJS `Mesh` from the typed arrays:
+
+1. Creates `VertexData` from positions / normals / uvs / indices
+2. Applies it to a pooled or new `Mesh` node
+3. Assigns the shared planet `Material`
+4. Sets `mesh.position` in render-space (planet-local → render-space via camera)

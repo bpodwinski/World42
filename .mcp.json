@@ -1,0 +1,23 @@
+{
+  "mcpServers": {
+    "github": {
+      "type": "http",
+      "url": "https://api.githubcopilot.com/mcp/",
+      "headers": {
+        "Authorization": "Bearer ${GITHUB_MCP_PAT}"
+      }
+    },
+    "playwright": {
+      "command": "npx",
+      "args": [
+        "@playwright/mcp@latest",
+        "--output-dir",
+        ".playwright-mcp"
+      ]
+    },
+    "openai-docs": {
+      "type": "http",
+      "url": "https://developers.openai.com/mcp"
+    }
+  }
+}

@@ -5,18 +5,25 @@ import {
     PBRMetallicRoughnessMaterial,
     Color3,
     TransformNode,
+    WebGPUEngine,
 } from "@babylonjs/core";
 
 import { FloatingEntity, OriginCamera } from "../../core/camera/camera_manager";
 import { ScaleManager } from "../../core/scale/scale_manager";
 import { TextureManager } from "../../core/io/texture_manager";
-import { ChunkTree } from "../../systems/lod/cdlod/cdlod_tree";
-import { CbtPlanet } from "../../systems/lod/cbt/cbt_scheduler";
-import type { Face } from "../../systems/lod/types";
+import { TerrainPlanet } from "../../systems/lod/terrain/terrain_scheduler";
+import type { CraterParams, NoiseParams } from "../../systems/lod/terrain/terrain_noise";
+import type { TerrainLodParams } from "../../systems/lod/terrain/terrain_lod";
 import {
     normalizeCatalogJSON as normalizeCatalogJSONFromSource,
     normalizeSystemJSON,
 } from "./stellar_catalog_normalizer";
+import lightingJsonRaw from "./planet_lighting.json";
+import { resolveLighting, type PlanetLightingJSON, type PlanetLightingParams, type ResolvedAtmosphere, type ResolvedLighting } from "./planet_lighting";
+import { resolveProfile } from "./planet_profiles";
+import { effectiveProfile } from "./terrain_profile_store";
+
+const LIGHTING_JSON = lightingJsonRaw as unknown as PlanetLightingJSON;
 
 /** ---------- Types JSON (catalogue) ---------- */
 export type StarJSON = {
@@ -25,15 +32,16 @@ export type StarJSON = {
     intensity?: number;
 };
 
-export type LodAlgorithm = "cdlod" | "cbt";
-
 export type BodyJSON = {
     type: string;
     position_km: [number, number, number];
     diameter_km: number;
     rotation_period_days: number | null;
-    lod_algorithm?: LodAlgorithm;
-    star?: StarJSON; // ✅ NEW
+    star?: StarJSON;
+    /** Terrain archetype id (planet_profiles.ts). When set, drives noise + craters + lighting. */
+    profile?: string;
+    /** Per-planet lighting overrides — merged over the profile (or planet_lighting.json `_defaults`). */
+    lighting?: PlanetLightingParams;
 };
 
 export type SystemJSON = Record<string, BodyJSON>;
@@ -66,7 +74,6 @@ export type StellarCatalogJSON = {
 export type LoadedBody = {
     systemId: string;
     bodyType: string;
-    lodAlgorithm: LodAlgorithm;
     name: string;
 
     /** Pivot in render-space (rotation/tilt), parented under FloatingEntity. */
@@ -91,6 +98,11 @@ export type LoadedBody = {
         color: Vector3;      // (r,g,b) linéaire
         intensity: number;   // scalaire
     };
+
+    /** Terrain archetype id (planet_profiles.ts), forwarded to resolveProfile(). */
+    profile?: string;
+    /** Lighting overrides from data.json, forwarded to resolveLighting()/resolveProfile(). */
+    lighting?: PlanetLightingParams;
 };
 
 export type LoadedSystem = {
@@ -99,39 +111,25 @@ export type LoadedSystem = {
     bodies: Map<string, LoadedBody>;
 };
 
-export type PlanetCDLOD = {
+export type PlanetTerrain = {
     entity: FloatingEntity;
-    chunks: ChunkTree[];
-    /** Planet radius in simulation units. */
-    radiusSim: number;
-    maxLevel: number;
-    resolution: number;
-};
-
-export type PlanetCBT = {
-    entity: FloatingEntity;
-    runtime: CbtPlanet;
+    runtime: TerrainPlanet;
     /** Planet radius in simulation units. */
     radiusSim: number;
     /** Star position in WorldDouble used for terrain lighting. */
     starPosWorldDouble: Vector3 | null;
+    /** Resolved single-scattering atmosphere, or null for airless bodies. */
+    atmosphere: ResolvedAtmosphere | null;
+    /** Terrain profile id this planet uses (for the options menu's hot-rebuild), if any. */
+    profile?: string;
+    /** Per-body lighting override (merged over the profile on rebuild), if any. */
+    lightingOverride?: PlanetLightingParams;
 };
 
-export type CDLODOptions = {
-    maxLevel?: number;
-    resolution?: number;
-    skip?: (name: string, body: LoadedBody) => boolean;
-    faces?: Face[];
-};
-
-export type CBTOptions = {
-    maxDepth?: number;
-    minDepth?: number;
-    resolution?: number;
-    maxSplitsPerFrame?: number;
-    maxMergesPerFrame?: number;
-    splitThresholdPx2?: number;
-    splitHysteresis?: number;
+export type TerrainOptions = {
+    /** Noise field (CPU displacement + GPU shader); default DEFAULT_NOISE. */
+    noise?: NoiseParams;
+    engine?: WebGPUEngine;
     skip?: (name: string, body: LoadedBody) => boolean;
 };
 
@@ -232,7 +230,6 @@ export async function loadStellarSystemFromCatalog(
         bodies.set(name, {
             systemId,
             bodyType: type,
-            lodAlgorithm: data.lod_algorithm ?? "cdlod",
             name,
             node: pivot,
             meshName,
@@ -241,6 +238,8 @@ export async function loadStellarSystemFromCatalog(
             radiusSim: diameterSim * 0.5,
             rotationPeriodDays: data.rotation_period_days,
             starLight,
+            profile: data.profile,
+            lighting: data.lighting,
         });
     }
 
@@ -259,104 +258,16 @@ export async function loadStellarSystemFromCatalog(
     return { systemId, root, bodies };
 }
 
-/**
- * Crée les FloatingEntity pour tous les corps du système,
- * puis crée le CDLOD pour ceux qui ne sont pas skip.
- *
- * NOTE: dépend d’un OriginCamera (floating origin).
- */
-export function createCDLODForSystem(
+export function createTerrainForSystem(
     scene: Scene,
     camera: OriginCamera,
     loaded: LoadedSystem,
-    opts: CDLODOptions = {}
-): Map<string, PlanetCDLOD> {
+    opts: TerrainOptions = {}
+): Map<string, PlanetTerrain> {
     const {
-        maxLevel = 8,
-        resolution = 64,
-        faces = ["front", "back", "left", "right", "top", "bottom"],
-        skip = (_name: string, body: LoadedBody) =>
-            body.bodyType === "star" || body.lodAlgorithm !== "cdlod",
-    } = opts;
-
-    // Extra margin for culling bounding sphere to account for terrain relief (10 km -> sim units).
-    ChunkTree.cullReliefMargin = ScaleManager.toSimulationUnits(10);
-
-    // attacher entités flottantes (noms namespacés)
-    for (const [name, body] of loaded.bodies) {
-        if (!body.entity) {
-            const ent = new FloatingEntity(`ent_${loaded.systemId}_${name}`, scene);
-            ent.parent = loaded.root; // rangement
-            ent.doublepos.copyFrom(body.positionWorldDouble);
-            camera.add(ent);
-
-            body.node.parent = ent;
-            body.node.position.set(0, 0, 0);
-            body.entity = ent;
-        }
-    }
-
-    const out = new Map<string, PlanetCDLOD>();
-
-    const stars = Array.from(loaded.bodies.values()).filter(b => b.bodyType === "star");
-
-    for (const [name, body] of loaded.bodies) {
-        if (skip(name, body)) continue;
-
-        const { pos: starPosWorldDouble, color: starColor, intensity: starIntensity, name: starName } =
-            pickNearestStar(body, stars);
-
-        const ent = body.entity!;
-        const radius = body.radiusSim;
-
-        // debug light
-        console.log(`[light] ${loaded.systemId}:${name} -> ${starName} color=${starColor.toString()} I=${starIntensity}`);
-
-        const chunks = faces.map((face) =>
-            new ChunkTree(
-                scene,
-                camera,
-                { uMin: -1, uMax: 1, vMin: -1, vMax: 1 },
-                0,
-                maxLevel,
-                radius,
-                resolution,
-                face,
-                ent,
-                body.node,
-                starPosWorldDouble,
-                starColor,
-                starIntensity,
-                process.env.CBT_WIREFRAME === '1',
-                false,
-                true,
-                true,
-                process.env.CBT_DEBUG_LOD === '1'
-            )
-        );
-
-        out.set(name, { entity: ent, chunks, radiusSim: radius, maxLevel, resolution });
-    }
-
-    return out;
-}
-
-export function createCBTForSystem(
-    scene: Scene,
-    camera: OriginCamera,
-    loaded: LoadedSystem,
-    opts: CBTOptions = {}
-): Map<string, PlanetCBT> {
-    const {
-        maxDepth = 9,
-        minDepth = 0,
-        resolution = 32,
-        maxSplitsPerFrame = 8,
-        maxMergesPerFrame = 8,
-        splitThresholdPx2 = 900,
-        splitHysteresis = 0.7,
-        skip = (_name: string, body: LoadedBody) =>
-            body.bodyType === "star" || body.lodAlgorithm !== "cbt",
+        noise,
+        engine,
+        skip = (_name: string, body: LoadedBody) => body.bodyType === "star",
     } = opts;
 
     for (const [name, body] of loaded.bodies) {
@@ -372,7 +283,7 @@ export function createCBTForSystem(
         }
     }
 
-    const out = new Map<string, PlanetCBT>();
+    const out = new Map<string, PlanetTerrain>();
     const stars = Array.from(loaded.bodies.values()).filter((b) => b.bodyType === "star");
 
     for (const [name, body] of loaded.bodies) {
@@ -382,25 +293,42 @@ export function createCBTForSystem(
             pickNearestStar(body, stars);
 
         const ent = body.entity!;
-        const runtime = new CbtPlanet(scene, camera, {
-            key: `${loaded.systemId}:${name}`,
+        const planetKey = `${loaded.systemId}:${name}`;
+        // A body with a `profile` gets its terrain (noise + craters + lighting) from that archetype,
+        // with persisted menu overrides applied (effectiveProfile) and any per-body lighting merged
+        // on top. A body WITHOUT a profile keeps the legacy behavior: global noise + its lighting
+        // block (craters fall back to DEFAULT_CRATERS), so existing catalog bodies are unchanged.
+        let bodyNoise: NoiseParams | undefined = noise;
+        let bodyCraters: CraterParams | undefined;
+        let bodyLod: TerrainLodParams | undefined;
+        let lighting: ResolvedLighting;
+        if (body.profile) {
+            const resolved = resolveProfile(LIGHTING_JSON, effectiveProfile(body.profile), {
+                lightingOverride: body.lighting,
+            });
+            bodyNoise = resolved.noise;
+            bodyCraters = resolved.craters;
+            bodyLod = resolved.lod;
+            lighting = resolved.lighting;
+        } else {
+            lighting = resolveLighting(LIGHTING_JSON, body.lighting);
+        }
+        const runtime = new TerrainPlanet(scene, camera, {
+            key: planetKey,
             entity: ent,
             renderParent: body.node,
             radiusSim: body.radiusSim,
-            maxDepth,
-            minDepth,
-            resolution,
-            maxSplitsPerFrame,
-            maxMergesPerFrame,
-            splitThresholdPx2,
-            splitHysteresis,
+            noise: bodyNoise,
+            craters: bodyCraters,
+            lod: bodyLod,
             starPosWorldDouble,
             starColor,
             starIntensity,
+            lighting,
         });
 
         console.log(
-            `[light][cbt] ${loaded.systemId}:${name} -> ${starName} color=${starColor.toString()} I=${starIntensity}`
+            `[light][terrain] ${planetKey} -> ${starName} color=${starColor.toString()} I=${starIntensity}`
         );
 
         out.set(name, {
@@ -408,6 +336,9 @@ export function createCBTForSystem(
             runtime,
             radiusSim: body.radiusSim,
             starPosWorldDouble,
+            atmosphere: lighting.atmosphere,
+            profile: body.profile,
+            lightingOverride: body.lighting,
         });
     }
 

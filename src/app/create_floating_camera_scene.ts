@@ -1,5 +1,6 @@
-import type { Engine, Scene, WebGPUEngine } from '@babylonjs/core';
+import type { Scene, WebGPUEngine } from '@babylonjs/core';
 import { DisposableRegistry } from '../core/lifecycle/disposable_registry';
+import { TerrainOptionsMenu } from './terrain_options_menu';
 import { bootstrapScene } from './bootstrap_scene';
 import { setupLodAndShadows } from './setup_lod_and_shadows';
 import { setupRuntime } from './setup_runtime';
@@ -12,7 +13,7 @@ import { setupRuntime } from './setup_runtime';
  * - Planet-local (sim units): mesh/shader space centered on each planet.
  */
 export async function createFloatingCameraScene(
-    engine: Engine | WebGPUEngine,
+    engine: WebGPUEngine,
     canvas: HTMLCanvasElement
 ): Promise<Scene> {
     const disposables = new DisposableRegistry();
@@ -22,7 +23,7 @@ export async function createFloatingCameraScene(
         disposables
     );
 
-    const { lod, refreshActivePlanetSelection } = setupLodAndShadows(
+    const { lod, refreshActivePlanetSelection, stars, occluders, atmospheres } = setupLodAndShadows(
         scene,
         engine,
         camera,
@@ -30,7 +31,7 @@ export async function createFloatingCameraScene(
         disposables
     );
 
-    setupRuntime({
+    const { fsr1RenderScale, setFsr1RenderScale } = setupRuntime({
         scene,
         engine,
         camera,
@@ -39,8 +40,24 @@ export async function createFloatingCameraScene(
         loadedSystems,
         lod,
         refreshActivePlanetSelection,
+        stars,
+        occluders,
+        atmospheres,
         disposables,
     });
+
+    // In-game terrain options menu (press O). Auto-generated from the param schema; edits persist to
+    // localStorage per profile. "Apply" HOT-REBUILDS the affected planets in place (no reload) via
+    // lod.rebuildProfile. Defaults to the dev Moon's profile (selena).
+    const terrainMenu = new TerrainOptionsMenu({
+        initialProfileId: 'selena',
+        onApply: (profileId) => lod.rebuildProfile(profileId),
+        renderSettings: {
+            fsr1RenderScale,
+            onFsr1RenderScaleChange: setFsr1RenderScale
+        }
+    });
+    disposables.add(() => terrainMenu.dispose());
 
     return scene;
 }

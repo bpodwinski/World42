@@ -5,6 +5,7 @@ import {
     TextBlock,
 } from "@babylonjs/gui";
 import { SpeedHUD } from "./components/speed_hud";
+import { PerfHUD } from "./components/perf_hud";
 import { CenterCrosshair } from "./components/center_crosshair";
 import { MouseCrosshair } from "./components/mouse_crosshair";
 
@@ -64,7 +65,13 @@ export type CrosshairOpts = {
 export class GuiManager {
     private ui: AdvancedDynamicTexture;
 
+    /** The underlying fullscreen GUI texture (composited by the Frame Graph GUI task). */
+    public get advancedTexture(): AdvancedDynamicTexture {
+        return this.ui;
+    }
+
     private speedHud: SpeedHUD;
+    private perfHud: PerfHUD;
     private center: CenterCrosshair;
     private mouse!: MouseCrosshair;
 
@@ -92,7 +99,12 @@ export class GuiManager {
             mouseActiveAlpha: opts.mouseActiveAlpha ?? (opts.mouseAlpha ?? 0.2),
         };
 
-        this.ui = AdvancedDynamicTexture.CreateFullscreenUI("World42UI", true, scene);
+        // useStandalone: the GUI is composited by the Frame Graph (FrameGraphGUITask) instead of
+        // the scene's normal layer pass — required because scene.frameGraph bypasses scene.layers.
+        this.ui = AdvancedDynamicTexture.CreateFullscreenUI("World42UI", true, {
+            useStandalone: true,
+            scene,
+        });
 
         // Speed HUD
         this.speedHud = new SpeedHUD(this.ui, {
@@ -103,6 +115,9 @@ export class GuiManager {
             outlineColor: "black",
             outlineWidth: 4,
         });
+
+        // Performance HUD (hidden by default; toggle with the P key)
+        this.perfHud = new PerfHUD(this.ui);
 
         // Crosshairs
         this.center = new CenterCrosshair(this.ui, {
@@ -136,6 +151,21 @@ export class GuiManager {
     /** Update the speed label (expects m/s) */
     public setSpeed(ms: number) {
         this.speedHud.set(ms);
+    }
+
+    /** Update the performance HUD text (multi-line, caller-formatted). */
+    public setPerfText(text: string) {
+        this.perfHud.set(text);
+    }
+
+    /** Toggle the performance HUD; returns the new visibility. */
+    public togglePerf(): boolean {
+        return this.perfHud.toggle();
+    }
+
+    /** Whether the performance HUD is currently visible. */
+    public isPerfVisible(): boolean {
+        return this.perfHud.isVisible();
     }
 
     // Center crosshair
@@ -190,6 +220,7 @@ export class GuiManager {
      */
     public dispose() {
         this.speedHud.dispose();
+        this.perfHud.dispose();
         this.center.dispose();
         this.mouse.dispose();
         this.ui.dispose();

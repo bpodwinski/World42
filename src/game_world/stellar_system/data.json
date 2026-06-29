@@ -1,5 +1,5 @@
 {
-  "default": "Sol",
+  "default": "Dev",
   "systems": {
     "Sol": {
       "origin_km": [0, 0, 0],
@@ -13,17 +13,16 @@
         },
         "Mercury": {
           "type": "planet",
-          "lod_algorithm": "cbt",
+
           "position_km": [57910000, 0, 0],
           "diameter_km": 4879,
-          "rotation_period_days": 58.6
-        },
-        "Mercury_CDLOD": {
-          "type": "planet",
-          "lod_algorithm": "cdlod",
-          "position_km": [57910000, 10000, 0],
-          "diameter_km": 4879,
-          "rotation_period_days": 58.6
+          "rotation_period_days": 58.6,
+          "lighting": {
+            "albedo":  [0.07, 0.07, 0.07],
+            "ambient": [0.004, 0.004, 0.004],
+            "terrain": { "highlandTint": [1.05, 1.05, 1.05], "plainsAmp": 0.08 },
+            "brdf":    { "lunarLs": 0.8, "oppAmp": 0.22, "aoStrength": 0.45 }
+          }
         },
         "Venus": {
           "type": "planet",
@@ -41,7 +40,13 @@
           "type": "planet",
           "position_km": [227900000, 0, 0],
           "diameter_km": 6779,
-          "rotation_period_days": 1.025
+          "rotation_period_days": 1.025,
+          "lighting": {
+            "albedo":  [0.18, 0.09, 0.05],
+            "ambient": [0.012, 0.008, 0.006],
+            "terrain": { "highlandTint": [1.15, 1.08, 1.04], "slopeLo": 0.05, "slopeHi": 0.28, "plainsAmp": 0.18 },
+            "brdf":    { "lunarLs": 0.35, "oppAmp": 0.05, "aoStrength": 0.42, "roughLo": 0.65, "roughHi": 0.92 }
+          }
         },
         "Jupiter": {
           "type": "planet",
@@ -101,7 +106,6 @@
         },
         "Proxima_b": {
           "type": "planet",
-          "lod_algorithm": "cbt",
           "position_km": [1900007253000, 0, 0],
           "diameter_km": 12742,
           "rotation_period_days": 11.2
@@ -124,6 +128,65 @@
           "position_km": [5906400000, 0, 0],
           "diameter_km": 2377,
           "rotation_period_days": 6.4
+        }
+      }
+    },
+    "Dev": {
+      "origin_km": [120000000000000, 0, 0],
+      "displayName": "Dev",
+      "bodies": {
+        "DevStar": {
+          "type": "star",
+          "position_km": [0, 0, 0],
+          "diameter_km": 1391000,
+          "rotation_period_days": 25.38,
+          "star": { "temperature_k": 5772, "intensity": 1.0 }
+        },
+        "Moon": {
+          "type": "planet",
+          "position_km": [149600000, 0, 0],
+          "diameter_km": 3474,
+          "rotation_period_days": 27.32,
+          "profile": "selena"
+        },
+        "Earth": {
+          "type": "planet",
+          "position_km": [149600000, 0, 384400],
+          "diameter_km": 12742,
+          "rotation_period_days": 1,
+          "lighting": {
+            "albedo":  [0.12, 0.14, 0.18],
+            "ambient": [0.01, 0.012, 0.02],
+            "atmosphere": {
+              "heightKm": 100,
+              "rayleigh": [5.8e-3, 13.5e-3, 33.1e-3],
+              "rayleighScaleKm": 8.0,
+              "mie": 21e-3,
+              "mieScaleKm": 1.2,
+              "mieG": 0.76,
+              "intensity": 20
+            }
+          }
+        }
+      }
+    },
+    "Benchmark": {
+      "origin_km": [80000000000000, 0, 0],
+      "displayName": "Benchmark",
+      "bodies": {
+        "BenchStar": {
+          "type": "star",
+          "position_km": [0, 0, 0],
+          "diameter_km": 1391000,
+          "rotation_period_days": 25.38,
+          "star": { "temperature_k": 5772, "intensity": 1.0 }
+        },
+        "BenchWorld": {
+          "type": "planet",
+
+          "position_km": [149600000, 0, 0],
+          "diameter_km": 12742,
+          "rotation_period_days": 1
         }
       }
     }

@@ -1,0 +1,126 @@
+{
+  "label": "cbt-ocbt",
+  "lod": "cbt-ocbt",
+  "url": "http://localhost:19000/?bench=cbt-ocbt",
+  "capturedAtMs": null,
+  "gpuAvailable": false,
+  "waypoints": [
+    20,
+    8,
+    5,
+    3,
+    2,
+    1.4,
+    1.08,
+    1.02
+  ],
+  "settleMs": 1500,
+  "sampleMs": 1500,
+  "warmupMs": 4000,
+  "byAltitude": [
+    {
+      "mult": 20,
+      "frameMsP50": 1.0716666673620543,
+      "frameMsP95": 1.1900000010927518,
+      "gpuMsP50": 0,
+      "gpuMsP95": 0,
+      "drawCalls": 13,
+      "activeIndices": 40,
+      "triangles": 13,
+      "leafCount": 1004,
+      "samples": 91
+    },
+    {
+      "mult": 8,
+      "frameMsP50": 0.9599999996523062,
+      "frameMsP95": 0.9849999996523062,
+      "gpuMsP50": 0,
+      "gpuMsP95": 0,
+      "drawCalls": 13,
+      "activeIndices": 40,
+      "triangles": 13,
+      "leafCount": 7130,
+      "samples": 91
+    },
+    {
+      "mult": 5,
+      "frameMsP50": 0.973333332935969,
+      "frameMsP95": 0.973333332935969,
+      "gpuMsP50": 0,
+      "gpuMsP95": 0,
+      "drawCalls": 13,
+      "activeIndices": 40,
+      "triangles": 13,
+      "leafCount": 17026,
+      "samples": 91
+    },
+    {
+      "mult": 3,
+      "frameMsP50": 0.8649999998509884,
+      "frameMsP95": 0.8649999998509884,
+      "gpuMsP50": 0,
+      "gpuMsP95": 0,
+      "drawCalls": 13,
+      "activeIndices": 40,
+      "triangles": 13,
+      "leafCount": 45476,
+      "samples": 91
+    },
+    {
+      "mult": 2,
+      "frameMsP50": 0.8799999992052714,
+      "frameMsP95": 0.8799999992052714,
+      "gpuMsP50": 0,
+      "gpuMsP95": 0,
+      "drawCalls": 13,
+      "activeIndices": 40,
+      "triangles": 13,
+      "leafCount": 107172,
+      "samples": 91
+    },
+    {
+      "mult": 1.4,
+      "frameMsP50": 0.8283333336313565,
+      "frameMsP95": 0.8283333336313565,
+      "gpuMsP50": 0,
+      "gpuMsP95": 0,
+      "drawCalls": 13,
+      "activeIndices": 40,
+      "triangles": 13,
+      "leafCount": 234926,
+      "samples": 91
+    },
+    {
+      "mult": 1.08,
+      "frameMsP50": 0.8836065572304804,
+      "frameMsP95": 0.895000000546376,
+      "gpuMsP50": 0,
+      "gpuMsP95": 0,
+      "drawCalls": 13,
+      "activeIndices": 40,
+      "triangles": 13,
+      "leafCount": 222490,
+      "samples": 91
+    },
+    {
+      "mult": 1.02,
+      "frameMsP50": 0.8583333330849806,
+      "frameMsP95": 0.8583333330849806,
+      "gpuMsP50": 0,
+      "gpuMsP95": 0,
+      "drawCalls": 13,
+      "activeIndices": 40,
+      "triangles": 13,
+      "leafCount": 245302,
+      "samples": 91
+    }
+  ],
+  "summary": {
+    "frameMsP50": 0.8836065572304804,
+    "frameMsP95": 1.1900000010927518,
+    "gpuMsP50": 0,
+    "gpuMsP95": 0,
+    "maxLeaves": 245302,
+    "maxActiveIndices": 40
+  }
+}

@@ -1,0 +1,79 @@
+# Coordinate Spaces
+
+World42 maintains three distinct coordinate spaces. **Any computation must use one space only.** Mixing spaces without explicit conversion is a bug.
+
+## The Three Spaces
+
+### WorldDouble (sim units)
+
+High-precision absolute position in simulation units.
+
+- **Where:** `camera.doublepos`, `entity.doublepos`, `body.positionWorldDouble`
+- **Used for:** LOD (SSE), backside/horizon culling, inter-body distances
+- **Convert from km:** `ScaleManager.toSimulationUnits(km)`
+
+### Render-space (sim units)
+
+Camera-relative space — the camera is always at **(0, 0, 0)** in render-space. This is what the GPU sees.
+
+- **Where:** `mesh.position`, `camera.position` (≈ 0), frustum planes, shadows
+- **Used for:** GPU rendering, frustum culling, post-processing, shadow maps
+- **Convert:** `camera.toRenderSpace(worldDouble, out)` or `worldDouble - camera.doublepos`
+
+### Planet-local (sim units)
+
+Origin at planet center, axes aligned with the planet's rotation.
+
+- **Where:** WASM worker outputs (vertices, bounds), shader uniforms (`cameraPosition`, `uPatchCenter`, `lightDirection`)
+- **Convert to WorldDouble:** `inversePivotMatrix * (worldDouble - planetCenter)`
+
+## Enforcement Rules
+
+1. Never mix km and sim units in the same computation
+2. Always go through `ScaleManager` for any km conversion — no magic constants
+3. Workers receive positions in planet-local and return meshes in planet-local
+4. `LodScheduler` reads only `camera.doublepos` (WorldDouble)
+5. Shader uniforms are in planet-local unless the comment explicitly states otherwise
+
+## ScaleManager
+
+`src/core/scale/scale_manager.ts` is the **sole** conversion point in the codebase.
+
+```typescript
+// Convert a distance in km to sim units
+ScaleManager.toSimulationUnits(6371)   // Earth radius
+
+// Convert back
+ScaleManager.toKilometers(simValue)
+```
+
+The conversion factor is set at startup from the `SCALE_FACTOR` environment variable (`.env`). This means you can tune the sim-unit range without changing any other constant in the codebase.
+
+## OriginCamera
+
+`src/core/camera/camera_manager.ts` manages the floating origin:
+
+```typescript
+// Absolute position (WorldDouble)
+camera.doublepos: Vector3Double
+
+// Convert WorldDouble → render-space (GPU-safe)
+camera.toRenderSpace(worldDouble: Vector3Double, out: Vector3): Vector3
+
+// Convert render-space → WorldDouble
+camera.toWorldSpace(renderPos: Vector3): Vector3Double
+
+// Distance from camera to a WorldDouble position, in sim units
+camera.distanceToSim(wd: Vector3Double): number
+```
+
+Each frame, the camera accumulates the render delta into `doublepos` and resets its BabylonJS `camera.position` back toward the origin, keeping GPU floats small.
+
+## FloatingEntity
+
+Entities that must track a planet or star across interplanetary distances use `FloatingEntity`. Each frame their `node.position` is recomputed in render-space from their `doublepos`:
+
+```typescript
+entity.doublepos = body.positionWorldDouble;
+// → automatically converted to render-space each frame
+```

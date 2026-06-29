@@ -1,0 +1,93 @@
+# Stellar Catalog
+
+World42 describes its universe in a single JSON file: `src/game_world/stellar_system/data.json`. The loader (`stellar_catalog_loader.ts`) parses this file at startup and creates all scene entities automatically.
+
+## Catalog Structure
+
+```json
+{
+  "systems": [
+    {
+      "name": "Sol",
+      "default": false,
+      "bodies": [ /* stars and planets */ ]
+    },
+    {
+      "name": "AlphaCentauri",
+      "default": false,
+      "bodies": [ /* ... */ ]
+    },
+    {
+      "name": "Dev",
+      "default": true,
+      "bodies": [ /* DevStar + Moon */ ]
+    }
+  ]
+}
+```
+
+The system with `"default": true` is the one the camera spawns into on startup. On the `CBT` branch this is `"Dev"`. Reset to `"Sol"` before merging to `main`.
+
+## Body Schema
+
+Each body in `bodies[]` describes a star or rocky planet:
+
+```json
+{
+  "name": "Moon",
+  "type": "rocky_planet",
+  "radius_km": 1737,
+  "mass_kg": 7.342e22,
+  "position_km": [0, 0, 384400],
+  "terrain": {
+    "profile": "airless_gray",
+    "albedo": 0.07,
+    "maxLevel": 12,
+    "patchResolution": 96
+  },
+  "lighting": {
+    "starRef": "DevStar",
+    "atmosphereRadius_km": 0
+  }
+}
+```
+
+## Systems
+
+### Sol
+
+The Solar System — 8 planets (Mercury through Neptune) plus the Sun. Each planet has a terrain profile tuned to its surface type (rocky, icy, gas giant placeholder).
+
+### Alpha Centauri
+
+A two-star system (Alpha Centauri A + B). Included for testing multi-star lighting and interplanetary distances at a different scale.
+
+### Dev
+
+The development reference system. **All visual and terrain changes must be validated here first.**
+
+| Body | Role |
+|------|------|
+| `DevStar` | Sun clone — identical Earth-distance lighting, reproducible illumination |
+| `Moon` | Pilot planet — gray airless surface, albedo 0.07, ø 3,474 km |
+
+**Why the Moon as pilot planet:**
+- Simple surface (no atmosphere, no vegetation) isolates terrain/lighting artifacts
+- Small size → all LOD levels load quickly during iteration
+- Good BRDF test bench: visible opposition surge, grazing shadows
+
+## Loader
+
+`src/game_world/stellar_system/stellar_catalog_loader.ts` processes `data.json` and for each body:
+
+1. Creates a `FloatingEntity` (node with `doublepos` in WorldDouble)
+2. Instantiates `RockyPlanet` with the terrain profile → starts the `LodScheduler` for this body
+3. Attaches lighting uniforms based on the body's `starRef`
+
+The loader runs once during `CreateScene()` and is not called again at runtime.
+
+## Adding a New Planet
+
+1. Add a new entry to `data.json` under the appropriate system's `bodies[]`
+2. Define or reuse a `terrain.profile` key
+3. The loader picks it up automatically on next startup — no TypeScript changes required for basic bodies

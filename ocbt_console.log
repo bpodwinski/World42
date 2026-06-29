@@ -1,0 +1,213 @@
+Total messages: 63 (Errors: 0, Warnings: 60)
+Returning 60 messages for level "warning"
+
+[WARNING] BJS - [20:41:50]: [Frame 0] WebGPU uncaptured error (1): [object GPUValidationError] - [Buffer "BabylonWebGPUDevice0_DataBufferUniqueId=7-ocbt_pool_tree_CopySrc_Storage_size64"] usage (BufferUsage::(CopySrc|Storage)) doesn't include BufferUsage::CopyDst.
+ - While calling [Queue].WriteBuffer([Buffer "BabylonWebGPUDevice0_DataBufferUniqueId=7-ocbt_pool_tree_CopySrc_Storage_size64"], (0 bytes), data, (64 bytes))
+ @ http://localhost:19350/ocbtTest.js:269251
+[WARNING] [Buffer "BabylonWebGPUDevice0_DataBufferUniqueId=7-ocbt_pool_tree_CopySrc_Storage_size64"] usage (BufferUsage::(CopySrc|Storage)) doesn't include BufferUsage::CopyDst.
+ - While calling [Queue].WriteBuffer([Buffer "BabylonWebGPUDevice0_DataBufferUniqueId=7-ocbt_pool_tree_CopySrc_Storage_size64"], (0 bytes), data, (64 bytes))
+ @ http://localhost:19350/ocbt-test.html:0
+[WARNING] BJS - [20:41:50]: [Frame 0] WebGPU uncaptured error (2): [object GPUValidationError] - [Buffer "BabylonWebGPUDevice0_DataBufferUniqueId=8-ocbt_pool_decode_CopySrc_Storage_size32"] usage (BufferUsage::(CopySrc|Storage)) doesn't include BufferUsage::CopyDst.
+ - While calling [Queue].WriteBuffer([Buffer "BabylonWebGPUDevice0_DataBufferUniqueId=8-ocbt_pool_decode_CopySrc_Storage_size32"], (0 bytes), data, (32 bytes))
+ @ http://localhost:19350/ocbtTest.js:269251
+[WARNING] [Buffer "BabylonWebGPUDevice0_DataBufferUniqueId=8-ocbt_pool_decode_CopySrc_Storage_size32"] usage (BufferUsage::(CopySrc|Storage)) doesn't include BufferUsage::CopyDst.
+ - While calling [Queue].WriteBuffer([Buffer "BabylonWebGPUDevice0_DataBufferUniqueId=8-ocbt_pool_decode_CopySrc_Storage_size32"], (0 bytes), data, (32 bytes))
+ @ http://localhost:19350/ocbt-test.html:0
+[WARNING] BJS - [20:41:50]: [Frame 0] WebGPU uncaptured error (3): [object GPUValidationError] - In entries[0], binding index 0 not present in the bind group layout.
+Expected layout: [{ binding: 1, visibility: ShaderStage::Compute, buffer: {type: BufferBindingType::Storage, minBindingSize: 4, hasDynamicOffset: 0} }, { binding: 2, visibility: ShaderStage::Compute, buffer: {type: BufferBindingType::Storage, minBindingSize: 4, hasDynamicOffset: 0} }]
+ - While validating [BindGroupDescriptor] against [BindGroupLayout (unlabeled)]
+ - While calling [Device "BabylonWebGPUDevice0"].CreateBindGroup([BindGroupDescriptor]).
+ @ http://localhost:19350/ocbtTest.js:269251
+[WARNING] In entries[0], binding index 0 not present in the bind group layout.
+Expected layout: [{ binding: 1, visibility: ShaderStage::Compute, buffer: {type: BufferBindingType::Storage, minBindingSize: 4, hasDynamicOffset: 0} }, { binding: 2, visibility: ShaderStage::Compute, buffer: {type: BufferBindingType::Storage, minBindingSize: 4, hasDynamicOffset: 0} }]
+ - While validating [BindGroupDescriptor] against [BindGroupLayout (unlabeled)]
+ - While calling [Device "BabylonWebGPUDevice0"].CreateBindGroup([BindGroupDescriptor]).
+ @ http://localhost:19350/ocbt-test.html:0
+[WARNING] BJS - [20:41:50]: [Frame 0] WebGPU uncaptured error (4): [object GPUValidationError] - [Invalid BindGroup (unlabeled)] is invalid due to a previous error.
+ - While encoding [ComputePassEncoder (unlabeled)].SetBindGroup(0, [Invalid BindGroup (unlabeled)], 0, ...).
+ - While finishing [CommandEncoder "render"].
+ @ http://localhost:19350/ocbtTest.js:269251
+[WARNING] [Invalid BindGroup (unlabeled)] is invalid due to a previous error.
+ - While encoding [ComputePassEncoder (unlabeled)].SetBindGroup(0, [Invalid BindGroup (unlabeled)], 0, ...).
+ - While finishing [CommandEncoder "render"].
+ @ http://localhost:19350/ocbt-test.html:0
+[WARNING] BJS - [20:41:50]: [Frame 0] WebGPU uncaptured error (5): [object GPUValidationError] - [Invalid CommandBuffer from CommandEncoder "render"] is invalid due to a previous error.
+ - While calling [Queue].Submit([[CommandBuffer from CommandEncoder "upload"], [Invalid CommandBuffer from CommandEncoder "render"]])
+ @ http://localhost:19350/ocbtTest.js:269251
+[WARNING] [Invalid CommandBuffer from CommandEncoder "render"] is invalid due to a previous error.
+ - While calling [Queue].Submit([[CommandBuffer from CommandEncoder "upload"], [Invalid CommandBuffer from CommandEncoder "render"]])
+ @ http://localhost:19350/ocbt-test.html:0
+[WARNING] BJS - [20:41:50]: [Frame 0] WebGPU uncaptured error (6): [object GPUValidationError] - [Invalid BindGroup (unlabeled)] is invalid due to a previous error.
+ - While encoding [ComputePassEncoder (unlabeled)].SetBindGroup(0, [Invalid BindGroup (unlabeled)], 0, ...).
+ - While finishing [CommandEncoder "render"].
+ @ http://localhost:19350/ocbtTest.js:269251
+[WARNING] [Invalid BindGroup (unlabeled)] is invalid due to a previous error.
+ - While encoding [ComputePassEncoder (unlabeled)].SetBindGroup(0, [Invalid BindGroup (unlabeled)], 0, ...).
+ - While finishing [CommandEncoder "render"].
+ @ http://localhost:19350/ocbt-test.html:0
+[WARNING] BJS - [20:41:50]: [Frame 0] WebGPU uncaptured error (7): [object GPUValidationError] - [Invalid CommandBuffer from CommandEncoder "render"] is invalid due to a previous error.
+ - While calling [Queue].Submit([[CommandBuffer from CommandEncoder "upload"], [Invalid CommandBuffer from CommandEncoder "render"]])
+ @ http://localhost:19350/ocbtTest.js:269251
+[WARNING] [Invalid CommandBuffer from CommandEncoder "render"] is invalid due to a previous error.
+ - While calling [Queue].Submit([[CommandBuffer from CommandEncoder "upload"], [Invalid CommandBuffer from CommandEncoder "render"]])
+ @ http://localhost:19350/ocbt-test.html:0
+[WARNING] BJS - [20:41:50]: [Frame 0] WebGPU uncaptured error (8): [object GPUValidationError] - [Invalid BindGroup (unlabeled)] is invalid due to a previous error.
+ - While encoding [ComputePassEncoder (unlabeled)].SetBindGroup(0, [Invalid BindGroup (unlabeled)], 0, ...).
+ - While finishing [CommandEncoder "render"].
+ @ http://localhost:19350/ocbtTest.js:269251
+[WARNING] [Invalid BindGroup (unlabeled)] is invalid due to a previous error.
+ - While encoding [ComputePassEncoder (unlabeled)].SetBindGroup(0, [Invalid BindGroup (unlabeled)], 0, ...).
+ - While finishing [CommandEncoder "render"].
+ @ http://localhost:19350/ocbt-test.html:0
+[WARNING] BJS - [20:41:50]: [Frame 0] WebGPU uncaptured error (9): [object GPUValidationError] - [Invalid CommandBuffer from CommandEncoder "render"] is invalid due to a previous error.
+ - While calling [Queue].Submit([[CommandBuffer from CommandEncoder "upload"], [Invalid CommandBuffer from CommandEncoder "render"]])
+ @ http://localhost:19350/ocbtTest.js:269251
+[WARNING] [Invalid CommandBuffer from CommandEncoder "render"] is invalid due to a previous error.
+ - While calling [Queue].Submit([[CommandBuffer from CommandEncoder "upload"], [Invalid CommandBuffer from CommandEncoder "render"]])
+ @ http://localhost:19350/ocbt-test.html:0
+[WARNING] BJS - [20:41:50]: [Frame 0] WebGPU uncaptured error (10): [object GPUValidationError] - [Invalid BindGroup (unlabeled)] is invalid due to a previous error.
+ - While encoding [ComputePassEncoder (unlabeled)].SetBindGroup(0, [Invalid BindGroup (unlabeled)], 0, ...).
+ - While finishing [CommandEncoder "render"].
+ @ http://localhost:19350/ocbtTest.js:269251
+[WARNING] [Invalid BindGroup (unlabeled)] is invalid due to a previous error.
+ - While encoding [ComputePassEncoder (unlabeled)].SetBindGroup(0, [Invalid BindGroup (unlabeled)], 0, ...).
+ - While finishing [CommandEncoder "render"].
+ @ http://localhost:19350/ocbt-test.html:0
+[WARNING] BJS - [20:41:50]: [Frame 0] WebGPU uncaptured error (11): [object GPUValidationError] - [Invalid CommandBuffer from CommandEncoder "render"] is invalid due to a previous error.
+ - While calling [Queue].Submit([[CommandBuffer from CommandEncoder "upload"], [Invalid CommandBuffer from CommandEncoder "render"]])
+ @ http://localhost:19350/ocbtTest.js:269251
+[WARNING] [Invalid CommandBuffer from CommandEncoder "render"] is invalid due to a previous error.
+ - While calling [Queue].Submit([[CommandBuffer from CommandEncoder "upload"], [Invalid CommandBuffer from CommandEncoder "render"]])
+ @ http://localhost:19350/ocbt-test.html:0
+[WARNING] BJS - [20:41:50]: [Frame 0] WebGPU uncaptured error (12): [object GPUValidationError] - [Invalid BindGroup (unlabeled)] is invalid due to a previous error.
+ - While encoding [ComputePassEncoder (unlabeled)].SetBindGroup(0, [Invalid BindGroup (unlabeled)], 0, ...).
+ - While finishing [CommandEncoder "render"].
+ @ http://localhost:19350/ocbtTest.js:269251
+[WARNING] [Invalid BindGroup (unlabeled)] is invalid due to a previous error.
+ - While encoding [ComputePassEncoder (unlabeled)].SetBindGroup(0, [Invalid BindGroup (unlabeled)], 0, ...).
+ - While finishing [CommandEncoder "render"].
+ @ http://localhost:19350/ocbt-test.html:0
+[WARNING] BJS - [20:41:50]: [Frame 0] WebGPU uncaptured error (13): [object GPUValidationError] - [Invalid CommandBuffer from CommandEncoder "render"] is invalid due to a previous error.
+ - While calling [Queue].Submit([[CommandBuffer from CommandEncoder "upload"], [Invalid CommandBuffer from CommandEncoder "render"]])
+ @ http://localhost:19350/ocbtTest.js:269251
+[WARNING] [Invalid CommandBuffer from CommandEncoder "render"] is invalid due to a previous error.
+ - While calling [Queue].Submit([[CommandBuffer from CommandEncoder "upload"], [Invalid CommandBuffer from CommandEncoder "render"]])
+ @ http://localhost:19350/ocbt-test.html:0
+[WARNING] BJS - [20:41:50]: [Frame 0] WebGPU uncaptured error (14): [object GPUValidationError] - [Buffer "BabylonWebGPUDevice0_DataBufferUniqueId=14-ocbt_pool_tree_CopySrc_Storage_size8192"] usage (BufferUsage::(CopySrc|Storage)) doesn't include BufferUsage::CopyDst.
+ - While calling [Queue].WriteBuffer([Buffer "BabylonWebGPUDevice0_DataBufferUniqueId=14-ocbt_pool_tree_CopySrc_Storage_size8192"], (0 bytes), data, (8192 bytes))
+ @ http://localhost:19350/ocbtTest.js:269251
+[WARNING] [Buffer "BabylonWebGPUDevice0_DataBufferUniqueId=14-ocbt_pool_tree_CopySrc_Storage_size8192"] usage (BufferUsage::(CopySrc|Storage)) doesn't include BufferUsage::CopyDst.
+ - While calling [Queue].WriteBuffer([Buffer "BabylonWebGPUDevice0_DataBufferUniqueId=14-ocbt_pool_tree_CopySrc_Storage_size8192"], (0 bytes), data, (8192 bytes))
+ @ http://localhost:19350/ocbt-test.html:0
+[WARNING] BJS - [20:41:50]: [Frame 0] WebGPU uncaptured error (15): [object GPUValidationError] - [Buffer "BabylonWebGPUDevice0_DataBufferUniqueId=15-ocbt_pool_decode_CopySrc_Storage_size4096"] usage (BufferUsage::(CopySrc|Storage)) doesn't include BufferUsage::CopyDst.
+ - While calling [Queue].WriteBuffer([Buffer "BabylonWebGPUDevice0_DataBufferUniqueId=15-ocbt_pool_decode_CopySrc_Storage_size4096"], (0 bytes), data, (4096 bytes))
+ @ http://localhost:19350/ocbtTest.js:269251
+[WARNING] [Buffer "BabylonWebGPUDevice0_DataBufferUniqueId=15-ocbt_pool_decode_CopySrc_Storage_size4096"] usage (BufferUsage::(CopySrc|Storage)) doesn't include BufferUsage::CopyDst.
+ - While calling [Queue].WriteBuffer([Buffer "BabylonWebGPUDevice0_DataBufferUniqueId=15-ocbt_pool_decode_CopySrc_Storage_size4096"], (0 bytes), data, (4096 bytes))
+ @ http://localhost:19350/ocbt-test.html:0
+[WARNING] BJS - [20:41:50]: [Frame 0] WebGPU uncaptured error (16): [object GPUValidationError] - In entries[0], binding index 0 not present in the bind group layout.
+Expected layout: [{ binding: 1, visibility: ShaderStage::Compute, buffer: {type: BufferBindingType::Storage, minBindingSize: 4, hasDynamicOffset: 0} }, { binding: 2, visibility: ShaderStage::Compute, buffer: {type: BufferBindingType::Storage, minBindingSize: 4, hasDynamicOffset: 0} }]
+ - While validating [BindGroupDescriptor] against [BindGroupLayout (unlabeled)]
+ - While calling [Device "BabylonWebGPUDevice0"].CreateBindGroup([BindGroupDescriptor]).
+ @ http://localhost:19350/ocbtTest.js:269251
+[WARNING] In entries[0], binding index 0 not present in the bind group layout.
+Expected layout: [{ binding: 1, visibility: ShaderStage::Compute, buffer: {type: BufferBindingType::Storage, minBindingSize: 4, hasDynamicOffset: 0} }, { binding: 2, visibility: ShaderStage::Compute, buffer: {type: BufferBindingType::Storage, minBindingSize: 4, hasDynamicOffset: 0} }]
+ - While validating [BindGroupDescriptor] against [BindGroupLayout (unlabeled)]
+ - While calling [Device "BabylonWebGPUDevice0"].CreateBindGroup([BindGroupDescriptor]).
+ @ http://localhost:19350/ocbt-test.html:0
+[WARNING] BJS - [20:41:50]: [Frame 0] WebGPU uncaptured error (17): [object GPUValidationError] - [Invalid BindGroup (unlabeled)] is invalid due to a previous error.
+ - While encoding [ComputePassEncoder (unlabeled)].SetBindGroup(0, [Invalid BindGroup (unlabeled)], 0, ...).
+ - While finishing [CommandEncoder "render"].
+ @ http://localhost:19350/ocbtTest.js:269251
+[WARNING] [Invalid BindGroup (unlabeled)] is invalid due to a previous error.
+ - While encoding [ComputePassEncoder (unlabeled)].SetBindGroup(0, [Invalid BindGroup (unlabeled)], 0, ...).
+ - While finishing [CommandEncoder "render"].
+ @ http://localhost:19350/ocbt-test.html:0
+[WARNING] BJS - [20:41:50]: [Frame 0] WebGPU uncaptured error (18): [object GPUValidationError] - [Invalid CommandBuffer from CommandEncoder "render"] is invalid due to a previous error.
+ - While calling [Queue].Submit([[CommandBuffer from CommandEncoder "upload"], [Invalid CommandBuffer from CommandEncoder "render"]])
+ @ http://localhost:19350/ocbtTest.js:269251
+[WARNING] [Invalid CommandBuffer from CommandEncoder "render"] is invalid due to a previous error.
+ - While calling [Queue].Submit([[CommandBuffer from CommandEncoder "upload"], [Invalid CommandBuffer from CommandEncoder "render"]])
+ @ http://localhost:19350/ocbt-test.html:0
+[WARNING] BJS - [20:41:50]: [Frame 0] WebGPU uncaptured error (19): [object GPUValidationError] - [Invalid BindGroup (unlabeled)] is invalid due to a previous error.
+ - While encoding [ComputePassEncoder (unlabeled)].SetBindGroup(0, [Invalid BindGroup (unlabeled)], 0, ...).
+ - While finishing [CommandEncoder "render"].
+ @ http://localhost:19350/ocbtTest.js:269251
+[WARNING] [Invalid BindGroup (unlabeled)] is invalid due to a previous error.
+ - While encoding [ComputePassEncoder (unlabeled)].SetBindGroup(0, [Invalid BindGroup (unlabeled)], 0, ...).
+ - While finishing [CommandEncoder "render"].
+ @ http://localhost:19350/ocbt-test.html:0
+[WARNING] BJS - [20:41:50]: [Frame 0] WebGPU uncaptured error (20): [object GPUValidationError] - [Invalid CommandBuffer from CommandEncoder "render"] is invalid due to a previous error.
+ - While calling [Queue].Submit([[CommandBuffer from CommandEncoder "upload"], [Invalid CommandBuffer from CommandEncoder "render"]])
+ @ http://localhost:19350/ocbtTest.js:269251
+[WARNING] [Invalid CommandBuffer from CommandEncoder "render"] is invalid due to a previous error.
+ - While calling [Queue].Submit([[CommandBuffer from CommandEncoder "upload"], [Invalid CommandBuffer from CommandEncoder "render"]])
+ @ http://localhost:19350/ocbt-test.html:0
+[WARNING] BJS - [20:41:50]: [Frame 0] WebGPU uncaptured error: too many warnings (20), no more warnings will be reported to the console for this engine. @ http://localhost:19350/ocbtTest.js:269251
+[WARNING] [Invalid BindGroup (unlabeled)] is invalid due to a previous error.
+ - While encoding [ComputePassEncoder (unlabeled)].SetBindGroup(0, [Invalid BindGroup (unlabeled)], 0, ...).
+ - While finishing [CommandEncoder "render"].
+ @ http://localhost:19350/ocbt-test.html:0
+[WARNING] [Invalid CommandBuffer from CommandEncoder "render"] is invalid due to a previous error.
+ - While calling [Queue].Submit([[CommandBuffer from CommandEncoder "upload"], [Invalid CommandBuffer from CommandEncoder "render"]])
+ @ http://localhost:19350/ocbt-test.html:0
+[WARNING] [Invalid BindGroup (unlabeled)] is invalid due to a previous error.
+ - While encoding [ComputePassEncoder (unlabeled)].SetBindGroup(0, [Invalid BindGroup (unlabeled)], 0, ...).
+ - While finishing [CommandEncoder "render"].
+ @ http://localhost:19350/ocbt-test.html:0
+[WARNING] [Invalid CommandBuffer from CommandEncoder "render"] is invalid due to a previous error.
+ - While calling [Queue].Submit([[CommandBuffer from CommandEncoder "upload"], [Invalid CommandBuffer from CommandEncoder "render"]])
+ @ http://localhost:19350/ocbt-test.html:0
+[WARNING] [Invalid BindGroup (unlabeled)] is invalid due to a previous error.
+ - While encoding [ComputePassEncoder (unlabeled)].SetBindGroup(0, [Invalid BindGroup (unlabeled)], 0, ...).
+ - While finishing [CommandEncoder "render"].
+ @ http://localhost:19350/ocbt-test.html:0
+[WARNING] [Invalid CommandBuffer from CommandEncoder "render"] is invalid due to a previous error.
+ - While calling [Queue].Submit([[CommandBuffer from CommandEncoder "upload"], [Invalid CommandBuffer from CommandEncoder "render"]])
+ @ http://localhost:19350/ocbt-test.html:0
+[WARNING] [Buffer "BabylonWebGPUDevice0_DataBufferUniqueId=28-ocbt_pool_tree_CopySrc_Storage_size131072"] usage (BufferUsage::(CopySrc|Storage)) doesn't include BufferUsage::CopyDst.
+ - While calling [Queue].WriteBuffer([Buffer "BabylonWebGPUDevice0_DataBufferUniqueId=28-ocbt_pool_tree_CopySrc_Storage_size131072"], (0 bytes), data, (131072 bytes))
+ @ http://localhost:19350/ocbt-test.html:0
+[WARNING] [Buffer "BabylonWebGPUDevice0_DataBufferUniqueId=29-ocbt_pool_decode_CopySrc_Storage_size65536"] usage (BufferUsage::(CopySrc|Storage)) doesn't include BufferUsage::CopyDst.
+ - While calling [Queue].WriteBuffer([Buffer "BabylonWebGPUDevice0_DataBufferUniqueId=29-ocbt_pool_decode_CopySrc_Storage_size65536"], (0 bytes), data, (65536 bytes))
+ @ http://localhost:19350/ocbt-test.html:0
+[WARNING] In entries[0], binding index 0 not present in the bind group layout.
+Expected layout: [{ binding: 1, visibility: ShaderStage::Compute, buffer: {type: BufferBindingType::Storage, minBindingSize: 4, hasDynamicOffset: 0} }, { binding: 2, visibility: ShaderStage::Compute, buffer: {type: BufferBindingType::Storage, minBindingSize: 4, hasDynamicOffset: 0} }]
+ - While validating [BindGroupDescriptor] against [BindGroupLayout (unlabeled)]
+ - While calling [Device "BabylonWebGPUDevice0"].CreateBindGroup([BindGroupDescriptor]).
+ @ http://localhost:19350/ocbt-test.html:0
+[WARNING] [Invalid BindGroup (unlabeled)] is invalid due to a previous error.
+ - While encoding [ComputePassEncoder (unlabeled)].SetBindGroup(0, [Invalid BindGroup (unlabeled)], 0, ...).
+ - While finishing [CommandEncoder "render"].
+ @ http://localhost:19350/ocbt-test.html:0
+[WARNING] [Invalid CommandBuffer from CommandEncoder "render"] is invalid due to a previous error.
+ - While calling [Queue].Submit([[CommandBuffer from CommandEncoder "upload"], [Invalid CommandBuffer from CommandEncoder "render"]])
+ @ http://localhost:19350/ocbt-test.html:0
+[WARNING] [Invalid BindGroup (unlabeled)] is invalid due to a previous error.
+ - While encoding [ComputePassEncoder (unlabeled)].SetBindGroup(0, [Invalid BindGroup (unlabeled)], 0, ...).
+ - While finishing [CommandEncoder "render"].
+ @ http://localhost:19350/ocbt-test.html:0
+[WARNING] [Invalid CommandBuffer from CommandEncoder "render"] is invalid due to a previous error.
+ - While calling [Queue].Submit([[CommandBuffer from CommandEncoder "upload"], [Invalid CommandBuffer from CommandEncoder "render"]])
+ @ http://localhost:19350/ocbt-test.html:0
+[WARNING] [Invalid BindGroup (unlabeled)] is invalid due to a previous error.
+ - While encoding [ComputePassEncoder (unlabeled)].SetBindGroup(0, [Invalid BindGroup (unlabeled)], 0, ...).
+ - While finishing [CommandEncoder "render"].
+ @ http://localhost:19350/ocbt-test.html:0
+[WARNING] [Invalid CommandBuffer from CommandEncoder "render"] is invalid due to a previous error.
+ - While calling [Queue].Submit([[CommandBuffer from CommandEncoder "upload"], [Invalid CommandBuffer from CommandEncoder "render"]])
+ @ http://localhost:19350/ocbt-test.html:0
+[WARNING] [Invalid BindGroup (unlabeled)] is invalid due to a previous error.
+ - While encoding [ComputePassEncoder (unlabeled)].SetBindGroup(0, [Invalid BindGroup (unlabeled)], 0, ...).
+ - While finishing [CommandEncoder "render"].
+ @ http://localhost:19350/ocbt-test.html:0
+[WARNING] [Invalid CommandBuffer from CommandEncoder "render"] is invalid due to a previous error.
+ - While calling [Queue].Submit([[CommandBuffer from CommandEncoder "upload"], [Invalid CommandBuffer from CommandEncoder "render"]])
+ @ http://localhost:19350/ocbt-test.html:0
+[WARNING] [Invalid BindGroup (unlabeled)] is invalid due to a previous error.
+ - While encoding [ComputePassEncoder (unlabeled)].SetBindGroup(0, [Invalid BindGroup (unlabeled)], 0, ...).
+ - While finishing [CommandEncoder "render"].
+ @ http://localhost:19350/ocbt-test.html:0
+[WARNING] [Invalid CommandBuffer from CommandEncoder "render"] is invalid due to a previous error.
+ - While calling [Queue].Submit([[CommandBuffer from CommandEncoder "upload"], [Invalid CommandBuffer from CommandEncoder "render"]])
+ @ http://localhost:19350/ocbt-test.html:0
