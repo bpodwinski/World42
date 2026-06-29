@@ -25,6 +25,7 @@ import {
     type CraterParams,
     type NoiseParams
 } from './cbt_noise';
+import { DEFAULT_LOD, type OcbtLodParams } from './cbt_lod';
 import { OcbtSource } from './ocbt/ocbt_source';
 import type { WebGPUEngine } from '@babylonjs/core';
 import type { ResolvedLighting } from '../../../game_world/stellar_system/planet_lighting';
@@ -46,6 +47,8 @@ export type CbtPlanetOptions = {
     craters?: CraterParams;
     /** Per-planet resolved lighting params (from planet_lighting.json). */
     lighting?: ResolvedLighting;
+    /** OCBT LOD / pool knobs. Default DEFAULT_LOD. */
+    lod?: OcbtLodParams;
 };
 
 /** Per-planet telemetry, refreshed on each {@link CbtPlanet.update}. */
@@ -113,6 +116,7 @@ export class CbtPlanet {
     private readonly starColor: Vector3;
     private noise: NoiseParams;
     private craters: CraterParams;
+    private lod: OcbtLodParams;
 
     constructor(
         private scene: Scene,
@@ -127,6 +131,7 @@ export class CbtPlanet {
         this.starColor = opts.starColor;
         this.noise = opts.noise ?? DEFAULT_NOISE;
         this.craters = opts.craters ?? DEFAULT_CRATERS;
+        this.lod = opts.lod ?? DEFAULT_LOD;
         this.sourceOpts = opts;
         // Source is NOT created here — deferred to the first update() call.
     }
@@ -152,16 +157,10 @@ export class CbtPlanet {
         // topology passes (copy_neighbors / reduce / classify) and freeing ~190 MB VRAM per planet vs
         // 1<<20. Do NOT drop to 1<<18 (262k < the 401k peak → the limb under-tessellates). The readback
         // saturation guard in OcbtSource warns once if any planet's live count approaches this pool.
-        const OCBT_CAPACITY = 1 << 19; // 524 288 slots
-        const OCBT_MAX_LEVEL = 32; // u64 hard cap; df64 cracks well before
-        // Subdivision FLOOR: the whole sphere is force-refined to at least this level so it never
-        // shows the bare 8 octahedron faces (faceted limb) when far or merging. Cost is fixed and
-        // tiny: a full sphere at level L is 8*2^L triangles (level 6 = 512). Raise for a rounder
-        // far-away limb, lower to save draw instances on distant bodies.
-        const OCBT_MIN_LEVEL = 6;
-        // Hysteresis: MERGE < SPLIT/sqrt(2). 8/4 keeps a safe gap (4 < 5.66).
-        const OCBT_SPLIT_PX = 16;
-        const OCBT_MERGE_PX = 8;
+        // LOD / pool knobs now come from the (per-profile) lod block — see DEFAULT_LOD for the prior
+        // hardcoded values and the rationale (pool sizing, hysteresis MERGE < SPLIT/sqrt(2), min/max
+        // level). capacity = 1 << capacityPow.
+        const lod = this.lod;
         return new OcbtSource(
             engine as WebGPUEngine,
             this.scene,
@@ -174,11 +173,11 @@ export class CbtPlanet {
                 starColor: this.starColor,
                 starIntensity: opts.starIntensity,
                 starPosWorldDouble: this.starPosWorldDouble,
-                capacity: OCBT_CAPACITY,
-                splitThresholdPx: OCBT_SPLIT_PX,
-                mergeThresholdPx: OCBT_MERGE_PX,
-                maxLevel: OCBT_MAX_LEVEL,
-                minLevel: OCBT_MIN_LEVEL,
+                capacity: 1 << Math.max(10, Math.min(24, Math.round(lod.capacityPow))),
+                splitThresholdPx: lod.splitPx,
+                mergeThresholdPx: lod.mergePx,
+                maxLevel: Math.round(lod.maxLevel),
+                minLevel: Math.round(lod.minLevel),
                 lighting: opts.lighting
             },
             this.onSourceUpdate
@@ -285,13 +284,16 @@ export class CbtPlanet {
         noise?: NoiseParams;
         craters?: CraterParams;
         lighting?: ResolvedLighting;
+        lod?: OcbtLodParams;
     }): void {
         if (params.noise) this.noise = params.noise;
         if (params.craters) this.craters = params.craters;
+        if (params.lod) this.lod = params.lod;
         this.sourceOpts = {
             ...this.sourceOpts,
             noise: this.noise,
             craters: this.craters,
+            lod: this.lod,
             lighting: params.lighting ?? this.sourceOpts.lighting
         };
         if (this.source) {

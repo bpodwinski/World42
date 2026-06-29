@@ -47,6 +47,15 @@ export type BrdfLightingParams = {
     specAa?: number;
     /** Firefly clamp on the specular term. */
     specMax?: number;
+    /** Diffuse normal AA: blend toward the smooth landform normal where the per-pixel shading
+     *  normal varies faster than the pixel can resolve. Higher = smoother sooner (less grazing grain). */
+    normalAa?: number;
+    /** Mean-preserving normal-AA correction strength (uPerfMask bit5) — darkens by sub-pixel normal
+     *  variance × grazing concavity so variance-smoothing does not over-brighten at grazing. */
+    meanAaK?: number;
+    /** Per-vertex crater-gradient footprint scale (footprintKm = camDistKm * this). Higher fades
+     *  sub-leaf craters sooner so small craters do not alias to square/diamond facets at distance. */
+    craterFpK?: number;
 };
 
 /**
@@ -153,7 +162,10 @@ export const DEFAULT_LIGHTING: ResolvedLighting = {
         roughHi:    0.9,
         f0:         0.04,
         specAa:     0.5,
-        specMax:    4.0
+        specMax:    4.0,
+        normalAa:   12.0,
+        meanAaK:    0.18,
+        craterFpK:  0.002
     }
 };
 
@@ -215,7 +227,10 @@ export function resolveLighting(json: PlanetLightingJSON, override?: PlanetLight
             roughHi:    ob.roughHi    ?? db.roughHi    ?? D.brdf.roughHi,
             f0:         ob.f0         ?? db.f0         ?? D.brdf.f0,
             specAa:     ob.specAa     ?? db.specAa     ?? D.brdf.specAa,
-            specMax:    ob.specMax    ?? db.specMax    ?? D.brdf.specMax
+            specMax:    ob.specMax    ?? db.specMax    ?? D.brdf.specMax,
+            normalAa:   ob.normalAa   ?? db.normalAa   ?? D.brdf.normalAa,
+            meanAaK:    ob.meanAaK    ?? db.meanAaK    ?? D.brdf.meanAaK,
+            craterFpK:  ob.craterFpK  ?? db.craterFpK  ?? D.brdf.craterFpK
         }
     };
 }

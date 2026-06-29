@@ -18,6 +18,7 @@ import {
     type CraterParams,
     type NoiseParams
 } from '../../systems/lod/cbt/cbt_noise';
+import { DEFAULT_LOD, type OcbtLodParams } from '../../systems/lod/cbt/cbt_lod';
 import {
     resolveLighting,
     type PlanetLightingJSON,
@@ -35,13 +36,16 @@ export type TerrainProfile = {
     craters: CraterParams;
     /** Optional lighting override; omitted fields fall back to planet_lighting.json `_defaults`. */
     lighting?: PlanetLightingParams;
+    /** Optional OCBT LOD/pool overrides; omitted fields fall back to DEFAULT_LOD. */
+    lod?: Partial<OcbtLodParams>;
 };
 
-/** A fully resolved profile, ready to hand to a CbtPlanet (noise + craters + resolved lighting). */
+/** A fully resolved profile, ready to hand to a CbtPlanet (noise + craters + lighting + lod). */
 export type ResolvedProfile = {
     noise: NoiseParams;
     craters: CraterParams;
     lighting: ResolvedLighting;
+    lod: OcbtLodParams;
 };
 
 /** Default profile when a body names none / an unknown id. Reproduces the current Moon look. */
@@ -210,5 +214,17 @@ export function resolveProfile(
     const noise: NoiseParams = { ...p.noise };
     if (opts?.seed !== undefined) noise.seed = opts.seed;
     const lighting = resolveLighting(json, mergeLightingParams(p.lighting, opts?.lightingOverride));
-    return { noise, craters: { ...p.craters, classes: p.craters.classes.map((c) => [...c] as const) }, lighting };
+    const lod: OcbtLodParams = {
+        splitPx: p.lod?.splitPx ?? DEFAULT_LOD.splitPx,
+        mergePx: p.lod?.mergePx ?? DEFAULT_LOD.mergePx,
+        capacityPow: p.lod?.capacityPow ?? DEFAULT_LOD.capacityPow,
+        minLevel: p.lod?.minLevel ?? DEFAULT_LOD.minLevel,
+        maxLevel: p.lod?.maxLevel ?? DEFAULT_LOD.maxLevel
+    };
+    return {
+        noise,
+        craters: { ...p.craters, classes: p.craters.classes.map((c) => [...c] as const) },
+        lighting,
+        lod
+    };
 }

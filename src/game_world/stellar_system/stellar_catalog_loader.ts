@@ -13,6 +13,7 @@ import { ScaleManager } from "../../core/scale/scale_manager";
 import { TextureManager } from "../../core/io/texture_manager";
 import { CbtPlanet } from "../../systems/lod/cbt/cbt_scheduler";
 import type { CraterParams, NoiseParams } from "../../systems/lod/cbt/cbt_noise";
+import type { OcbtLodParams } from "../../systems/lod/cbt/cbt_lod";
 import {
     normalizeCatalogJSON as normalizeCatalogJSONFromSource,
     normalizeSystemJSON,
@@ -299,6 +300,7 @@ export function createCBTForSystem(
         // block (craters fall back to DEFAULT_CRATERS), so existing catalog bodies are unchanged.
         let bodyNoise: NoiseParams | undefined = noise;
         let bodyCraters: CraterParams | undefined;
+        let bodyLod: OcbtLodParams | undefined;
         let lighting: ResolvedLighting;
         if (body.profile) {
             const resolved = resolveProfile(LIGHTING_JSON, effectiveProfile(body.profile), {
@@ -306,6 +308,7 @@ export function createCBTForSystem(
             });
             bodyNoise = resolved.noise;
             bodyCraters = resolved.craters;
+            bodyLod = resolved.lod;
             lighting = resolved.lighting;
         } else {
             lighting = resolveLighting(LIGHTING_JSON, body.lighting);
@@ -317,6 +320,7 @@ export function createCBTForSystem(
             radiusSim: body.radiusSim,
             noise: bodyNoise,
             craters: bodyCraters,
+            lod: bodyLod,
             starPosWorldDouble,
             starColor,
             starIntensity,

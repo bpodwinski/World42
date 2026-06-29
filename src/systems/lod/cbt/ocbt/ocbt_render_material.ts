@@ -137,18 +137,18 @@ function bakedHeader(opts: OcbtRenderOptions): string {
         // pixel can resolve (fine foreground micro-relief), blend toward the smooth landform normal
         // so the diffuse ndl stops aliasing into grain. Variance-based (dpdx of the normal) so it
         // targets sub-pixel detail without over-flattening the far field. Higher = smoother sooner.
-        `const CBT_NORMAL_AA : f32 = 12.0;`,
+        `const CBT_NORMAL_AA : f32 = ${f(b.normalAa)};`,
         // Mean-preserving normal-AA correction strength (uPerfMask bit5). The variance-smoothed normal
         // over-brightens at grazing because the BRDF is concave there (Jensen: E[f(N)] < f(E[N])); this
         // darkens the diffuse by the sub-pixel normal variance × grazing concavity to restore the mean.
-        `const CBT_MEAN_AA_K : f32 = 0.18;`,
+        `const CBT_MEAN_AA_K : f32 = ${f(b.meanAaK)};`,
         // Per-vertex crater-gradient footprint scale. The crater gradient is evaluated PER VERTEX and
         // interpolated across the leaf; a crater smaller than the leaf can't be represented and aliases
         // to the leaf shape (square/diamond facets at distance). footprintKm = camDistKm * K approximates
         // the leaf edge (the LOD keeps leaf ~constant screen-px, so leaf size ∝ distance), feeding the
         // craterField Nyquist fade (crFp) so sub-leaf craters smoothly fade instead of squaring. K≈leaf
         // angular size / (CBT_NORMAL_FP_LO). camDistKm is shared at edge verts → stays watertight.
-        `const CBT_CRATER_FP_K : f32 = 0.002;`,
+        `const CBT_CRATER_FP_K : f32 = ${f(b.craterFpK)};`,
     ].flat().join('\n');
 }
 

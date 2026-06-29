@@ -21,8 +21,11 @@ const LIGHTING_JSON = lightingJsonRaw as unknown as PlanetLightingJSON;
 
 const STORAGE_KEY = 'world42.terrainProfiles';
 
+/** An override value: a scalar, an RGB/vec3 array, or the crater-classes array-of-arrays. */
+export type OverrideValue = number | number[] | number[][];
+
 /** profileId -> (dotted param path -> value). */
-export type OverrideMap = Record<string, Record<string, number>>;
+export type OverrideMap = Record<string, Record<string, OverrideValue>>;
 
 /** Load all persisted overrides (empty object if none / unavailable / corrupt). */
 export function loadOverrides(): OverrideMap {
@@ -46,7 +49,7 @@ export function saveOverrides(map: OverrideMap): void {
 }
 
 /** Record one parameter override for a profile and persist. */
-export function setOverride(profileId: string, path: string, value: number): void {
+export function setOverride(profileId: string, path: string, value: OverrideValue): void {
     const map = loadOverrides();
     (map[profileId] ??= {})[path] = value;
     saveOverrides(map);
