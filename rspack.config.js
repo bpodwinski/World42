@@ -1,6 +1,7 @@
 require('dotenv').config();
 
 const path = require('path');
+const rspack = require('@rspack/core');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const { TsCheckerRspackPlugin } = require('ts-checker-rspack-plugin');
 const Dotenv = require('dotenv-webpack');
@@ -21,9 +22,10 @@ const config = (env, argv) => ({
         ...(isProd(argv)
             ? {}
             : {
-                  ocbtTest: './src/systems/lod/cbt/ocbt/ocbt_pool_gpu_test_main.ts',
+                  ocbtTest:
+                      './src/systems/lod/terrain/gpu/terrain_pool_gpu_test_main.ts',
                   ocbtTopoTest:
-                      './src/systems/lod/cbt/ocbt/ocbt_topology_gpu_test_main.ts'
+                      './src/systems/lod/terrain/gpu/terrain_topology_gpu_test_main.ts'
               })
     },
     output: {
@@ -81,6 +83,12 @@ const config = (env, argv) => ({
                   })
               ]),
         new TsCheckerRspackPlugin(),
+        // Build-time dev flag. `.env` forces NODE_ENV=production, so app code uses __DEV__
+        // (true under `rspack serve`, false in production) to gate dev-only imports such as
+        // the BabylonJS Inspector — keeping it out of the public gh-pages bundle.
+        new rspack.DefinePlugin({
+            __DEV__: JSON.stringify(!isProd(argv))
+        }),
         new Dotenv({
             path: './.env',
             systemvars: true,

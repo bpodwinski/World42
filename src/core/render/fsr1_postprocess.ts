@@ -96,11 +96,14 @@ export function fsr1RenderPercent(renderScale: number): number {
     return Math.round(renderScale * 100);
 }
 
-/** LDR half-float render target options for the full-res FSR1 intermediate texture. */
+/**
+ * LDR half-float render target options for the full-res FSR1 intermediate texture.
+ * Not `as const` — `FrameGraphTextureOptions` expects mutable `number[]` for `types`/`formats`.
+ */
 export const FSR1_FULLRES_RTT_OPTIONS = {
     createMipMaps: false,
     samples: 1,
     types: [Constants.TEXTURETYPE_HALF_FLOAT],
     formats: [Constants.TEXTUREFORMAT_RGBA],
     labels: ['fsr1Color'],
-} as const;
+};

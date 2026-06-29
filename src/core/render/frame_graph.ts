@@ -316,7 +316,10 @@ export function attachFrameGraph(
         });
         const fsr1Easu = new FrameGraphFsr1EasuTask('fsr1Easu', fg, options.fsr1.renderScale);
         fsr1Easu.sourceTexture = fxaa.outputTexture;
-        fsr1Easu.outputTexture = fsr1Color;
+        // EASU must output a full-res (100%) RTT to upscale the renderScale% scene. Babylon types
+        // `outputTexture` as readonly, but assigning a target output is the supported runtime pattern
+        // (the auto-created output would inherit the smaller input size). Type-only cast.
+        (fsr1Easu as { outputTexture: typeof fsr1Color }).outputTexture = fsr1Color;
         fg.addTask(fsr1Easu);
 
         // 8c. FSR1 RCAS: adaptive sharpening at full resolution.

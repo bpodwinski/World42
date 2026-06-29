@@ -2,7 +2,8 @@ node_modules/
 dist/
 coverage/
 
-package-lock.json
+# package-lock.json is intentionally tracked: the CI deploy (.github/workflows/deploy.yml)
+# runs `npm ci`, which requires a committed lockfile.
 
 *.jpg
 *.png
