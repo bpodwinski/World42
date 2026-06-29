@@ -125,11 +125,11 @@ export class MouseSteerControlManager {
             maxYawRate: opts.maxYawRate ?? 0.75,
             maxPitchRate: opts.maxPitchRate ?? 0.75,
             invertY: opts.invertY ?? false,
-            acceleration: opts.acceleration ?? 2,
-            strafeAcceleration: opts.strafeAcceleration ?? 2,
-            maxSpeed: opts.maxSpeed ?? 5000,
-            damping: opts.damping ?? 0.50,
-            boostMultiplier: opts.boostMultiplier ?? 50,
+            acceleration: opts.acceleration ?? 10,
+            strafeAcceleration: opts.strafeAcceleration ?? 10,
+            maxSpeed: opts.maxSpeed ?? 1000,
+            damping: opts.damping ?? 0.05,
+            boostMultiplier: opts.boostMultiplier ?? 10,
             brakeDamping: opts.brakeDamping ?? 0.3,
             yawAcceleration: opts.yawAcceleration ?? 10,
             pitchAcceleration: opts.pitchAcceleration ?? 10,
@@ -409,11 +409,8 @@ export class MouseSteerControlManager {
         this.velocity.addInPlace(right.scale(this.inputs.strafe * this.opts.strafeAcceleration * dt));
         this.velocity.addInPlace(up.scale(this.inputs.rise * this.opts.strafeAcceleration * dt));
 
-        // Brake / damping: strong when coasting (no input), minimal when actively thrusting
-        const isThrusting = this.inputs.fwd !== 0 || this.inputs.strafe !== 0 || this.inputs.rise !== 0;
-        const damping = this.inputs.brake ? this.opts.brakeDamping
-            : isThrusting ? 0.005
-            : this.opts.damping;
+        // Brake / damping (linear)
+        const damping = this.inputs.brake ? this.opts.brakeDamping : this.opts.damping;
         const dampFactor = Math.exp(-damping * dt * 60);
         this.velocity.scaleInPlace(dampFactor);
 

@@ -392,6 +392,7 @@ export function setupRuntime({
     // matching the non-frame-graph ordering.
     const foldObserver = scene.onBeforeRenderObservable.add(() => {
         scene.onBeforeActiveMeshesEvaluationObservable.notifyObservers(scene);
+        scene.onAfterActiveMeshesEvaluationObservable.notifyObservers(scene);
     });
     disposables.addBabylonObserver(scene.onBeforeRenderObservable, foldObserver);
 
