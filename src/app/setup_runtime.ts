@@ -378,7 +378,10 @@ export function setupRuntime({
         // OCBT compute runs as a graph task (before the scene-render task). Until the graph is built
         // it is driven by the scheduler's startup observer; onGraphReady hands ownership to the task.
         runCompute: lod.runOcbtCompute,
-        onGraphReady: () => lod.setComputeOwnedByGraph(true)
+        onGraphReady: () => lod.setComputeOwnedByGraph(true),
+        // FSR1 spatial upscaling: render at 67% resolution, upscale via EASU + RCAS.
+        // Remove or set to undefined to disable and restore the native-resolution pipeline.
+        fsr1: { renderScale: 0.9, sharpness: 0.5 },
     });
     disposables.add(() => fg.dispose());
 

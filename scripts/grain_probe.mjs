@@ -40,6 +40,7 @@ const URL = arg('url', 'http://localhost:19000/?system=Dev&planet=Moon');
 const PLANET = arg('planet', 'Moon');
 const ALT = parseFloat(arg('alt', '3'));
 const SUN_ELEV = parseFloat(arg('sunElev', '5'));
+const PITCH = parseFloat(arg('pitch', '0')); // view tilt from nadir toward the sun (deg)
 const SSAA = parseFloat(arg('ssaa', '0.25')); // hwScale for the reference (0.25 = 16 samples/px)
 const BAND = arg('band', '0.55,0.05,0.38,0.4').split(',').map(Number); // x,y,w,h canvas fractions (on the lit grain patch)
 const MASKS = arg('masks', '0,1,2,4').split(',').map((s) => parseInt(s, 10));
@@ -160,11 +161,11 @@ try {
     await page.evaluate(() => window.__world42Perf.enableCapture(true));
 
     const pose = await page.evaluate(
-        ({ planet, altKm, sunElevDeg }) => {
+        ({ planet, altKm, sunElevDeg, pitchDeg }) => {
             window.__world42Perf.setHardwareScaling(1);
-            return window.__world42Bench.poseGrazing({ planet, altKm, sunElevDeg });
+            return window.__world42Bench.poseGrazing({ planet, altKm, sunElevDeg, pitchDeg });
         },
-        { planet: PLANET, altKm: ALT, sunElevDeg: SUN_ELEV }
+        { planet: PLANET, altKm: ALT, sunElevDeg: SUN_ELEV, pitchDeg: PITCH }
     );
     console.log(
         `# grain_probe  ${pose.planet}  alt=${pose.altKm}km  sunElev=${pose.sunElevDeg.toFixed(1)}°  ` +

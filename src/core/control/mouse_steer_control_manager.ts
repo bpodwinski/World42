@@ -128,7 +128,7 @@ export class MouseSteerControlManager {
             acceleration: opts.acceleration ?? 2,
             strafeAcceleration: opts.strafeAcceleration ?? 2,
             maxSpeed: opts.maxSpeed ?? 5000,
-            damping: opts.damping ?? 0.02,
+            damping: opts.damping ?? 0.50,
             boostMultiplier: opts.boostMultiplier ?? 50,
             brakeDamping: opts.brakeDamping ?? 0.3,
             yawAcceleration: opts.yawAcceleration ?? 10,
@@ -409,12 +409,15 @@ export class MouseSteerControlManager {
         this.velocity.addInPlace(right.scale(this.inputs.strafe * this.opts.strafeAcceleration * dt));
         this.velocity.addInPlace(up.scale(this.inputs.rise * this.opts.strafeAcceleration * dt));
 
-        // Brake / damping (linear)
-        const damping = this.inputs.brake ? this.opts.brakeDamping : this.opts.damping;
+        // Brake / damping: strong when coasting (no input), minimal when actively thrusting
+        const isThrusting = this.inputs.fwd !== 0 || this.inputs.strafe !== 0 || this.inputs.rise !== 0;
+        const damping = this.inputs.brake ? this.opts.brakeDamping
+            : isThrusting ? 0.005
+            : this.opts.damping;
         const dampFactor = Math.exp(-damping * dt * 60);
         this.velocity.scaleInPlace(dampFactor);
 
-        if (this.velocity.lengthSquared() < 1e-6) this.velocity.set(0, 0, 0);
+        if (this.velocity.lengthSquared() < 0.01) this.velocity.set(0, 0, 0);
 
         // Clamp total speed
         const speed = this.velocity.length();

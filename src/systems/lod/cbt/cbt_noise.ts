@@ -149,7 +149,7 @@ export type NoiseParams = {
  */
 export const DEFAULT_NOISE: NoiseParams = {
     seed: 1,
-    octaves: 8,
+    octaves: 16,
     baseFrequency: 5.5,
     baseAmplitude: 32,
     lacunarity: 2.07,
@@ -157,8 +157,8 @@ export const DEFAULT_NOISE: NoiseParams = {
     // Reduced from 180: craters (cbt_noise.wgsl craterField, depths up to ~18 km) are now the
     // DOMINANT relief; the fbm is the finer inter-crater roughness on top.
     globalAmplitude: 5,
-    detailOctaves: 8,
-    detailRange: 80,
+    detailOctaves: 16,
+    detailRange: 60,
 };
 
 let cachedPerm: Uint8Array | null = null;

@@ -131,6 +131,13 @@ function bakedHeader(opts: OcbtRenderOptions): string {
         // over-brightens at grazing because the BRDF is concave there (Jensen: E[f(N)] < f(E[N])); this
         // darkens the diffuse by the sub-pixel normal variance × grazing concavity to restore the mean.
         `const CBT_MEAN_AA_K : f32 = 0.18;`,
+        // Per-vertex crater-gradient footprint scale. The crater gradient is evaluated PER VERTEX and
+        // interpolated across the leaf; a crater smaller than the leaf can't be represented and aliases
+        // to the leaf shape (square/diamond facets at distance). footprintKm = camDistKm * K approximates
+        // the leaf edge (the LOD keeps leaf ~constant screen-px, so leaf size ∝ distance), feeding the
+        // craterField Nyquist fade (crFp) so sub-leaf craters smoothly fade instead of squaring. K≈leaf
+        // angular size / (CBT_NORMAL_FP_LO). camDistKm is shared at edge verts → stays watertight.
+        `const CBT_CRATER_FP_K : f32 = 0.002;`,
     ].flat().join('\n');
 }
 
@@ -213,8 +220,11 @@ function vertexSource(opts: OcbtRenderOptions): string {
         '    // dir + distance, so the interpolated gradient is watertight (no shading seam). Slope',
         '    // variant at CBT_SLOPE_DIST feeds the smooth splat/AO normal (stable across altitude).',
         '    let camDistKmV = length(localRel + uniforms.uCamDelta);',
-        '    vertexOutputs.vCraterGrad = craterField(dir, CBT_RADIUS, camDistKmV, true, 0.0).yzw;',
-        '    vertexOutputs.vCraterGradSlope = craterField(dir, CBT_RADIUS, CBT_SLOPE_DIST, true, 0.0).yzw;',
+        '    // Leaf-size footprint (camDistKm * K) feeds the craterField Nyquist fade so sub-leaf craters',
+        '    // fade out instead of aliasing to square/diamond leaf facets at distance (per-vertex interp).',
+        '    let craterFpKm = camDistKmV * CBT_CRATER_FP_K;',
+        '    vertexOutputs.vCraterGrad = craterField(dir, CBT_RADIUS, camDistKmV, true, craterFpKm).yzw;',
+        '    vertexOutputs.vCraterGradSlope = craterField(dir, CBT_RADIUS, CBT_SLOPE_DIST, true, craterFpKm).yzw;',
         '    // Macro fbm gradient for the smooth slope/AO normal at the fixed CBT_SLOPE_DIST footprint:',
         '    // evaluated here (per vertex) instead of a 2nd per-pixel 8-octave fbm. Low-frequency, so the',
         '    // interpolation is watertight (shared edge verts share dir); the fragment only projects it.',

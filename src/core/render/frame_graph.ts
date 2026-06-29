@@ -39,6 +39,13 @@ import {
     ATMO_PP_UNIFORMS,
     type AtmosphereSource,
 } from './atmosphere_postprocess';
+import {
+    FrameGraphFsr1EasuTask,
+    FrameGraphFsr1RcasTask,
+    fsr1RenderPercent,
+    FSR1_FULLRES_RTT_OPTIONS,
+    type Fsr1Options,
+} from './fsr1_postprocess';
 
 /**
  * Frame Graph custom task for the star ray-march pass.
@@ -145,6 +152,12 @@ export type FrameGraphOptions = {
     runCompute: () => void;
     /** Called once the graph is built and installed, so the caller can hand compute ownership to it. */
     onGraphReady?: () => void;
+    /**
+     * FSR1 spatial upscaling. When provided the scene is rendered at
+     * `renderScale` fraction of display resolution and upscaled to full-res
+     * via EASU + RCAS. Omit to keep the native-resolution pipeline.
+     */
+    fsr1?: Fsr1Options;
 };
 
 /**
@@ -169,15 +182,19 @@ export function attachFrameGraph(
     const fg = new FrameGraph(scene, false);
     const tm = fg.textureManager;
 
-    // Full-screen HDR color + depth render targets (1:1 with the canvas). SINGLE-SAMPLE: geometric
-    // edge AA is handled by the always-on TAA (16x) + FXAA below, not MSAA. Reason we dropped MSAA:
-    // WebGPU cannot resolve a DEPTH attachment via a render-pass resolveTarget, so Babylon resolved the
-    // MSAA depth with a COMPUTE shader whose bind-group layout is invalid (multisampled depth declared
-    // sampleType Float) — 7 validation errors/frame AND a garbage resolved depth (star terrain-occlusion
-    // broken). Single-sample depth is sampled directly by the star, so there is nothing to resolve.
+    // Full-screen HDR color + depth render targets. SINGLE-SAMPLE: geometric edge AA is handled by
+    // the always-on TAA (16x) + FXAA below, not MSAA. Reason we dropped MSAA: WebGPU cannot resolve
+    // a DEPTH attachment via a render-pass resolveTarget, so Babylon resolved the MSAA depth with a
+    // COMPUTE shader whose bind-group layout is invalid (multisampled depth declared sampleType Float)
+    // — 7 validation errors/frame AND a garbage resolved depth (star terrain-occlusion broken).
+    // Single-sample depth is sampled directly by the star, so there is nothing to resolve.
+    //
+    // When FSR1 is active, sceneColor and sceneDepth are created at renderScale% of the canvas so
+    // that all intermediate passes run at the lower resolution. FSR1 EASU + RCAS upscale to 100%.
     const MSAA_SAMPLES = 1;
+    const renderPct = options.fsr1 ? fsr1RenderPercent(options.fsr1.renderScale) : 100;
     const sceneColor = tm.createRenderTargetTexture('sceneColor', {
-        size: 100,
+        size: renderPct,
         sizeIsPercentage: true,
         options: {
             createMipMaps: false,
@@ -188,7 +205,7 @@ export function attachFrameGraph(
         },
     });
     const sceneDepth = tm.createRenderTargetTexture('sceneDepth', {
-        size: 100,
+        size: renderPct,
         sizeIsPercentage: true,
         options: {
             createMipMaps: false,
@@ -280,17 +297,43 @@ export function attachFrameGraph(
     fxaa.sourceTexture = imageProcessing.outputTexture;
     fg.addTask(fxaa);
 
-    // 8. Sharpen (LDR).
-    const sharpen = new FrameGraphSharpenTask('sharpen', fg);
-    sharpen.sourceTexture = fxaa.outputTexture;
-    sharpen.postProcess.edgeAmount = 0.1;
-    sharpen.postProcess.colorAmount = 1.0;
-    fg.addTask(sharpen);
+    // 8. Sharpen (LDR) — skipped when FSR1 is active (RCAS handles sharpening at full-res).
+    let preGuiTexture: FrameGraphTextureHandle;
+    if (!options.fsr1) {
+        const sharpen = new FrameGraphSharpenTask('sharpen', fg);
+        sharpen.sourceTexture = fxaa.outputTexture;
+        sharpen.postProcess.edgeAmount = 0.1;
+        sharpen.postProcess.colorAmount = 1.0;
+        fg.addTask(sharpen);
+        preGuiTexture = sharpen.outputTexture;
+    } else {
+        // 8b. FSR1 EASU: upscale from renderScale% → 100%.
+        // A dedicated full-res RTT is created so subsequent passes (RCAS, GUI) run at canvas size.
+        const fsr1Color = tm.createRenderTargetTexture('fsr1Color', {
+            size: 100,
+            sizeIsPercentage: true,
+            options: FSR1_FULLRES_RTT_OPTIONS,
+        });
+        const fsr1Easu = new FrameGraphFsr1EasuTask('fsr1Easu', fg, options.fsr1.renderScale);
+        fsr1Easu.sourceTexture = fxaa.outputTexture;
+        fsr1Easu.outputTexture = fsr1Color;
+        fg.addTask(fsr1Easu);
+
+        // 8c. FSR1 RCAS: adaptive sharpening at full resolution.
+        const fsr1Rcas = new FrameGraphFsr1RcasTask(
+            'fsr1Rcas',
+            fg,
+            options.fsr1.sharpness ?? 0.2
+        );
+        fsr1Rcas.sourceTexture = fsr1Easu.outputTexture;
+        fg.addTask(fsr1Rcas);
+        preGuiTexture = fsr1Rcas.outputTexture;
+    }
 
     // 9. GUI / HUD overlay (crosshair, speed, perf) composited on top — scene.frameGraph bypasses
     // the normal scene layer pass, so the fullscreen GUI must be rendered as a graph task.
     const guiTask = new FrameGraphGUITask('gui', fg, options.gui);
-    guiTask.targetTexture = sharpen.outputTexture;
+    guiTask.targetTexture = preGuiTexture;
     fg.addTask(guiTask);
 
     // 10. Present to the backbuffer.
