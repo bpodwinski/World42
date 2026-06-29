@@ -1,11 +1,11 @@
 /**
- * OCBT (pool-CBT) {@link CbtGeometrySource} — the GPU concurrent-binary-tree path
- * (Benyoub & Dupuy, HPG 2024). Owns an {@link OcbtTopologyKernel} (the validated
+ * TERRAIN (pool-TERRAIN) {@link TerrainGeometrySource} — the GPU concurrent-binary-tree path
+ * (Benyoub & Dupuy, HPG 2024). Owns an {@link TerrainTopologyKernel} (the validated
  * split/merge topology engine), its render mesh + material, and runs entirely on the
  * GPU: per frame it advances the topology one refinement step, decodes every live
  * slot to vertex corners (EvaluateLEB), and draws the implicit mesh. Cost is
  * decoupled from subdivision depth — it scales with the fixed pool capacity, not
- * 2^depth — which is the whole point of OCBT vs the implicit-CBT path.
+ * 2^depth — which is the whole point of TERRAIN vs the implicit-TERRAIN path.
  *
  * Phase 2 (this file) drives refinement with a FIXED per-face uniform target level
  * (the deterministic, validated predicate from the Phase 1c cross-check) so the
@@ -15,13 +15,13 @@
  * WebGPU only.
  */
 import { Matrix, Vector3, type Mesh, type Scene, type TransformNode, type WebGPUEngine } from '@babylonjs/core';
-import type { CbtFrameParams, CbtGeometryListener, CbtGeometrySource } from '../cbt_geometry_source';
-import { DEFAULT_CRATERS, type CraterParams, type NoiseParams } from '../cbt_noise';
+import type { TerrainFrameParams, TerrainGeometryListener, TerrainGeometrySource } from '../terrain_geometry_source';
+import { DEFAULT_CRATERS, type CraterParams, type NoiseParams } from '../terrain_noise';
 import type { ResolvedLighting } from '../../../../game_world/stellar_system/planet_lighting';
-import { OcbtTopologyKernel } from './ocbt_topology_kernel';
-import { buildOcbtRenderMaterial, createOcbtTemplateMesh, type OcbtRenderMaterial } from './ocbt_render_material';
+import { TerrainTopologyKernel } from './terrain_topology_kernel';
+import { buildTerrainRenderMaterial, createTerrainTemplateMesh, type TerrainRenderMaterial } from './terrain_render_material';
 
-export type OcbtSourceOptions = {
+export type TerrainSourceOptions = {
     key: string;
     renderParent: TransformNode;
     radiusSim: number;
@@ -48,13 +48,13 @@ export type OcbtSourceOptions = {
     lighting?: ResolvedLighting;
 };
 
-export class OcbtSource implements CbtGeometrySource {
-    private readonly kernel: OcbtTopologyKernel;
-    private readonly render: OcbtRenderMaterial;
+export class TerrainSource implements TerrainGeometrySource {
+    private readonly kernel: TerrainTopologyKernel;
+    private readonly render: TerrainRenderMaterial;
     private readonly mesh: Mesh;
     private readonly starPos: Vector3 | null;
     private readonly starIntensity: number;
-    private readonly listener: CbtGeometryListener;
+    private readonly listener: TerrainGeometryListener;
     private readonly radius: number;
     private readonly splitThresholdPx: number;
     private readonly mergeThresholdPx: number;
@@ -123,11 +123,11 @@ export class OcbtSource implements CbtGeometrySource {
     private static readonly SETTLE_FRAMES = 90;
     /** Default df64->f32 noise cutoff (km) for the eval. Aggressive: df64 only within ~2 km of the
      *  camera (where f32 dir quantization would band the relief); f32 beyond. Live-tunable via
-     *  globalThis.__ocbtDf64NearKm. Raise it if banding appears very close to the ground. */
+     *  globalThis.__terrainDf64NearKm. Raise it if banding appears very close to the ground. */
     private static readonly DF64_NEAR_KM_DEFAULT = 2.0;
-    /** Axe 3: re-bake the heavy OCBT pipeline only 1 frame in N under steady drift (the draw stays
+    /** Axe 3: re-bake the heavy TERRAIN pipeline only 1 frame in N under steady drift (the draw stays
      *  exact between via uCamDelta). 1 = every frame (old behavior). Live-tunable via
-     *  globalThis.__ocbtRebakeEvery. Higher = cheaper motion, slightly more LOD latency. */
+     *  globalThis.__terrainRebakeEvery. Higher = cheaper motion, slightly more LOD latency. */
     private static readonly REBAKE_EVERY_DEFAULT = 3;
     /** OPT-4 adaptive throttle ramp (frames of sustained steady drift). After RAMP1 the re-bake interval
      *  doubles (base->2x), after RAMP2 it triples (base->3x). ~0.5 s / ~1.5 s at 60 fps. */
@@ -149,8 +149,8 @@ export class OcbtSource implements CbtGeometrySource {
     constructor(
         engine: WebGPUEngine,
         scene: Scene,
-        opts: OcbtSourceOptions,
-        listener: CbtGeometryListener
+        opts: TerrainSourceOptions,
+        listener: TerrainGeometryListener
     ) {
         this.listener = listener;
         this.key = opts.key;
@@ -168,9 +168,9 @@ export class OcbtSource implements CbtGeometrySource {
         // (not the full pool) via PrepareIndirect + dispatchIndirect. noise: the df64 eval
         // bakes it so the decoded positions are TERRAIN-displaced (terrain-aware topology).
         const craters = opts.craters ?? DEFAULT_CRATERS;
-        this.kernel = new OcbtTopologyKernel(engine, opts.capacity, 'metric', true, opts.noise, craters);
+        this.kernel = new TerrainTopologyKernel(engine, opts.capacity, 'metric', true, opts.noise, craters);
 
-        this.render = buildOcbtRenderMaterial(
+        this.render = buildTerrainRenderMaterial(
             scene,
             opts.key,
             {
@@ -195,7 +195,7 @@ export class OcbtSource implements CbtGeometrySource {
             this.kernel.indicesBuffer
         );
 
-        this.mesh = createOcbtTemplateMesh(scene, opts.key);
+        this.mesh = createTerrainTemplateMesh(scene, opts.key);
         this.mesh.parent = opts.renderParent;
         this.mesh.material = this.render.material;
         // Draw nothing until the seed is uploaded: a freshly created StorageBuffer is
@@ -223,7 +223,7 @@ export class OcbtSource implements CbtGeometrySource {
             })
             .catch((e) => {
                 // eslint-disable-next-line no-console
-                console.error('[OcbtSource] kernel init failed', e);
+                console.error('[TerrainSource] kernel init failed', e);
             });
     }
 
@@ -256,7 +256,7 @@ export class OcbtSource implements CbtGeometrySource {
         return Math.max(this.cullMinDot, Math.cos(theta));
     }
 
-    requestUpdate(frame: CbtFrameParams): void {
+    requestUpdate(frame: TerrainFrameParams): void {
         if (this.disposed || !this.ready) return;
 
         // Camera in planet-local space = inverse(renderParentWorld) * renderOrigin
@@ -280,7 +280,7 @@ export class OcbtSource implements CbtGeometrySource {
 
         // Planet spin reference: a fixed world axis in planet-local; its rotation away from the anchor
         // value measures spin since the anchor (catches spin near the axis, where camLocal barely moves).
-        Vector3.TransformNormalToRef(OcbtSource.WORLD_REF, this.tmpInv, this.tmpRefLocal);
+        Vector3.TransformNormalToRef(TerrainSource.WORLD_REF, this.tmpInv, this.tmpRefLocal);
 
         // Residual drift since the frozen anchor (tmpCamDelta = anchor - live).
         let driftKm = Infinity;
@@ -289,7 +289,7 @@ export class OcbtSource implements CbtGeometrySource {
             this.anchorCamLocal.subtractToRef(this.tmpCamLocal, this.tmpCamDelta);
             driftKm = this.tmpCamDelta.length();
             viewRotated =
-                Vector3.Dot(this.anchorRefLocal, this.tmpRefLocal) < OcbtSource.ROT_EPS_COS;
+                Vector3.Dot(this.anchorRefLocal, this.tmpRefLocal) < TerrainSource.ROT_EPS_COS;
         } else {
             this.tmpCamDelta.set(0, 0, 0);
         }
@@ -311,7 +311,7 @@ export class OcbtSource implements CbtGeometrySource {
                     n.z * this.anchorViewNormals[i * 3 + 2];
                 if (d < minDot) minDot = d;
             }
-            viewDirChanged = minDot < OcbtSource.ROT_EPS_COS;
+            viewDirChanged = minDot < TerrainSource.ROT_EPS_COS;
         }
 
         // LOD-aware coverage threshold: the finest visible leaf edge projects to ~splitThresholdPx, so
@@ -322,7 +322,7 @@ export class OcbtSource implements CbtGeometrySource {
         // No flat absolute cap: it would force distant fast-spinning planets to re-bake every frame.
         const altKm = Math.max(this.tmpCamLocal.length() - this.radius, 1e-3);
         const finestLeafKm = (this.splitThresholdPx * altKm) / Math.max(focalPx, 1);
-        const driftThreshKm = 0.5 * OcbtSource.FRUSTUM_GUARD * finestLeafKm;
+        const driftThreshKm = 0.5 * TerrainSource.FRUSTUM_GUARD * finestLeafKm;
 
         // Discrete jump (teleport / fast fly) → arm a convergence burst (incremental topology needs
         // ~SETTLE_FRAMES to fully refine a new view). Steady drift/spin needs only single re-bakes.
@@ -332,8 +332,8 @@ export class OcbtSource implements CbtGeometrySource {
             ? Vector3.Distance(this.tmpCamLocal, this.lastFrameCamLocal)
             : Infinity;
         this.lastFrameCamLocal.copyFrom(this.tmpCamLocal);
-        if (!this.anchorValid || jump > OcbtSource.JUMP_FACTOR * driftThreshKm) {
-            this.convergeFrames = OcbtSource.SETTLE_FRAMES;
+        if (!this.anchorValid || jump > TerrainSource.JUMP_FACTOR * driftThreshKm) {
+            this.convergeFrames = TerrainSource.SETTLE_FRAMES;
         }
 
         // Axe 3 — throttle the heavy re-bake. The full pipeline (topology classify/copy/reduce over
@@ -347,8 +347,8 @@ export class OcbtSource implements CbtGeometrySource {
         const baseRebakeEvery = Math.max(
             1,
             Math.floor(
-                (globalThis as unknown as { __ocbtRebakeEvery?: number }).__ocbtRebakeEvery ??
-                OcbtSource.REBAKE_EVERY_DEFAULT
+                (globalThis as unknown as { __terrainRebakeEvery?: number }).__terrainRebakeEvery ??
+                TerrainSource.REBAKE_EVERY_DEFAULT
             )
         );
         const forcedRebake = !this.anchorValid || this.convergeFrames > 0;
@@ -362,20 +362,20 @@ export class OcbtSource implements CbtGeometrySource {
         // to the base interval the SAME frame, so the frustum cull + prefetch stay responsive (a throttled
         // cull during mouse-look pops leaves in — the failure mode the profiling bilan flagged). The draw
         // is exact between re-bakes either way (uCamDelta), so this only adds a little LOD-metric latency
-        // to slow steady motion — never a visual change. Disable via globalThis.__ocbtAdaptiveRebake=false.
+        // to slow steady motion — never a visual change. Disable via globalThis.__terrainAdaptiveRebake=false.
         if (rotating || forcedRebake) {
             this.steadyDriftFrames = 0;
         } else {
             this.steadyDriftFrames++;
         }
         const adaptiveOn =
-            (globalThis as unknown as { __ocbtAdaptiveRebake?: boolean }).__ocbtAdaptiveRebake ??
+            (globalThis as unknown as { __terrainAdaptiveRebake?: boolean }).__terrainAdaptiveRebake ??
             true;
         let rebakeEvery = baseRebakeEvery;
         if (adaptiveOn && !rotating && !forcedRebake) {
-            if (this.steadyDriftFrames > OcbtSource.ADAPT_RAMP2) {
+            if (this.steadyDriftFrames > TerrainSource.ADAPT_RAMP2) {
                 rebakeEvery = baseRebakeEvery * 3;
-            } else if (this.steadyDriftFrames > OcbtSource.ADAPT_RAMP1) {
+            } else if (this.steadyDriftFrames > TerrainSource.ADAPT_RAMP1) {
                 rebakeEvery = baseRebakeEvery * 2;
             }
         }
@@ -386,8 +386,8 @@ export class OcbtSource implements CbtGeometrySource {
         // exact between frames (uCamDelta keeps carrying the residual) and setPerfMask below still
         // applies each frame, so toggling blocks takes effect while the leaf set is held.
         const freezeTopology = !!(
-            globalThis as unknown as { __ocbtFreezeTopology?: boolean | number }
-        ).__ocbtFreezeTopology;
+            globalThis as unknown as { __terrainFreezeTopology?: boolean | number }
+        ).__terrainFreezeTopology;
         const needRebake =
             !freezeTopology &&
             (forcedRebake || (driftDriven && this.framesSinceRebake >= rebakeEvery));
@@ -400,7 +400,7 @@ export class OcbtSource implements CbtGeometrySource {
         // normal, bit1 skip df64 ground detail, bit2 skip crater rays — to A/B each block's GPU cost.
         // Set every frame (even when the topology is frozen) so toggles take effect immediately.
         this.render.setPerfMask(
-            (globalThis as unknown as { __ocbtPerfMask?: number }).__ocbtPerfMask ?? 0
+            (globalThis as unknown as { __terrainPerfMask?: number }).__terrainPerfMask ?? 0
         );
         this.render.setLightIntensity(this.starIntensity);
 
@@ -417,8 +417,8 @@ export class OcbtSource implements CbtGeometrySource {
                 // df64->f32 noise cutoff (km), live-tunable via the global. Beyond it the eval uses the
                 // cheaper f32 noise twin (exact past the threshold — banding only shows very close).
                 df64NearKm:
-                    (globalThis as unknown as { __ocbtDf64NearKm?: number }).__ocbtDf64NearKm ??
-                    OcbtSource.DF64_NEAR_KM_DEFAULT
+                    (globalThis as unknown as { __terrainDf64NearKm?: number }).__terrainDf64NearKm ??
+                    TerrainSource.DF64_NEAR_KM_DEFAULT
             });
 
             // Frustum cull: rotate each render-space plane normal into camera-relative
@@ -440,9 +440,9 @@ export class OcbtSource implements CbtGeometrySource {
                     this.anchorViewNormals[i * 3 + 2] = pl.normal.z;
                 }
                 // heightMargin = 0: positions are terrain-displaced now, so the frustum is exact.
-                this.kernel.setFrustum(this.frustumF32, OcbtSource.FRUSTUM_GUARD, true, 0);
+                this.kernel.setFrustum(this.frustumF32, TerrainSource.FRUSTUM_GUARD, true, 0);
             } else {
-                this.kernel.setFrustum(this.frustumF32, OcbtSource.FRUSTUM_GUARD, false, 0);
+                this.kernel.setFrustum(this.frustumF32, TerrainSource.FRUSTUM_GUARD, false, 0);
             }
 
             // Alternate split (even) / merge (odd) RE-BAKES so the two halves never race on the
@@ -494,17 +494,17 @@ export class OcbtSource implements CbtGeometrySource {
                     this.liveLeafCount = count;
                     // Pool-saturation guard (pool_tree[1] vs capacity): if the live leaf set ever
                     // approaches the fixed pool, the Allocate pass starts dropping splits and the limb
-                    // silently under-tessellates. Warn ONCE so a too-small OCBT_CAPACITY (or a planet
+                    // silently under-tessellates. Warn ONCE so a too-small TERRAIN_CAPACITY (or a planet
                     // that needs more than Dev/Moon's ~401k) is visible, not mistaken for a LOD bug.
                     if (
                         !this.poolSaturationWarned &&
-                        count > OcbtSource.POOL_SATURATION_FRAC * this.kernel.capacity
+                        count > TerrainSource.POOL_SATURATION_FRAC * this.kernel.capacity
                     ) {
                         this.poolSaturationWarned = true;
                         console.warn(
-                            `[OCBT] ${this.key}: live leaves ${count} > ` +
-                            `${Math.round(OcbtSource.POOL_SATURATION_FRAC * 100)}% of pool ` +
-                            `${this.kernel.capacity} — raise OCBT_CAPACITY (limb may under-tessellate).`
+                            `[TERRAIN] ${this.key}: live leaves ${count} > ` +
+                            `${Math.round(TerrainSource.POOL_SATURATION_FRAC * 100)}% of pool ` +
+                            `${this.kernel.capacity} — raise TERRAIN_CAPACITY (limb may under-tessellate).`
                         );
                     }
                     // Bound the draw to the live count (= compaction count = pool_tree[1]),
@@ -512,7 +512,7 @@ export class OcbtSource implements CbtGeometrySource {
                     // ramp DOWN slowly so a single stale-small read can't pop holes.
                     const want = Math.min(
                         this.kernel.capacity,
-                        Math.ceil(count * OcbtSource.INSTANCE_SAFETY) + OcbtSource.INSTANCE_FLOOR
+                        Math.ceil(count * TerrainSource.INSTANCE_SAFETY) + TerrainSource.INSTANCE_FLOOR
                     );
                     const cur = this.mesh.forcedInstanceCount || this.kernel.capacity;
                     this.mesh.forcedInstanceCount =
@@ -536,11 +536,11 @@ export class OcbtSource implements CbtGeometrySource {
         // (and a convergence burst). Without this, a teleport would bake the new view against a stale
         // anchor with a huge uCamDelta. The GPU engine re-derives all geometry from there.
         this.anchorValid = false;
-        this.convergeFrames = OcbtSource.SETTLE_FRAMES;
+        this.convergeFrames = TerrainSource.SETTLE_FRAMES;
     }
 
     /**
-     * Enable/disable the mesh draw. The OCBT template mesh has alwaysSelectAsActiveMesh = true
+     * Enable/disable the mesh draw. The TERRAIN template mesh has alwaysSelectAsActiveMesh = true
      * (procedural bounds → Babylon never frustum-culls it), so an off-screen planet keeps
      * drawing its full leaf set every frame. The scheduler calls this from its render-space
      * frustum test to stop the draw of a planet the camera is not looking at (e.g. Earth while
@@ -551,7 +551,7 @@ export class OcbtSource implements CbtGeometrySource {
         this.mesh.setEnabled(on);
     }
 
-    /** OCBT compute GPU timings (ms, last-second average) for the perf HUD. Delegates to the kernel. */
+    /** TERRAIN compute GPU timings (ms, last-second average) for the perf HUD. Delegates to the kernel. */
     getGpuTimings(): { topoMs: number; evalMs: number; compactMs: number } {
         return this.kernel.getGpuTimings();
     }

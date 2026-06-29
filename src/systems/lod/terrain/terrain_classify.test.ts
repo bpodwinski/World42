@@ -1,9 +1,9 @@
 import { Matrix, Vector3 } from '@babylonjs/core';
 import { describe, expect, it } from 'vitest';
-import { classifySplitCandidates } from './cbt_classify';
-import type { CbtNode } from './cbt_state';
+import { classifySplitCandidates } from './terrain_classify';
+import type { TerrainNode } from './terrain_state';
 
-function makeLeaf(id: number, v0: Vector3, v1: Vector3, v2: Vector3): CbtNode {
+function makeLeaf(id: number, v0: Vector3, v1: Vector3, v2: Vector3): TerrainNode {
     return {
         id,
         level: 0,

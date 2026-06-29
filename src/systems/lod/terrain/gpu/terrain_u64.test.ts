@@ -18,7 +18,7 @@ import {
     u64Lt,
     u64Depth,
     type U64
-} from './ocbt_u64';
+} from './terrain_u64';
 
 const MASK64 = (1n << 64n) - 1n;
 
@@ -44,7 +44,7 @@ function* sample64(count: number): Generator<bigint> {
     }
 }
 
-describe('ocbt_u64 — lane layout & round-trip', () => {
+describe('terrain_u64 — lane layout & round-trip', () => {
     it('round-trips BigInt <-> [lo, hi] across the full 64-bit range', () => {
         for (const v of sample64(64)) {
             expect(u64ToBigInt(u64FromBigInt(v))).toBe(v);
@@ -57,7 +57,7 @@ describe('ocbt_u64 — lane layout & round-trip', () => {
     });
 });
 
-describe('ocbt_u64 — bitwise ops vs BigInt', () => {
+describe('terrain_u64 — bitwise ops vs BigInt', () => {
     it('and / or / xor / not match BigInt', () => {
         const samples = [...sample64(48)];
         for (const av of samples) {
@@ -73,7 +73,7 @@ describe('ocbt_u64 — bitwise ops vs BigInt', () => {
     });
 });
 
-describe('ocbt_u64 — shifts vs BigInt', () => {
+describe('terrain_u64 — shifts vs BigInt', () => {
     it('shl / shr match BigInt for every shift amount 0..63', () => {
         for (const v of sample64(40)) {
             const a = u64FromBigInt(v);
@@ -96,7 +96,7 @@ describe('ocbt_u64 — shifts vs BigInt', () => {
     });
 });
 
-describe('ocbt_u64 — findMSB / bit / depth', () => {
+describe('terrain_u64 — findMSB / bit / depth', () => {
     it('findMSB matches the BigInt bit length', () => {
         expect(u64FindMSB(u64FromBigInt(0n))).toBe(-1);
         for (const v of sample64(48)) {
@@ -124,7 +124,7 @@ describe('ocbt_u64 — findMSB / bit / depth', () => {
     });
 });
 
-describe('ocbt_u64 — comparison vs BigInt', () => {
+describe('terrain_u64 — comparison vs BigInt', () => {
     it('cmp / gt / lt match BigInt ordering', () => {
         const samples = [...sample64(40)];
         for (const av of samples) {

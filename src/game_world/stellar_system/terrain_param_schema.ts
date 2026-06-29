@@ -130,7 +130,7 @@ export const TERRAIN_PARAM_SCHEMA: ParamSpec[] = [
     { path: 'lighting.brdf.craterFpK', group: 'Anti-alias', label: 'Crater footprint', kind: 'baked',
       min: 0, max: 0.01, step: 0.0005, description: 'Per-vertex crater footprint scale: higher fades sub-leaf craters sooner (no square facets at distance).' },
 
-    // --- OCBT LOD / performance (recreates the GPU source on Apply). All baked. ---------------------
+    // --- TERRAIN LOD / performance (recreates the GPU source on Apply). All baked. ---------------------
     { path: 'lod.splitPx', group: 'LOD', label: 'Split (px)', kind: 'baked',
       min: 2, max: 40, step: 0.5, description: 'Split a leaf when its longest edge exceeds this many pixels. LOWER = finer mesh = more cost.' },
     { path: 'lod.mergePx', group: 'LOD', label: 'Merge (px)', kind: 'baked',

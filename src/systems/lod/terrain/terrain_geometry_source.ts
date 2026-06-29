@@ -1,15 +1,15 @@
 import { Matrix, Plane, Vector3 } from '@babylonjs/core';
-import { classifyLeaves } from './cbt_classify';
-import { CbtEmitCache, emitMeshFromLeaves, type EmitResult } from './cbt_emit';
-import type { NoiseParams } from './cbt_noise';
-import { CbtState } from './cbt_state';
+import { classifyLeaves } from './terrain_classify';
+import { TerrainEmitCache, emitMeshFromLeaves, type EmitResult } from './terrain_emit';
+import type { NoiseParams } from './terrain_noise';
+import { TerrainState } from './terrain_state';
 
 /**
  * Per-frame camera inputs a source needs to classify the tree. These are the
  * exact values {@link classifyLeaves} consumes (the per-planet constants like
  * thresholds and noise live on the source itself, not here).
  */
-export type CbtFrameParams = {
+export type TerrainFrameParams = {
     cameraWorldDouble: Vector3;
     planetCenterWorldDouble: Vector3;
     renderParentWorldMatrix: Matrix;
@@ -18,7 +18,7 @@ export type CbtFrameParams = {
     frustumPlanes: ReadonlyArray<Plane> | null;
 };
 
-export type CbtSourceStats = {
+export type TerrainSourceStats = {
     leafCount: number;
     splitsThisFrame: number;
     mergesThisFrame: number;
@@ -29,18 +29,18 @@ export type CbtSourceStats = {
 };
 
 /** Called when a source produces an update. `geometry` is null when the tree did not change. */
-export type CbtGeometryListener = (
+export type TerrainGeometryListener = (
     geometry: EmitResult | null,
-    stats: CbtSourceStats
+    stats: TerrainSourceStats
 ) => void;
 
-/** Produces CBT mesh geometry for one planet. Owns classify + split/merge + emit; caller owns the Babylon mesh upload. */
-export interface CbtGeometrySource {
+/** Produces TERRAIN mesh geometry for one planet. Owns classify + split/merge + emit; caller owns the Babylon mesh upload. */
+export interface TerrainGeometrySource {
     /** Emit the current tree (no classify/split/merge) — initial mesh / full refresh. */
     refresh(): void;
     /** Classify + split + merge for this frame; emit only if the topology changed. */
-    requestUpdate(frame: CbtFrameParams): void;
-    /** Defer a full re-emit to the next update (mirrors CbtPlanet.resetNow). */
+    requestUpdate(frame: TerrainFrameParams): void;
+    /** Defer a full re-emit to the next update (mirrors TerrainPlanet.resetNow). */
     reset(): void;
     /** Optional: toggle wireframe on a source that owns its own material (GPU path). */
     setWireframe?(on: boolean): void;

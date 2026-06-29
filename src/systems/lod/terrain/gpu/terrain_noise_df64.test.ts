@@ -2,7 +2,7 @@
 // thing the gradient sum depends on) collapses for two cm-apart directions when the
 // domain p*freq is carried in f32 (the banding bug), but is correctly resolved when it is
 // carried in df64 (the fix), matching the native-f64 reference. Same skew math as
-// cbt_noise_df64.wgsl / cbt_noise.ts simplex3 — only the domain precision differs.
+// terrain_noise_df64.wgsl / terrain_noise.ts simplex3 — only the domain precision differs.
 import { describe, it, expect } from 'vitest';
 import {
     df64FromNumber,
@@ -11,7 +11,7 @@ import {
     df64Sub,
     df64MulF32,
     type DF64
-} from './ocbt_f64';
+} from './terrain_f64';
 
 const F3 = 1 / 3;
 const G3 = 1 / 6;
@@ -27,7 +27,7 @@ function cellF64(x: number, y: number, z: number) {
     return { cell: [i & 255, j & 255, k & 255], p0: [x - (i - t), y - (j - t), z - (k - t)] };
 }
 
-// df64-domain cell+offset — TS mirror of cbtSimplex3_df64_d's skew block.
+// df64-domain cell+offset — TS mirror of terrainSimplex3_df64_d's skew block.
 function df64Floor(a: DF64): DF64 {
     const hi = fr(Math.floor(a[0]));
     if (hi === a[0]) {

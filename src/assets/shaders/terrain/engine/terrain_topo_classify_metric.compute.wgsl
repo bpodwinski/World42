@@ -1,4 +1,4 @@
-// OCBT Classify pass — CAMERA METRIC variant (one thread per pool slot). The render
+// TERRAIN Classify pass — CAMERA METRIC variant (one thread per pool slot). The render
 // path's replacement for the deterministic faceTarget predicate: refine a leaf while
 // its longest edge projects to more than `splitThreshold` pixels, coarsen it below
 // `mergeThreshold` (hysteresis), backside-cull leaves beyond the horizon, and cap at
@@ -10,7 +10,7 @@
 // it needs no LEB decode itself — the topology only changes at frame end and eval
 // runs after, so positions match the current heap ids at classify time.
 //
-// Composed after: engineWgslPreamble + ocbt_u64.wgsl + common.
+// Composed after: engineWgslPreamble + terrain_u64.wgsl + common.
 
 struct ClassifyParams {
     camRadius : vec4<f32>, // xyz = camera in planet-local sim units, w = planet radius
@@ -52,7 +52,7 @@ fn corner_dir(slot : u32, c : u32) -> vec3<f32> {
 fn main(@builtin(global_invocation_id) gid : vec3<u32>,
         @builtin(num_workgroups) nwg : vec3<u32>) {
     let id = linear_id(gid, nwg.x);
-    if (id >= OCBT_CAPACITY) { return; }
+    if (id >= TERRAIN_CAPACITY) { return; }
 
     let heap = heapID[id];
     if (heap_is_zero(heap)) { return; }
@@ -63,7 +63,7 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>,
     let b = id * BD_WORDS;
     bisectorData[b + BD_PATTERN]     = NO_SPLIT;
     bisectorData[b + BD_STATE]       = ST_UNCHANGED;
-    bisectorData[b + BD_PROBLEMATIC] = OCBT_INVALID;
+    bisectorData[b + BD_PROBLEMATIC] = TERRAIN_INVALID;
     bisectorData[b + BD_FLAGS]       = FLAG_VISIBLE;
 
     let cam = cp.camRadius.xyz;
@@ -146,7 +146,7 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>,
         bisectorData[b + BD_STATE] = ST_SIMPLIFY;
         if (u64_bit(heap, 0u) == 0u) {
             let slot = atomicAdd(&classification[SIMPLIFY_COUNTER], 1u);
-            atomicStore(&classification[CLASSIFY_COUNTER_OFFSET + OCBT_CAPACITY + slot], id);
+            atomicStore(&classification[CLASSIFY_COUNTER_OFFSET + TERRAIN_CAPACITY + slot], id);
         }
     }
 }

@@ -14,7 +14,7 @@ import { ScaleManager } from '../core/scale/scale_manager';
  * Determinism: the camera pose is a pure function of the FRAME INDEX (not wall-clock), one keyframe per
  * rendered frame, so the path is identical regardless of fps. The target planet's spin is FROZEN for the
  * duration (rotation.y re-imposed each frame). The pose observer is registered FIRST (insertFirst) so
- * cull + compute + render all see the bench pose the same frame. Each run also RESETS OCBT topology
+ * cull + compute + render all see the bench pose the same frame. Each run also RESETS TERRAIN topology
  * (resetLod) up front, so the convergence transient — and thus the leaf-count trajectory — is identical
  * run-to-run (no state leak from a previous flight). Per-frame metrics come from the injected stats
  * sampler; whole-GPU power is sampled externally (nvidia-smi) by scripts/bench_flight.mjs.
@@ -32,7 +32,7 @@ export type BenchFrameSample = {
     frameMs: number;
     gpuMs: number;
     drawCalls: number;
-    cbt: { leafCount: number; ocbtTopoMs: number; ocbtEvalMs: number; ocbtCompactMs: number };
+    terrain: { leafCount: number; terrainTopoMs: number; terrainEvalMs: number; terrainCompactMs: number };
 };
 
 type BenchFrame = {
@@ -401,13 +401,13 @@ export function installBenchFlight(
                             t: Date.now(),
                             phase,
                             altKm,
-                            leaves: s.cbt.leafCount,
+                            leaves: s.terrain.leafCount,
                             draws: s.drawCalls,
                             frameMs: s.frameMs,
                             gpuMs: s.gpuMs,
-                            topoMs: s.cbt.ocbtTopoMs,
-                            evalMs: s.cbt.ocbtEvalMs,
-                            compactMs: s.cbt.ocbtCompactMs
+                            topoMs: s.terrain.terrainTopoMs,
+                            evalMs: s.terrain.terrainEvalMs,
+                            compactMs: s.terrain.terrainCompactMs
                         });
                         i++;
                         if (i >= N) {

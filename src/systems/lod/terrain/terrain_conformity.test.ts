@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CbtState, type CbtNode } from './cbt_state';
+import { TerrainState, type TerrainNode } from './terrain_state';
 
 /**
  * Conformity guarantees for the ROAM bintree: the adaptive mesh must be
@@ -29,7 +29,7 @@ function edgeKey(ax: number, ay: number, az: number, bx: number, by: number, bz:
 
 type EdgeInfo = { count: number; levels: number[] };
 
-function collectEdges(leaves: ReadonlyArray<CbtNode>): Map<string, EdgeInfo> {
+function collectEdges(leaves: ReadonlyArray<TerrainNode>): Map<string, EdgeInfo> {
     const edges = new Map<string, EdgeInfo>();
     const add = (k: string, level: number) => {
         const e = edges.get(k);
@@ -50,7 +50,7 @@ function collectEdges(leaves: ReadonlyArray<CbtNode>): Map<string, EdgeInfo> {
 }
 
 /** Refine the single leaf whose centroid is nearest `target`, N times. */
-function refineNear(state: CbtState, target: [number, number, number], iterations: number): void {
+function refineNear(state: TerrainState, target: [number, number, number], iterations: number): void {
     for (let i = 0; i < iterations; i++) {
         const leaves = state.getLeafNodes();
         let best = leaves[0];
@@ -72,9 +72,9 @@ function refineNear(state: CbtState, target: [number, number, number], iteration
     }
 }
 
-describe('CBT conformity (ROAM bintree)', () => {
+describe('TERRAIN conformity (ROAM bintree)', () => {
     it('roots form a watertight octahedron (every edge shared by 2)', () => {
-        const leaves = new CbtState(RADIUS, MAX_DEPTH).getLeafNodes();
+        const leaves = new TerrainState(RADIUS, MAX_DEPTH).getLeafNodes();
         expect(leaves.length).toBe(8);
         const edges = collectEdges(leaves);
         for (const [, info] of edges) {
@@ -83,7 +83,7 @@ describe('CBT conformity (ROAM bintree)', () => {
     });
 
     it('stays watertight under deep adaptive refinement', () => {
-        const state = new CbtState(RADIUS, MAX_DEPTH);
+        const state = new TerrainState(RADIUS, MAX_DEPTH);
         refineNear(state, [RADIUS, 0, 0], 200);
         const leaves = state.getLeafNodes();
         expect(leaves.length).toBeGreaterThan(20);
@@ -100,7 +100,7 @@ describe('CBT conformity (ROAM bintree)', () => {
     });
 
     it('stays restricted: edge-adjacent leaves differ by at most one level', () => {
-        const state = new CbtState(RADIUS, MAX_DEPTH);
+        const state = new TerrainState(RADIUS, MAX_DEPTH);
         refineNear(state, [RADIUS, 0, 0], 200);
         const edges = collectEdges(state.getLeafNodes());
         for (const [, info] of edges) {
@@ -111,7 +111,7 @@ describe('CBT conformity (ROAM bintree)', () => {
     });
 
     it('refinement at multiple separate spots stays watertight', () => {
-        const state = new CbtState(RADIUS, MAX_DEPTH);
+        const state = new TerrainState(RADIUS, MAX_DEPTH);
         refineNear(state, [RADIUS, 0, 0], 80);
         refineNear(state, [0, RADIUS, 0], 80);
         refineNear(state, [0, 0, RADIUS], 80);

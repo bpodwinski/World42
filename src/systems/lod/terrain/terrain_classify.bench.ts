@@ -3,11 +3,11 @@ import {
     classifyLeaves,
     classifySplitCandidates,
     measureLeafProjectedAreas,
-} from './cbt_classify';
-import { makeClassifyParams, makeLeafSet } from './__fixtures__/cbt_fixtures';
+} from './terrain_classify';
+import { makeClassifyParams, makeLeafSet } from './__fixtures__/terrain_fixtures';
 
 /**
- * Classify is the per-frame hot path. Today `CbtPlanet.update` runs BOTH
+ * Classify is the per-frame hot path. Today `TerrainPlanet.update` runs BOTH
  * `measureLeafProjectedAreas` and `classifySplitCandidates` over the same
  * leaves (two O(n) passes). These benches establish the baseline so Phase 1's
  * single-pass `classifyLeaves` can be measured against the sum of the two.
@@ -37,7 +37,7 @@ for (const size of SIZES) {
         });
 
         // True pre-Phase-1 per-frame cost: measure pass + classify pass + the
-        // scheduler's merge aggregation over the metrics (old cbt_scheduler).
+        // scheduler's merge aggregation over the metrics (old terrain_scheduler).
         bench('measure + classify + merge-agg (pre-Phase-1 update cost)', () => {
             const metrics = measureLeafProjectedAreas(measureParams);
             classifySplitCandidates(params);

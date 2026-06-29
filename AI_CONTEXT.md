@@ -12,10 +12,10 @@ TypeScript, WebGPU/WebGL2, Web Workers, and a Rust/WASM terrain generator.
 
 The project currently contains two terrain LOD families:
 - CDLOD quad-sphere terrain for the existing production path.
-- CBT/OCBT terrain experiments for GPU topology and large-scale adaptive
+- TERRAIN/TERRAIN terrain experiments for GPU topology and large-scale adaptive
   triangulation.
 
-Per planet, use one terrain algorithm at a time. Do not mix CDLOD and CBT on a
+Per planet, use one terrain algorithm at a time. Do not mix CDLOD and TERRAIN on a
 single planet unless the user explicitly asks for a transition experiment.
 
 ## Required Reading By Task
@@ -25,8 +25,8 @@ Read the relevant local context before editing these areas:
 - Coordinate conversions: `src/core/scale/scale_manager.ts`, camera helpers,
   and any local coordinate-space notes.
 - CDLOD terrain: `src/systems/lod/chunks/`, `src/systems/lod/lod_scheduler.ts`.
-- CBT/OCBT terrain: `src/systems/lod/cbt/` and the CBT skill/reference docs
-  under `.codex/skills/world42-cbt/` or `.claude/skills/world42-cbt/`.
+- TERRAIN/TERRAIN terrain: `src/systems/lod/terrain/` and the TERRAIN skill/reference docs
+  under `.codex/skills/world42-terrain/` or `.claude/skills/world42-terrain/`.
 - Worker protocol: `src/systems/lod/workers/worker_protocol.ts`,
   `src/systems/lod/workers/terrain_mesh_worker.ts`, `terrain/src/lib.rs`.
 - Terrain shaders: `src/assets/shaders/terrain/` and
@@ -39,7 +39,7 @@ Read the relevant local context before editing these areas:
 - Keep coordinate spaces explicit: WorldDouble, render-space, and planet-local.
 - Workers receive and return planet-local terrain data.
 - The main thread must not generate heavy terrain geometry.
-- Preserve CDLOD behavior when changing CBT/OCBT code, and preserve CBT/OCBT
+- Preserve CDLOD behavior when changing TERRAIN/TERRAIN code, and preserve TERRAIN/TERRAIN
   behavior when changing CDLOD code.
 - Keep TypeScript strict and avoid broad `any` usage.
 - Keep source code, comments, identifiers, commit messages, and PR descriptions

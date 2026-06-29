@@ -13,16 +13,16 @@ import process from 'node:process';
  *
  * Backend selection: `--lod <algo>` appends `?bench=<algo>` to the URL, which
  * makes the app load ONLY the dedicated Benchmark planet on that backend
- * (cdlod | cbt-cpu | cbt-gpu | cbt-ocbt) — see src/.../bench_override.ts.
+ * (cdlod | terrain-cpu | terrain-gpu | terrain-terrain) — see src/.../bench_override.ts.
  *
  * Usage:
- *   node scripts/cbt_perf_capture.mjs --lod cbt-ocbt --label cbt-ocbt
- *   node scripts/cbt_perf_capture.mjs --lod cdlod --altitudes "20,8,3,1.08"
+ *   node scripts/terrain_perf_capture.mjs --lod terrain-terrain --label terrain-terrain
+ *   node scripts/terrain_perf_capture.mjs --lod cdlod --altitudes "20,8,3,1.08"
  *
  * Requires the `playwright` package (not a default dep). If missing, prints the
  * one-time install command and exits 2.
  *
- * Compare runs with: node scripts/cbt_perf_matrix.mjs   (runs all 4 backends)
+ * Compare runs with: node scripts/terrain_perf_matrix.mjs   (runs all 4 backends)
  */
 
 const argv = process.argv.slice(2);
@@ -33,7 +33,7 @@ function arg(name, fallback) {
 
 const lod = arg('lod', ''); // '' = whatever data.json says (no bench override)
 const label = arg('label', lod || 'capture');
-const planetKey = process.env.CBT_PLANET || arg('planet', '');
+const planetKey = process.env.TERRAIN_PLANET || arg('planet', '');
 const defaultPort = process.env.PORT && process.env.PORT !== '0' ? process.env.PORT : '19000';
 let url = process.env.PW_URL || `http://localhost:${defaultPort}/`;
 const autoServe = process.env.PW_AUTO_SERVE !== '0';
@@ -51,7 +51,7 @@ const WAYPOINTS = arg('altitudes', '')
 
 // CPU/worker backends build geometry asynchronously, so they need more time to
 // converge before a clean sample than the GPU paths.
-const isAsyncBackend = lod === 'cdlod' || lod === 'cbt-cpu';
+const isAsyncBackend = lod === 'cdlod' || lod === 'terrain-cpu';
 const SETTLE_MS = Number(arg('settle', isAsyncBackend ? '3000' : '1500'));
 const SAMPLE_MS = Number(arg('sample', '1500'));
 const WARMUP_MS = Number(arg('warmup', '4000')); // discarded: pipeline/shader compile + first churn
@@ -166,7 +166,7 @@ async function sampleWaypoint(page, planet, mult) {
                 if (s.gpuMs > 0) gpu.push(s.gpuMs);
                 draws.push(s.drawCalls);
                 indices.push(s.activeIndices);
-                if (s.cbt.leafCount > maxLeaves) maxLeaves = s.cbt.leafCount;
+                if (s.terrain.leafCount > maxLeaves) maxLeaves = s.terrain.leafCount;
                 if (now < end) requestAnimationFrame(tick);
                 else resolve();
             };
@@ -205,7 +205,7 @@ async function main() {
         page = await ctx.newPage();
         await page.setViewportSize({ width: 1920, height: 1080 });
     } else {
-        // Headless Chromium has no WebGPU, so the GPU backends (cbt-gpu/cbt-ocbt) can't run
+        // Headless Chromium has no WebGPU, so the GPU backends (terrain-gpu/terrain-terrain) can't run
         // there. PW_HEADLESS=0 launches a headed browser with WebGPU enabled (real GPU), the
         // only way to bench the GPU paths. Default stays headless for CPU-only / CI runs.
         const headless = process.env.PW_HEADLESS !== '0';

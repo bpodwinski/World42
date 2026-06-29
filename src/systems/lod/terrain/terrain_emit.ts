@@ -1,4 +1,4 @@
-import type { CbtNode } from './cbt_state';
+import type { TerrainNode } from './terrain_state';
 
 type ChunkMeshDataTyped = {
     positions: Float32Array;
@@ -7,7 +7,7 @@ type ChunkMeshDataTyped = {
     uvs: Float32Array;
     indices: Uint16Array | Uint32Array;
 };
-import { fbmNoise, type NoiseParams, DEFAULT_NOISE } from './cbt_noise';
+import { fbmNoise, type NoiseParams, DEFAULT_NOISE } from './terrain_noise';
 
 /** Finite-difference step for surface gradient normals (in unit-sphere space). */
 const GRAD_EPS = 5e-3;
@@ -196,14 +196,14 @@ function writeTriangleIndices(
 }
 
 /**
- * Emit a single mesh from all CBT leaf triangles.
+ * Emit a single mesh from all TERRAIN leaf triangles.
  *
- * True CBT: each leaf = 1 triangle (3 vertices).
+ * True TERRAIN: each leaf = 1 triangle (3 vertices).
  * Noise displacement + surface gradient normals applied per vertex.
- * No internal subdivision — the CBT depth IS the mesh resolution.
+ * No internal subdivision — the TERRAIN depth IS the mesh resolution.
  */
 export function emitMeshFromLeaves(
-    leaves: ReadonlyArray<CbtNode>,
+    leaves: ReadonlyArray<TerrainNode>,
     radius: number,
     options: EmitOptions = {}
 ): EmitResult {
@@ -249,9 +249,9 @@ export function emitMeshFromLeaves(
  * keyed by its stable slot id, so on a topology change only the slots whose
  * geometry actually changed (the handful created by a split) recompute noise —
  * the dominant rebuild cost. Output is byte-identical to {@link emitMeshFromLeaves}
- * (verified by cbt_emit_incremental.test.ts).
+ * (verified by terrain_emit_incremental.test.ts).
  */
-export class CbtEmitCache {
+export class TerrainEmitCache {
     private cap = 0;
     private pos = new Float32Array(0); // cap*9
     private nrm = new Float32Array(0); // cap*9
@@ -281,7 +281,7 @@ export class CbtEmitCache {
         this.cap = nc;
     }
 
-    private syncLeaf(leaf: CbtNode, radius: number, noise: NoiseParams | null): void {
+    private syncLeaf(leaf: TerrainNode, radius: number, noise: NoiseParams | null): void {
         const slot = leaf.id;
         const g = slot * 9;
         const { v0, v1, v2 } = leaf;
@@ -307,7 +307,7 @@ export class CbtEmitCache {
         this.recomputed++;
     }
 
-    emit(leaves: ReadonlyArray<CbtNode>, radius: number, options: EmitOptions = {}): EmitResult {
+    emit(leaves: ReadonlyArray<TerrainNode>, radius: number, options: EmitOptions = {}): EmitResult {
         const noise = options.noise === undefined ? DEFAULT_NOISE : options.noise;
 
         let maxSlot = 0;

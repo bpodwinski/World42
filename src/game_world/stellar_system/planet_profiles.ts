@@ -4,8 +4,8 @@
  * plus a seed: millions of procedural worlds share a handful of profiles instead of duplicating
  * parameters. A profile bundles the three terrain-shaping systems:
  *
- *   - noise    (FBM relief)        -> cbt_noise.ts NoiseParams        (GPU bake + CPU collision)
- *   - craters  (impact geometry)   -> cbt_noise.ts CraterParams       (GPU bake + CPU collision)
+ *   - noise    (FBM relief)        -> terrain_noise.ts NoiseParams        (GPU bake + CPU collision)
+ *   - craters  (impact geometry)   -> terrain_noise.ts CraterParams       (GPU bake + CPU collision)
  *   - lighting (BRDF / albedo / …) -> planet_lighting.ts (resolved over planet_lighting.json)
  *
  * This is the SOURCE the in-game options menu edits (see terrain_param_schema.ts). Comments here
@@ -17,8 +17,8 @@ import {
     DEFAULT_NOISE,
     type CraterParams,
     type NoiseParams
-} from '../../systems/lod/cbt/cbt_noise';
-import { DEFAULT_LOD, type OcbtLodParams } from '../../systems/lod/cbt/cbt_lod';
+} from '../../systems/lod/terrain/terrain_noise';
+import { DEFAULT_LOD, type TerrainLodParams } from '../../systems/lod/terrain/terrain_lod';
 import {
     resolveLighting,
     type PlanetLightingJSON,
@@ -36,16 +36,16 @@ export type TerrainProfile = {
     craters: CraterParams;
     /** Optional lighting override; omitted fields fall back to planet_lighting.json `_defaults`. */
     lighting?: PlanetLightingParams;
-    /** Optional OCBT LOD/pool overrides; omitted fields fall back to DEFAULT_LOD. */
-    lod?: Partial<OcbtLodParams>;
+    /** Optional TERRAIN LOD/pool overrides; omitted fields fall back to DEFAULT_LOD. */
+    lod?: Partial<TerrainLodParams>;
 };
 
-/** A fully resolved profile, ready to hand to a CbtPlanet (noise + craters + lighting + lod). */
+/** A fully resolved profile, ready to hand to a TerrainPlanet (noise + craters + lighting + lod). */
 export type ResolvedProfile = {
     noise: NoiseParams;
     craters: CraterParams;
     lighting: ResolvedLighting;
-    lod: OcbtLodParams;
+    lod: TerrainLodParams;
 };
 
 /** Default profile when a body names none / an unknown id. Reproduces the current Moon look. */
@@ -196,7 +196,7 @@ function mergeLightingParams(
 }
 
 /**
- * Resolve a profile id into concrete terrain params for a CbtPlanet.
+ * Resolve a profile id into concrete terrain params for a TerrainPlanet.
  * @param json planet_lighting.json (provides the lighting `_defaults`).
  * @param profileId profile to resolve (falls back to {@link DEFAULT_PROFILE_ID}).
  * @param opts.seed overrides the noise seed (per-planet uniqueness for procedural worlds).
@@ -214,7 +214,7 @@ export function resolveProfile(
     const noise: NoiseParams = { ...p.noise };
     if (opts?.seed !== undefined) noise.seed = opts.seed;
     const lighting = resolveLighting(json, mergeLightingParams(p.lighting, opts?.lightingOverride));
-    const lod: OcbtLodParams = {
+    const lod: TerrainLodParams = {
         splitPx: p.lod?.splitPx ?? DEFAULT_LOD.splitPx,
         mergePx: p.lod?.mergePx ?? DEFAULT_LOD.mergePx,
         capacityPow: p.lod?.capacityPow ?? DEFAULT_LOD.capacityPow,

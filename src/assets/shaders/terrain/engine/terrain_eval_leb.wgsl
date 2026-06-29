@@ -1,33 +1,33 @@
-// OCBT vertex decode (WGSL) — REFERENCE leb convention over the consistently-wound
-// octahedron. Bit-for-bit twin of src/systems/lod/cbt/ocbt/ocbt_eval_leb.ts (itself
+// TERRAIN vertex decode (WGSL) — REFERENCE leb convention over the consistently-wound
+// octahedron. Bit-for-bit twin of src/systems/lod/terrain/gpu/terrain_eval_leb.ts (itself
 // the proven Phase 1c cross-check decoder). Given a u64 heap id, returns the leaf
 // triangle's three corners as unit directions on the sphere; the caller scales by
 // radius and adds the radial noise displacement.
 //
-// This is NOT the legacy cbt_leb.wgsl convention — the OCBT engine stores heap ids in
+// This is NOT the legacy terrain_leb.wgsl convention — the TERRAIN engine stores heap ids in
 // the reference convention over GPU_FACE_CORNERS (seed reoriented for a consistently
 // oriented octahedron), so the render path MUST decode with this file.
 //
-// Requires ocbt_u64.wgsl (u64_depth / u64_shr / u64_bit) composed BEFORE it.
+// Requires terrain_u64.wgsl (u64_depth / u64_shr / u64_bit) composed BEFORE it.
 
-struct OcbtTri {
+struct TerrainTri {
     c0 : vec3<f32>,
     c1 : vec3<f32>,
     c2 : vec3<f32>,
 };
 
 // Consistently-wound octahedron face corners (apex, left, right). Mirror of
-// GPU_FACE_CORNERS in ocbt_eval_leb.ts. Returns OcbtTri(a, l, r).
-fn ocbt_face_corners(face : u32) -> OcbtTri {
+// GPU_FACE_CORNERS in terrain_eval_leb.ts. Returns TerrainTri(a, l, r).
+fn terrain_face_corners(face : u32) -> TerrainTri {
     switch (face) {
-        case 0u: { return OcbtTri(vec3<f32>(0.0, 1.0, 0.0), vec3<f32>(0.0, 0.0, 1.0), vec3<f32>(1.0, 0.0, 0.0)); }
-        case 1u: { return OcbtTri(vec3<f32>(0.0, 1.0, 0.0), vec3<f32>(-1.0, 0.0, 0.0), vec3<f32>(0.0, 0.0, 1.0)); }
-        case 2u: { return OcbtTri(vec3<f32>(0.0, 1.0, 0.0), vec3<f32>(0.0, 0.0, -1.0), vec3<f32>(-1.0, 0.0, 0.0)); }
-        case 3u: { return OcbtTri(vec3<f32>(0.0, 1.0, 0.0), vec3<f32>(1.0, 0.0, 0.0), vec3<f32>(0.0, 0.0, -1.0)); }
-        case 4u: { return OcbtTri(vec3<f32>(0.0, -1.0, 0.0), vec3<f32>(1.0, 0.0, 0.0), vec3<f32>(0.0, 0.0, 1.0)); }
-        case 5u: { return OcbtTri(vec3<f32>(0.0, -1.0, 0.0), vec3<f32>(0.0, 0.0, 1.0), vec3<f32>(-1.0, 0.0, 0.0)); }
-        case 6u: { return OcbtTri(vec3<f32>(0.0, -1.0, 0.0), vec3<f32>(-1.0, 0.0, 0.0), vec3<f32>(0.0, 0.0, -1.0)); }
-        default: { return OcbtTri(vec3<f32>(0.0, -1.0, 0.0), vec3<f32>(0.0, 0.0, -1.0), vec3<f32>(1.0, 0.0, 0.0)); }
+        case 0u: { return TerrainTri(vec3<f32>(0.0, 1.0, 0.0), vec3<f32>(0.0, 0.0, 1.0), vec3<f32>(1.0, 0.0, 0.0)); }
+        case 1u: { return TerrainTri(vec3<f32>(0.0, 1.0, 0.0), vec3<f32>(-1.0, 0.0, 0.0), vec3<f32>(0.0, 0.0, 1.0)); }
+        case 2u: { return TerrainTri(vec3<f32>(0.0, 1.0, 0.0), vec3<f32>(0.0, 0.0, -1.0), vec3<f32>(-1.0, 0.0, 0.0)); }
+        case 3u: { return TerrainTri(vec3<f32>(0.0, 1.0, 0.0), vec3<f32>(1.0, 0.0, 0.0), vec3<f32>(0.0, 0.0, -1.0)); }
+        case 4u: { return TerrainTri(vec3<f32>(0.0, -1.0, 0.0), vec3<f32>(1.0, 0.0, 0.0), vec3<f32>(0.0, 0.0, 1.0)); }
+        case 5u: { return TerrainTri(vec3<f32>(0.0, -1.0, 0.0), vec3<f32>(0.0, 0.0, 1.0), vec3<f32>(-1.0, 0.0, 0.0)); }
+        case 6u: { return TerrainTri(vec3<f32>(0.0, -1.0, 0.0), vec3<f32>(-1.0, 0.0, 0.0), vec3<f32>(0.0, 0.0, -1.0)); }
+        default: { return TerrainTri(vec3<f32>(0.0, -1.0, 0.0), vec3<f32>(0.0, 0.0, -1.0), vec3<f32>(1.0, 0.0, 0.0)); }
     }
 }
 
@@ -38,11 +38,11 @@ fn ocbt_face_corners(face : u32) -> OcbtTri {
 // closed-form barycentric matrix W applied to the seed); the 3 corners are projected
 // to the sphere ONCE at return. Bit-identical to the old slerp through depth 4,
 // micro-divergent beyond. MSB-first path bits.
-fn ocbt_leb_decode(heap : vec2<u32>) -> OcbtTri {
+fn terrain_leb_decode(heap : vec2<u32>) -> TerrainTri {
     let depth = u64_depth(heap);
     let steps = depth - 3u;
     let face = u64_shr(heap, steps).x - 8u;
-    let fc = ocbt_face_corners(face);
+    let fc = terrain_face_corners(face);
     var v0 = fc.c2; // right
     var v1 = fc.c0; // apex
     var v2 = fc.c1; // left
@@ -62,5 +62,5 @@ fn ocbt_leb_decode(heap : vec2<u32>) -> OcbtTri {
             v2 = nv2;
         }
     }
-    return OcbtTri(normalize(v0), normalize(v1), normalize(v2));
+    return TerrainTri(normalize(v0), normalize(v1), normalize(v2));
 }

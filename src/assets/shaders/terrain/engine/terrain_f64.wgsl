@@ -1,11 +1,11 @@
-// Double-single ("df64") floating point for the OCBT path. WGSL has no f64, but at
+// Double-single ("df64") floating point for the TERRAIN path. WGSL has no f64, but at
 // terrain depth ~60 a position decoded from an LEB matrix needs ~60 fractional bits
 // while f32 has 24. A df64 value is carried as vec2<f32> = (hi, lo) with
 // value == hi + lo and |lo| <= 0.5 ulp(hi), giving ~48 bits of mantissa — enough to
 // decode a patch relative to the camera (floating-origin) at depth ~60, then narrow
 // to f32 for the vertex buffer.
 //
-// Mirrors src/systems/lod/cbt/ocbt/ocbt_f64.ts EXACTLY. This is the standard
+// Mirrors src/systems/lod/terrain/gpu/terrain_f64.ts EXACTLY. This is the standard
 // error-free-transform algebra (Dekker / Thall), the f64-less analogue of the
 // reference double_math.hlsl. f32 here HAS a fused multiply-add (WGSL fma), which is
 // what makes twoProd exact.

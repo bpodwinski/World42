@@ -1,20 +1,20 @@
 import { describe, it, expect } from 'vitest';
-import { OcbtPool } from './ocbt_cpu_mirror';
-import { assertPowerOfTwo, bitfieldWordCount, log2PowerOfTwo } from './ocbt_pool';
+import { TerrainPool } from './terrain_cpu_mirror';
+import { assertPowerOfTwo, bitfieldWordCount, log2PowerOfTwo } from './terrain_pool';
 
 /** Brute-force oracle: allocated slots in ascending order, straight from the bitfield. */
-function allocatedBrute(pool: OcbtPool): number[] {
+function allocatedBrute(pool: TerrainPool): number[] {
     const out: number[] = [];
     for (let s = 0; s < pool.capacity; s++) if (pool.getBit(s)) out.push(s);
     return out;
 }
-function freeBrute(pool: OcbtPool): number[] {
+function freeBrute(pool: TerrainPool): number[] {
     const out: number[] = [];
     for (let s = 0; s < pool.capacity; s++) if (!pool.getBit(s)) out.push(s);
     return out;
 }
 
-describe('ocbt_pool layout helpers', () => {
+describe('terrain_pool layout helpers', () => {
     it('validates power-of-two capacity', () => {
         expect(() => assertPowerOfTwo(8)).not.toThrow();
         expect(() => assertPowerOfTwo(1 << 18)).not.toThrow();
@@ -31,9 +31,9 @@ describe('ocbt_pool layout helpers', () => {
     });
 });
 
-describe('OcbtPool — golden (capacity 8)', () => {
+describe('TerrainPool — golden (capacity 8)', () => {
     it('decodes the i-th allocated / free slot after a hand-set bitfield', () => {
-        const p = new OcbtPool(8);
+        const p = new TerrainPool(8);
         // Allocate slots {1, 2, 5} by hand, then reduce from the bitfield.
         for (const s of [1, 2, 5]) p.setBit(s, true);
         expect(p.count()).toBe(3);
@@ -45,9 +45,9 @@ describe('OcbtPool — golden (capacity 8)', () => {
     });
 
     it('reduce() rebuilds the tree from a bulk-loaded bitfield identically', () => {
-        const a = new OcbtPool(8);
+        const a = new TerrainPool(8);
         for (const s of [0, 3, 7]) a.setBit(s, true); // incremental path updates
-        const b = new OcbtPool(8);
+        const b = new TerrainPool(8);
         for (const s of [0, 3, 7]) (b as unknown as { bits: Uint32Array }).bits[s >>> 5] |= 1 << (s & 31);
         b.reduce(); // bulk rebuild
         expect(b.count()).toBe(a.count());
@@ -58,9 +58,9 @@ describe('OcbtPool — golden (capacity 8)', () => {
     });
 });
 
-describe('OcbtPool — allocate / free', () => {
+describe('TerrainPool — allocate / free', () => {
     it('allocates lowest free slots first and fills to capacity', () => {
-        const p = new OcbtPool(16);
+        const p = new TerrainPool(16);
         expect(p.allocate(3)).toEqual([0, 1, 2]);
         expect(p.allocate(2)).toEqual([3, 4]);
         expect(p.count()).toBe(5);
@@ -73,7 +73,7 @@ describe('OcbtPool — allocate / free', () => {
     });
 
     it('fills the whole pool and throws on overflow', () => {
-        const p = new OcbtPool(8);
+        const p = new TerrainPool(8);
         const all = p.allocate(8);
         expect(all).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
         expect(p.count()).toBe(8);
@@ -82,10 +82,10 @@ describe('OcbtPool — allocate / free', () => {
     });
 });
 
-describe('OcbtPool — fuzz vs brute force', () => {
+describe('TerrainPool — fuzz vs brute force', () => {
     it('decode/count match brute force across random alloc/free (capacity 1024)', () => {
         const cap = 1024;
-        const p = new OcbtPool(cap);
+        const p = new TerrainPool(cap);
         // Seeded LCG for reproducibility (no Math.random).
         let s = 0x1234_5678 >>> 0;
         const rnd = () => ((s = (s * 1664525 + 1013904223) >>> 0), s / 2 ** 32);

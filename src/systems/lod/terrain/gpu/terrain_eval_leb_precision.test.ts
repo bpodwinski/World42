@@ -14,7 +14,7 @@ import {
     df64Mul,
     df64InvSqrt,
     type DF64
-} from './ocbt_f64';
+} from './terrain_f64';
 
 type V = [DF64, DF64, DF64];
 const RKM = 6371;
@@ -33,7 +33,7 @@ const vNorm = (a: V): V => {
 };
 
 // Planar decode of face 0 (seed v0=r,v1=a,v2=l), MSB->LSB path bits, single final
-// normalize — the df64 twin of ocbt_topo_eval_leb_f64.compute.wgsl, returning corner v0.
+// normalize — the df64 twin of terrain_topo_eval_leb_f64.compute.wgsl, returning corner v0.
 function decodeDf(pathBits: number[]): [number, number, number] {
     let v0 = vFrom(1, 0, 0);
     let v1 = vFrom(0, 1, 0);
@@ -90,7 +90,7 @@ const mkPath = (steps: number): number[] => {
     return p;
 };
 
-describe('ocbt df64 planar decode — precision stays far below leaf edge through depth 60', () => {
+describe('terrain df64 planar decode — precision stays far below leaf edge through depth 60', () => {
     it('df64 decode error is < 1e-3 of the leaf edge at every depth (cm-capable, slerp-free)', () => {
         for (const depth of [20, 30, 40, 45, 50, 55, 60]) {
             const path = mkPath(depth - 3);

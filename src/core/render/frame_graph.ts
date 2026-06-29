@@ -20,7 +20,7 @@ import {
     type Scene,
 } from '@babylonjs/core';
 import { ThinCustomPostProcess } from '@babylonjs/core/PostProcesses/thinCustomPostProcess';
-import { FrameGraphOcbtComputeTask } from './ocbt_compute_task';
+import { FrameGraphTerrainComputeTask } from './terrain_compute_task';
 import { FrameGraphGUITask } from '@babylonjs/gui';
 import type { AdvancedDynamicTexture } from '@babylonjs/gui';
 import type { OriginCamera } from '../camera/camera_manager';
@@ -148,7 +148,7 @@ export type FrameGraphOptions = {
     atmospheres: AtmosphereSource[];
     /** Fullscreen GUI texture (must be created with useStandalone: true) for the HUD overlay. */
     gui: AdvancedDynamicTexture;
-    /** Drives the OCBT terrain compute as a graph task (runs before the scene-render task). */
+    /** Drives the TERRAIN terrain compute as a graph task (runs before the scene-render task). */
     runCompute: () => void;
     /** Called once the graph is built and installed, so the caller can hand compute ownership to it. */
     onGraphReady?: () => void;
@@ -164,7 +164,7 @@ export type FrameGraphOptions = {
  * Builds the World42 render pipeline as a Babylon Frame Graph and installs it on the scene.
  *
  * Replaces the imperative camera post-process stack (DefaultRenderingPipeline + TAA pipeline +
- * star post-process). The graph governs ONLY the render passes; the OCBT compute, floating-origin
+ * star post-process). The graph governs ONLY the render passes; the TERRAIN compute, floating-origin
  * integration and LOD tick keep running in their scene observables (see {@link setupRuntime}).
  *
  * Pass order (HDR until tonemap): Clear → ObjectRenderer (terrain+skybox) → Star (HDR) → TAA →
@@ -226,14 +226,14 @@ export function attachFrameGraph(
     clear.depthTexture = sceneDepth;
     fg.addTask(clear);
 
-    // 1b. OCBT terrain compute (topology + EvaluateLEB + draw compaction). MUST be added before the
+    // 1b. TERRAIN terrain compute (topology + EvaluateLEB + draw compaction). MUST be added before the
     // scene-render task: it writes the storage buffers that task's vertex shader reads, and the graph
     // orders tasks only by texture dependencies (it cannot see the storage-buffer handoff), so task
     // order is the contract. Both record into the same WebGPU command encoder → dispatch before draw.
-    const ocbtCompute = new FrameGraphOcbtComputeTask('ocbtCompute', fg, options.runCompute);
-    fg.addTask(ocbtCompute);
+    const terrainCompute = new FrameGraphTerrainComputeTask('terrainCompute', fg, options.runCompute);
+    fg.addTask(terrainCompute);
 
-    // 2. Render the scene meshes (OCBT terrain + skybox) into HDR color + depth.
+    // 2. Render the scene meshes (TERRAIN terrain + skybox) into HDR color + depth.
     const objRenderer = new FrameGraphObjectRendererTask('sceneRender', fg, scene, {});
     objRenderer.camera = camera;
     objRenderer.targetTexture = clear.outputTexture;
@@ -265,7 +265,7 @@ export function attachFrameGraph(
     }
 
     // 4. TAA — ALWAYS ON (also while the camera moves). No reprojection (PrePass/velocity is
-    // incompatible with the OCBT GPU mesh + log depth), so the 3x3 neighborhood clamp (clampHistory)
+    // incompatible with the TERRAIN GPU mesh + log depth), so the 3x3 neighborhood clamp (clampHistory)
     // is what suppresses ghosting/smear during motion. MSAA above handles geometric edges so TAA can
     // stay light. If motion ghosting is too strong, re-enable disableOnCameraMove or lower samples.
     const taa = new FrameGraphTAATask('taa', fg);
@@ -345,7 +345,7 @@ export function attachFrameGraph(
     // falls back to the normal (post-less) render — a brief transient at startup.
     void fg.buildAsync().then(() => {
         scene.frameGraph = fg;
-        // Graph (and its OCBT compute task) is now live — hand the heavy compute loop to the task so it
+        // Graph (and its TERRAIN compute task) is now live — hand the heavy compute loop to the task so it
         // stops running in the startup observer (no double-tick). Runs in a microtask before the next
         // scene.render(), so there is no frame where both drive the compute.
         options.onGraphReady?.();

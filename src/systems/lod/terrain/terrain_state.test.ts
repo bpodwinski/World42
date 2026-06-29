@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { CbtState } from './cbt_state';
+import { TerrainState } from './terrain_state';
 
-describe('CbtState', () => {
+describe('TerrainState', () => {
     it('starts with 8 root triangles and grows leaves with conformal (diamond) splits', () => {
-        const state = new CbtState(100, 4);
+        const state = new TerrainState(100, 4);
         expect(state.leafCount).toBe(8);
 
         // Roots are paired into 4 base-edge diamonds; each conformal split refines
@@ -16,7 +16,7 @@ describe('CbtState', () => {
     });
 
     it('does not split when maxDepth is reached', () => {
-        const state = new CbtState(100, 0);
+        const state = new TerrainState(100, 0);
         const leafIds = state.getLeafNodes().map((leaf) => leaf.id);
         const splitCount = state.splitByPriority(leafIds, 8);
 
@@ -25,7 +25,7 @@ describe('CbtState', () => {
     });
 
     it('merges a diamond back to its coarse pair', () => {
-        const state = new CbtState(100, 4);
+        const state = new TerrainState(100, 4);
         const firstLeaf = state.getLeafNodes()[0];
         const splitCount = state.splitByPriority([firstLeaf.id], 1);
         expect(splitCount).toBe(1);
@@ -45,7 +45,7 @@ describe('CbtState', () => {
         // pool starts at 4096 slots and doubles on demand; a stale array reference cached
         // before allocSlot() would send writes to the orphaned old array, leaving slots
         // past the grow boundary with 0/NaN verts. Refine deeply enough to force a grow.
-        const state = new CbtState(100, 15);
+        const state = new TerrainState(100, 15);
         // Uniform refinement: split every current leaf each pass (~doubles the leaf
         // count), so after ~10 passes we have >4096 slots and have crossed >=1 grow.
         for (let pass = 0; pass < 10; pass++) {

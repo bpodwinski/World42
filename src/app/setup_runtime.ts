@@ -114,11 +114,11 @@ export function setupRuntime({
         (performance as unknown as { memory?: PerfMemory }).memory;
 
     const sampleStats = () => {
-        const cbt = lod.getCbtStats();
+        const terrain = lod.getTerrainStats();
         const frameMs = sceneInstr.frameTimeCounter.lastSecAverage;
         // engine.gpuTimeInFrameForMainPass is a WebGPUPerfCounter (ns) armed by
         // enableGPUTimingMeasurements in EngineManager. Main (canvas) pass only —
-        // terrain draw + post, NOT the OCBT compute passes.
+        // terrain draw + post, NOT the TERRAIN compute passes.
         const wgpuMain = (
             engine as unknown as {
                 gpuTimeInFrameForMainPass?: { counter: { lastSecAverage: number } };
@@ -140,7 +140,7 @@ export function setupRuntime({
             // or the last sample is stale (> 3 s old). util %, VRAM MiB, clock MHz, power W.
             osGpu:
                 osGpu && performance.now() - osGpu.recvMs < 3000 ? osGpu.data : null,
-            cbt,
+            terrain,
         };
     };
 
@@ -153,12 +153,12 @@ export function setupRuntime({
                 ? `GPU ${f(s.osGpu.util, 0)}%  vram ${(s.osGpu.vramUsed / 1024).toFixed(1)}/${(s.osGpu.vramTotal / 1024).toFixed(0)}G  ${f(s.osGpu.clock, 0)}MHz ${f(s.osGpu.power, 0)}W`
                 : `GPU% n/a (run scripts/gpu_hud_bridge.ps1)`,
             `ram ${s.jsHeapMB < 0 ? 'n/a' : f(s.jsHeapMB, 0) + 'MB'}  idx ${(s.activeIndices / 1000).toFixed(0)}k`,
-            `cbt leaves ${s.cbt.leafCount}  verts ${s.cbt.vertexCount}`,
-            `split/f ${s.cbt.splitsThisFrame}  merge/f ${s.cbt.mergesThisFrame}`,
-            `classify ${f(s.cbt.classifyMs, 2)}ms  rebuild ${f(s.cbt.rebuildMs, 2)}ms`,
-            // OCBT compute GPU time (the graph's compute task), split by bucket. 0 when the re-bake
+            `terrain leaves ${s.terrain.leafCount}  verts ${s.terrain.vertexCount}`,
+            `split/f ${s.terrain.splitsThisFrame}  merge/f ${s.terrain.mergesThisFrame}`,
+            `classify ${f(s.terrain.classifyMs, 2)}ms  rebuild ${f(s.terrain.rebuildMs, 2)}ms`,
+            // TERRAIN compute GPU time (the graph's compute task), split by bucket. 0 when the re-bake
             // gate is disengaged (still camera) or the timestamp-query feature is unavailable.
-            `ocbt topo ${f(s.cbt.ocbtTopoMs, 2)} eval ${f(s.cbt.ocbtEvalMs, 2)} compact ${f(s.cbt.ocbtCompactMs, 2)}ms`,
+            `terrain topo ${f(s.terrain.terrainTopoMs, 2)} eval ${f(s.terrain.terrainEvalMs, 2)} compact ${f(s.terrain.terrainCompactMs, 2)}ms`,
         ].join('\n');
     };
 
@@ -168,36 +168,36 @@ export function setupRuntime({
         setCaptureEnabled(visible);
     });
 
-    // Dev-only hook for deterministic headless capture (scripts/cbt_perf_capture.mjs).
+    // Dev-only hook for deterministic headless capture (scripts/terrain_perf_capture.mjs).
     const tmpRenderTarget = new Vector3();
     const perfHook = {
         enableCapture: (on: boolean) => setCaptureEnabled(on),
-        // Debug fragment perf-profiling mask read by OcbtSource each frame: bit0 skip slope normal,
+        // Debug fragment perf-profiling mask read by TerrainSource each frame: bit0 skip slope normal,
         // bit1 skip df64 ground detail, bit2 skip crater rays. Toggle blocks, watch gpuMs.
         setPerfMask: (mask: number) => {
-            (globalThis as unknown as { __ocbtPerfMask?: number }).__ocbtPerfMask = mask | 0;
+            (globalThis as unknown as { __terrainPerfMask?: number }).__terrainPerfMask = mask | 0;
         },
-        /** Dev-only: pin OCBT topology (freeze the leaf set) so a fragment perf-mask sweep runs at a
+        /** Dev-only: pin TERRAIN topology (freeze the leaf set) so a fragment perf-mask sweep runs at a
          *  CONSTANT leaf count — the clean way to attribute per-block fragment cost. Converge the view
          *  FIRST, then freeze. Leaf-count variance confounded the old in-flight perfMask sweep. */
         setFreezeTopology: (on: boolean) => {
-            (globalThis as unknown as { __ocbtFreezeTopology?: boolean }).__ocbtFreezeTopology =
+            (globalThis as unknown as { __terrainFreezeTopology?: boolean }).__terrainFreezeTopology =
                 !!on;
         },
         /** Dev-only A/B: toggle the OPT-4 adaptive re-bake throttle (default on). Off = fixed base
          *  interval (the pre-OPT-4 behavior) so before/after compute cost can be measured directly. */
         setAdaptiveRebake: (on: boolean) => {
-            (globalThis as unknown as { __ocbtAdaptiveRebake?: boolean }).__ocbtAdaptiveRebake =
+            (globalThis as unknown as { __terrainAdaptiveRebake?: boolean }).__terrainAdaptiveRebake =
                 !!on;
         },
         getStats: () => sampleStats(),
-        getPlanets: () => lod.getCbtPlanetInfo(),
+        getPlanets: () => lod.getTerrainPlanetInfo(),
         setCameraDoublePos: (x: number, y: number, z: number) => {
             camera.doublepos.set(x, y, z);
             lod.resetNow();
         },
         /** Dev-only: drift the camera WITHOUT a LOD reset (mimics steady keyboard piloting, so the
-         *  OCBT drift gate / re-bake throttle engages — unlike setCameraDoublePos which teleports). */
+         *  TERRAIN drift gate / re-bake throttle engages — unlike setCameraDoublePos which teleports). */
         nudgeCameraDoublePos: (dx: number, dy: number, dz: number) => {
             camera.doublepos.set(
                 camera.doublepos.x + dx,
@@ -295,7 +295,7 @@ export function setupRuntime({
             );
         });
 
-    // Analytic hard-floor ground collision: keep the camera above the CBT/OCBT
+    // Analytic hard-floor ground collision: keep the camera above the TERRAIN/TERRAIN
     // surface (the GPU terrain has no CPU mesh, so Babylon collision can't see it).
     // Runs after the steering controller's per-frame move (registered earlier).
     const GROUND_CLEARANCE_SIM = ScaleManager.toSimulationUnits(0.015); // ~15 m floor
@@ -315,7 +315,7 @@ export function setupRuntime({
     // in km and as a multiple of its radius (the unit the perf bench waypoints use).
     const tmpPlanetCenter = new Vector3();
     const formatAltitude = (): string => {
-        const infos = lod.getCbtPlanetInfo();
+        const infos = lod.getTerrainPlanetInfo();
         let bestKey = '';
         let bestDist = Infinity;
         let bestRadius = 1;
@@ -332,8 +332,8 @@ export function setupRuntime({
         // Altitude above the ACTUAL terrain, not sea level: the nearest ground info gives the
         // analytic fbm height under the camera (same field the shader renders).
         let groundRadius = bestRadius;
-        const cbtGround = lod.getCbtGroundInfo();
-        if (cbtGround && cbtGround.key === bestKey) groundRadius = cbtGround.groundRSim;
+        const terrainGround = lod.getTerrainGroundInfo();
+        if (terrainGround && terrainGround.key === bestKey) groundRadius = terrainGround.groundRSim;
         const altKm = ScaleManager.toRealUnits(bestDist - groundRadius);
         const ratio = bestDist / bestRadius;
         const name = bestKey.split(':').pop() ?? bestKey;
@@ -369,15 +369,15 @@ export function setupRuntime({
 
     // Render pipeline as a Frame Graph (replaces the imperative camera post-process stack:
     // DefaultRenderingPipeline + TAA pipeline + star post-process). The graph governs only the
-    // render passes; OCBT compute / LOD / floating-origin keep running in their scene observables.
+    // render passes; TERRAIN compute / LOD / floating-origin keep running in their scene observables.
     const fg = attachFrameGraph(scene, camera, {
         stars,
         occluders,
         atmospheres,
         gui: gui.advancedTexture,
-        // OCBT compute runs as a graph task (before the scene-render task). Until the graph is built
+        // TERRAIN compute runs as a graph task (before the scene-render task). Until the graph is built
         // it is driven by the scheduler's startup observer; onGraphReady hands ownership to the task.
-        runCompute: lod.runOcbtCompute,
+        runCompute: lod.runTerrainCompute,
         onGraphReady: () => lod.setComputeOwnedByGraph(true),
         // FSR1 spatial upscaling: render at 67% resolution, upscale via EASU + RCAS.
         // Remove or set to undefined to disable and restore the native-resolution pipeline.

@@ -20,7 +20,7 @@ export type PerfHUDOpts = {
 
 /**
  * PerfHUD displays a multi-line performance read-out (frame/GPU time, draw
- * calls, CBT leaf/split/merge counts, rebuild ms) in the top-right corner.
+ * calls, TERRAIN leaf/split/merge counts, rebuild ms) in the top-right corner.
  *
  * It attaches to an existing AdvancedDynamicTexture and is **hidden by default**
  * so normal runs are unaffected — toggle it with {@link setVisible}.

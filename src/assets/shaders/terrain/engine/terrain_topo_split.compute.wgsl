@@ -1,4 +1,4 @@
-// OCBT engine — Split pass (one thread per split-list entry). Faithful port of
+// TERRAIN engine — Split pass (one thread per split-list entry). Faithful port of
 // SplitElement (update_utilities.hlsl): yields if driven by a neighbor already on the
 // path, reserves the free-slot budget atomically (refunding on over-subscription),
 // raises CENTER_SPLIT on itself via atomicOr (the reservation handshake), then walks
@@ -6,7 +6,7 @@
 // RIGHT/LEFT_DOUBLE on a coarser twin until the chain terminates. Winners are appended
 // to the allocate list. This is the concurrent equivalent of the oracle's LEPP.
 //
-// Composed after: engineWgslPreamble + ocbt_u64.wgsl + common.
+// Composed after: engineWgslPreamble + terrain_u64.wgsl + common.
 // neighbors = the CURRENT (this-frame) neighbor buffer (read-only here).
 // bisectorData is atomic (atomicOr on the pattern field, atomicLoad on state).
 
@@ -32,11 +32,11 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>,
     // Yield if we are on the longest-edge path of a neighbor that drives the diamond:
     // if neighbor X's twin is us AND X is itself changing, X will subdivide us.
     let cn0 = nb_n0(currentID);
-    if (cn0 != OCBT_INVALID) {
+    if (cn0 != TERRAIN_INVALID) {
         if (nb_n2(cn0) == currentID && bd_state(cn0) != ST_UNCHANGED) { return; }
     }
     let cn1 = nb_n1(currentID);
-    if (cn1 != OCBT_INVALID) {
+    if (cn1 != TERRAIN_INVALID) {
         if (nb_n2(cn1) == currentID && bd_state(cn1) != ST_UNCHANGED) { return; }
     }
 
@@ -47,7 +47,7 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>,
     // tightened for the common terminal cases to avoid massive over-reservation.
     var maxReq : i32 = 2 * i32(currentDepth - BASE_DEPTH) - 1;
     var twinID = nb_n2(currentID);
-    if (twinID == OCBT_INVALID) {
+    if (twinID == TERRAIN_INVALID) {
         maxReq = 1;
     } else if (nb_n2(twinID) == currentID) {
         maxReq = 2;
@@ -74,7 +74,7 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>,
     var done = false;
     loop {
         if (done) { break; }
-        if (twinID == OCBT_INVALID) { break; }
+        if (twinID == TERRAIN_INVALID) { break; }
 
         let nHeap = heapID[twinID];
         let nDepth = u64_depth(nHeap);

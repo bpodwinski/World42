@@ -11,9 +11,9 @@ import {
 import { FloatingEntity, OriginCamera } from "../../core/camera/camera_manager";
 import { ScaleManager } from "../../core/scale/scale_manager";
 import { TextureManager } from "../../core/io/texture_manager";
-import { CbtPlanet } from "../../systems/lod/cbt/cbt_scheduler";
-import type { CraterParams, NoiseParams } from "../../systems/lod/cbt/cbt_noise";
-import type { OcbtLodParams } from "../../systems/lod/cbt/cbt_lod";
+import { TerrainPlanet } from "../../systems/lod/terrain/terrain_scheduler";
+import type { CraterParams, NoiseParams } from "../../systems/lod/terrain/terrain_noise";
+import type { TerrainLodParams } from "../../systems/lod/terrain/terrain_lod";
 import {
     normalizeCatalogJSON as normalizeCatalogJSONFromSource,
     normalizeSystemJSON,
@@ -111,9 +111,9 @@ export type LoadedSystem = {
     bodies: Map<string, LoadedBody>;
 };
 
-export type PlanetCBT = {
+export type PlanetTerrain = {
     entity: FloatingEntity;
-    runtime: CbtPlanet;
+    runtime: TerrainPlanet;
     /** Planet radius in simulation units. */
     radiusSim: number;
     /** Star position in WorldDouble used for terrain lighting. */
@@ -126,7 +126,7 @@ export type PlanetCBT = {
     lightingOverride?: PlanetLightingParams;
 };
 
-export type CBTOptions = {
+export type TerrainOptions = {
     /** Noise field (CPU displacement + GPU shader); default DEFAULT_NOISE. */
     noise?: NoiseParams;
     engine?: WebGPUEngine;
@@ -258,12 +258,12 @@ export async function loadStellarSystemFromCatalog(
     return { systemId, root, bodies };
 }
 
-export function createCBTForSystem(
+export function createTerrainForSystem(
     scene: Scene,
     camera: OriginCamera,
     loaded: LoadedSystem,
-    opts: CBTOptions = {}
-): Map<string, PlanetCBT> {
+    opts: TerrainOptions = {}
+): Map<string, PlanetTerrain> {
     const {
         noise,
         engine,
@@ -283,7 +283,7 @@ export function createCBTForSystem(
         }
     }
 
-    const out = new Map<string, PlanetCBT>();
+    const out = new Map<string, PlanetTerrain>();
     const stars = Array.from(loaded.bodies.values()).filter((b) => b.bodyType === "star");
 
     for (const [name, body] of loaded.bodies) {
@@ -300,7 +300,7 @@ export function createCBTForSystem(
         // block (craters fall back to DEFAULT_CRATERS), so existing catalog bodies are unchanged.
         let bodyNoise: NoiseParams | undefined = noise;
         let bodyCraters: CraterParams | undefined;
-        let bodyLod: OcbtLodParams | undefined;
+        let bodyLod: TerrainLodParams | undefined;
         let lighting: ResolvedLighting;
         if (body.profile) {
             const resolved = resolveProfile(LIGHTING_JSON, effectiveProfile(body.profile), {
@@ -313,7 +313,7 @@ export function createCBTForSystem(
         } else {
             lighting = resolveLighting(LIGHTING_JSON, body.lighting);
         }
-        const runtime = new CbtPlanet(scene, camera, {
+        const runtime = new TerrainPlanet(scene, camera, {
             key: planetKey,
             entity: ent,
             renderParent: body.node,
@@ -328,7 +328,7 @@ export function createCBTForSystem(
         });
 
         console.log(
-            `[light][cbt] ${planetKey} -> ${starName} color=${starColor.toString()} I=${starIntensity}`
+            `[light][terrain] ${planetKey} -> ${starName} color=${starColor.toString()} I=${starIntensity}`
         );
 
         out.set(name, {

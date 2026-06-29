@@ -1,5 +1,5 @@
 /**
- * Double-single ("df64") floating point — the CPU mirror of `ocbt_f64.wgsl`.
+ * Double-single ("df64") floating point — the CPU mirror of `terrain_f64.wgsl`.
  *
  * WGSL has no f64, but at terrain depth ~60 a position decoded from an LEB matrix
  * loses precision in plain f32 long before the leaf is reached (a unit sphere at
@@ -11,7 +11,7 @@
  *
  * This is NOT a line-by-line port of `double_math.hlsl` (that file assumes a real
  * f64 type); it is the standard error-free-transform df64 algebra (Dekker / Thall),
- * which is what an f64-less GPU needs. It is the golden oracle: `ocbt_f64.test.ts`
+ * which is what an f64-less GPU needs. It is the golden oracle: `terrain_f64.test.ts`
  * checks every op against the host FP64 result, and later phases cross-check the GPU
  * decode against values produced here.
  *

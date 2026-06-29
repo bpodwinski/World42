@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { OcbtTopology, type BisectorView } from './ocbt_topology';
-import { ocbtCorners } from './ocbt_eval_leb';
+import { TerrainTopology, type BisectorView } from './terrain_topology';
+import { terrainCorners } from './terrain_eval_leb';
 
 type V3 = [number, number, number];
 
@@ -48,14 +48,14 @@ function symmetryViolations(leaves: BisectorView[]): number {
 const near = (p: V3, q: readonly number[], tol = 1e-6) =>
     Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]) < tol;
 /**
- * Stored verts and the canonical decode `ocbtCorners(heapID)` must describe the same
+ * Stored verts and the canonical decode `terrainCorners(heapID)` must describe the same
  * triangle (set-matched within tolerance). The oracle now stores geometry straight from
- * ocbtCorners, so this guards that heapID<->geometry wiring stays consistent.
+ * terrainCorners, so this guards that heapID<->geometry wiring stays consistent.
  */
 function heapIdConsistencyViolations(leaves: BisectorView[]): number {
     let bad = 0;
     for (const t of leaves) {
-        const cand = ocbtCorners(t.heapID);
+        const cand = terrainCorners(t.heapID);
         for (const s of [t.a, t.l, t.r]) {
             if (!cand.some((c) => near(s, c))) bad++;
         }
@@ -71,16 +71,16 @@ const centroid = (t: BisectorView): V3 => {
     return [x * i, y * i, z * i];
 };
 
-function checkAll(topo: OcbtTopology): void {
+function checkAll(topo: TerrainTopology): void {
     const leaves = topo.leaves();
     expect(watertightViolations(leaves)).toBe(0);
     expect(symmetryViolations(leaves)).toBe(0);
     expect(heapIdConsistencyViolations(leaves)).toBe(0);
 }
 
-describe('OcbtTopology — octahedron seed', () => {
+describe('TerrainTopology — octahedron seed', () => {
     it('seeds 8 leaves with heap ids 8..15 and is watertight + symmetric', () => {
-        const topo = new OcbtTopology(20);
+        const topo = new TerrainTopology(20);
         const leaves = topo.leaves();
         expect(leaves.length).toBe(8);
         expect(topo.leafCount).toBe(8);
@@ -92,9 +92,9 @@ describe('OcbtTopology — octahedron seed', () => {
     });
 });
 
-describe('OcbtTopology — single split forces the diamond', () => {
+describe('TerrainTopology — single split forces the diamond', () => {
     it('splitting one root also splits its base diamond partner, staying watertight', () => {
-        const topo = new OcbtTopology(20);
+        const topo = new TerrainTopology(20);
         const before = topo.leafCount;
         topo.requestSplit(0); // root 0; base neighbour is root 4 (the diamond)
         // root + diamond partner each split into 2 => +2 leaves.
@@ -103,14 +103,14 @@ describe('OcbtTopology — single split forces the diamond', () => {
     });
 });
 
-describe('OcbtTopology — deep local refinement (fly-in)', () => {
+describe('TerrainTopology — deep local refinement (fly-in)', () => {
     it('repeatedly splitting toward a target stays watertight + symmetric across seams', () => {
         // maxDepth (30) is kept well above the refinement target (SOFT_TARGET) so the
         // forced-diamond chain always completes — the chain may go one level past the
         // requested leaf, and stranding it at a hard cap is a separate Phase 1c concern
         // (the reference reserves the whole chain atomically and refuses if it cannot).
         const SOFT_TARGET = 18;
-        const topo = new OcbtTopology(30);
+        const topo = new TerrainTopology(30);
         const target: V3 = (() => {
             const i = 1 / Math.hypot(0.3, 0.7, 0.5);
             return [0.3 * i, 0.7 * i, 0.5 * i];
@@ -141,12 +141,12 @@ describe('OcbtTopology — deep local refinement (fly-in)', () => {
     });
 });
 
-describe('OcbtTopology — multi-region refinement (LEPP, watertight)', () => {
+describe('TerrainTopology — multi-region refinement (LEPP, watertight)', () => {
     // Several simultaneous hot-spots meeting at coarse boundaries — the case base-only
     // forcing cracked. With the LEPP conforming split this must be fully watertight.
     it('refining toward several targets at once stays watertight + symmetric', () => {
         const SOFT_TARGET = 16;
-        const topo = new OcbtTopology(30);
+        const topo = new TerrainTopology(30);
         const targets: V3[] = [
             [0.3, 0.7, 0.5],
             [-0.6, 0.2, -0.4],
@@ -178,14 +178,14 @@ describe('OcbtTopology — multi-region refinement (LEPP, watertight)', () => {
     });
 });
 
-describe('OcbtTopology — refinement driven INTO the depth cap', () => {
+describe('TerrainTopology — refinement driven INTO the depth cap', () => {
     // The old base-only forcing cracked when refinement piled at maxDepth (the forced
     // partner could not split past the cap). LEPP only propagates toward COARSER nodes,
     // so driving to the cap should stay watertight (splits at the cap are simply refused
     // by the entry guard; their same-level cap neighbours share full edges).
     it('greedy refine with target depth == maxDepth stays watertight', () => {
         const MAXD = 12;
-        const topo = new OcbtTopology(MAXD);
+        const topo = new TerrainTopology(MAXD);
         const target: V3 = (() => {
             const i = 1 / Math.hypot(0.3, 0.7, 0.5);
             return [0.3 * i, 0.7 * i, 0.5 * i];
@@ -213,7 +213,7 @@ describe('OcbtTopology — refinement driven INTO the depth cap', () => {
 
     it('random refine with target depth == maxDepth stays watertight', () => {
         const MAXD = 11;
-        const topo = new OcbtTopology(MAXD);
+        const topo = new TerrainTopology(MAXD);
         let s = 0x0d15ea5e >>> 0;
         const rnd = () => ((s = (s * 1664525 + 1013904223) >>> 0), s / 2 ** 32);
         for (let iter = 0; iter < 4000; iter++) {
@@ -225,13 +225,13 @@ describe('OcbtTopology — refinement driven INTO the depth cap', () => {
     });
 });
 
-describe('OcbtTopology — arbitrary random refinement (LEPP, watertight)', () => {
+describe('TerrainTopology — arbitrary random refinement (LEPP, watertight)', () => {
     // The adversarial case: split random leaves with no coherence. LEPP must keep the
     // mesh watertight + symmetric regardless (base-only forcing produced T-junctions
     // here — see git history of this test).
     it('many random splits stay watertight + symmetric', () => {
         const SOFT_TARGET = 14;
-        const topo = new OcbtTopology(30);
+        const topo = new TerrainTopology(30);
         let s = 0x51ed_2701 >>> 0;
         const rnd = () => ((s = (s * 1664525 + 1013904223) >>> 0), s / 2 ** 32);
         for (let iter = 0; iter < 800; iter++) {
@@ -245,7 +245,7 @@ describe('OcbtTopology — arbitrary random refinement (LEPP, watertight)', () =
 
     it('multiple independent seeds all stay watertight', () => {
         for (const seed of [1, 7, 42, 1337, 0xbeef]) {
-            const topo = new OcbtTopology(28);
+            const topo = new TerrainTopology(28);
             let s = seed >>> 0;
             const rnd = () => ((s = (s * 1664525 + 1013904223) >>> 0), s / 2 ** 32);
             for (let iter = 0; iter < 400; iter++) {
@@ -260,9 +260,9 @@ describe('OcbtTopology — arbitrary random refinement (LEPP, watertight)', () =
     });
 });
 
-describe('OcbtTopology — conservative merge', () => {
+describe('TerrainTopology — conservative merge', () => {
     it('merging back the freshly split diamonds restores the seed and stays watertight', () => {
-        const topo = new OcbtTopology(20);
+        const topo = new TerrainTopology(20);
         // Split every root once (each pulls in its diamond partner).
         for (let r = 0; r < 8; r++) topo.requestSplit(r);
         checkAll(topo);
@@ -285,7 +285,7 @@ describe('OcbtTopology — conservative merge', () => {
     // watertight at every pass and round-trip EXACTLY to the 8-face seed.
     it('greedy full merge of a deeply refined mesh round-trips to the seed, watertight throughout', () => {
         for (const seed of [1, 7, 99, 2718]) {
-            const topo = new OcbtTopology(30);
+            const topo = new TerrainTopology(30);
             let s = seed >>> 0;
             const rnd = () => ((s = (s * 1664525 + 1013904223) >>> 0), s / 2 ** 32);
             // Build a watertight, multi-level mesh.

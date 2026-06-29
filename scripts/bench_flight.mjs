@@ -6,7 +6,7 @@
  *   default  : one flight → scripts/.bench/<label>.json (+ diff vs --baseline).
  *   --repeat N: N flights of the same config → median ± stddev (is a delta signal or noise?).
  *
- * Each flight RESETS OCBT topology first (in-page), so back-to-back flights replay an identical
+ * Each flight RESETS TERRAIN topology first (in-page), so back-to-back flights replay an identical
  * leaf-count trajectory — no state leak from the previous flight. --frames is fixed (no wall-clock
  * reparam), so the path is byte-identical every run.
  *
@@ -23,7 +23,7 @@
  *
  * Determinism: the path is FRAME-INDEXED in-page at a fixed fps cap with the planet spin frozen to a
  * FIXED phase, so the trajectory AND the terrain under it are identical every run. fps is capped → read
- * power (nvidia-smi) + LEAF COUNT + the in-engine OCBT compute buckets. Render-pass gpuMs is BROKEN
+ * power (nvidia-smi) + LEAF COUNT + the in-engine TERRAIN compute buckets. Render-pass gpuMs is BROKEN
  * under Playwright (reads ~0) — never trust it; it is omitted from the output.
  */
 import { chromium } from 'playwright';
@@ -119,7 +119,7 @@ try {
     const rowFmt = (name, a) => a && console.log(
         `  ${name.padEnd(8)} pwr ${String(a.powerW).padStart(3)}W util ${String(a.util).padStart(3)}%  ` +
         `leaves ${String(a.leaves).padStart(6)}  frame ${a.frameMs}ms  ` +
-        `ocbt[topo ${a.topoMs} eval ${a.evalMs} compact ${a.compactMs}]ms`);
+        `terrain[topo ${a.topoMs} eval ${a.evalMs} compact ${a.compactMs}]ms`);
 
     if (REPEAT > 1) {
         // ---- repeat ×N: median ± stddev so you know if a delta is signal -------------------------

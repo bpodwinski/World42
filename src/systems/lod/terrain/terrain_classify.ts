@@ -1,20 +1,20 @@
 import { Matrix, Plane, Vector3 } from '@babylonjs/core';
-import type { CbtNode } from './cbt_state';
+import type { TerrainNode } from './terrain_state';
 
-export type CbtSplitCandidate = {
+export type TerrainSplitCandidate = {
     nodeId: number;
     score: number;
     projectedAreaPx2: number;
 };
 
-export type CbtLeafMetric = {
+export type TerrainLeafMetric = {
     nodeId: number;
     parentId: number | null;
     projectedAreaPx2: number;
 };
 
-export type CbtClassifyParams = {
-    leaves: ReadonlyArray<CbtNode>;
+export type TerrainClassifyParams = {
+    leaves: ReadonlyArray<TerrainNode>;
     cameraWorldDouble: Vector3;
     planetCenterWorldDouble: Vector3;
     renderParentWorldMatrix: Matrix;
@@ -155,7 +155,7 @@ export function classifySplitCandidates({
     cameraFovRadians,
     splitThresholdPx2,
     splitHysteresis,
-}: CbtClassifyParams): CbtSplitCandidate[] {
+}: TerrainClassifyParams): TerrainSplitCandidate[] {
     const focal = viewportHeightPx / (2 * Math.tan(cameraFovRadians * 0.5));
     const threshold = splitThresholdPx2 * Math.max(0.05, Math.min(1.0, splitHysteresis));
 
@@ -163,7 +163,7 @@ export function classifySplitCandidates({
     const tmpCentroidRotated = new Vector3();
     const tmpCentroidWorld = new Vector3();
 
-    const candidates: CbtSplitCandidate[] = [];
+    const candidates: TerrainSplitCandidate[] = [];
 
     for (const leaf of leaves) {
         tmpCentroidLocal
@@ -192,9 +192,9 @@ export function classifySplitCandidates({
     return candidates;
 }
 
-export type CbtClassifyResult = {
+export type TerrainClassifyResult = {
     /** Leaves whose projected area exceeds the split threshold, sorted desc. */
-    splitCandidates: CbtSplitCandidate[];
+    splitCandidates: TerrainSplitCandidate[];
     /** Parent ids eligible to merge (both children present, below threshold), sorted asc by area. */
     mergeParents: number[];
 };
@@ -222,7 +222,7 @@ export function classifyLeaves({
     cullMinDot = DEFAULT_CULL_MIN_DOT,
     frustumPlanes = null,
     frustumGuardScale = DEFAULT_FRUSTUM_GUARD,
-}: CbtClassifyParams): CbtClassifyResult {
+}: TerrainClassifyParams): TerrainClassifyResult {
     const focal = viewportHeightPx / (2 * Math.tan(cameraFovRadians * 0.5));
     const splitThreshold = splitThresholdPx2 * Math.max(0.05, Math.min(1.0, splitHysteresis));
     const mergeThreshold = splitThresholdPx2 * splitHysteresis;
@@ -237,7 +237,7 @@ export function classifyLeaves({
     const camRelY = cameraWorldDouble.y - planetCenterWorldDouble.y;
     const camRelZ = cameraWorldDouble.z - planetCenterWorldDouble.z;
 
-    const splitCandidates: CbtSplitCandidate[] = [];
+    const splitCandidates: TerrainSplitCandidate[] = [];
     const parentAgg = new Map<number, { children: number; maxAreaPx2: number }>();
 
     for (const leaf of leaves) {
@@ -323,13 +323,13 @@ export function measureLeafProjectedAreas({
     renderParentWorldMatrix,
     viewportHeightPx,
     cameraFovRadians,
-}: Omit<CbtClassifyParams, 'splitThresholdPx2' | 'splitHysteresis'>): CbtLeafMetric[] {
+}: Omit<TerrainClassifyParams, 'splitThresholdPx2' | 'splitHysteresis'>): TerrainLeafMetric[] {
     const focal = viewportHeightPx / (2 * Math.tan(cameraFovRadians * 0.5));
     const tmpCentroidLocal = new Vector3();
     const tmpCentroidRotated = new Vector3();
     const tmpCentroidWorld = new Vector3();
 
-    const metrics: CbtLeafMetric[] = [];
+    const metrics: TerrainLeafMetric[] = [];
     for (const leaf of leaves) {
         tmpCentroidLocal
             .copyFrom(leaf.v0)

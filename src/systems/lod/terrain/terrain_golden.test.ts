@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { classifySplitCandidates } from './cbt_classify';
-import { emitMeshFromLeaves } from './cbt_emit';
-import { CbtState, type CbtNode } from './cbt_state';
-import { makeClassifyParams } from './__fixtures__/cbt_fixtures';
+import { classifySplitCandidates } from './terrain_classify';
+import { emitMeshFromLeaves } from './terrain_emit';
+import { TerrainState, type TerrainNode } from './terrain_state';
+import { makeClassifyParams } from './__fixtures__/terrain_fixtures';
 
 /**
  * Golden master: a fixed seed + fixed camera produces a deterministic tree and
@@ -33,7 +33,7 @@ function fnv1a(str: string): string {
     return (h >>> 0).toString(16).padStart(8, '0');
 }
 
-function centroidKey(leaf: CbtNode): string {
+function centroidKey(leaf: TerrainNode): string {
     const cx = (leaf.v0.x + leaf.v1.x + leaf.v2.x) / 3;
     const cy = (leaf.v0.y + leaf.v1.y + leaf.v2.y) / 3;
     const cz = (leaf.v0.z + leaf.v1.z + leaf.v2.z) / 3;
@@ -44,16 +44,16 @@ function centroidKey(leaf: CbtNode): string {
 // node-id assignment and leaf iteration order, so they assert the GEOMETRY of the
 // tree, not bookkeeping. A structural refactor that preserves geometry (e.g. the
 // Map→typed-array pool migration) must keep these hashes unchanged.
-function canonical(leaves: ReadonlyArray<CbtNode>): CbtNode[] {
+function canonical(leaves: ReadonlyArray<TerrainNode>): TerrainNode[] {
     return [...leaves].sort((a, b) => centroidKey(a).localeCompare(centroidKey(b)));
 }
 
-function topologyHash(leaves: ReadonlyArray<CbtNode>): string {
+function topologyHash(leaves: ReadonlyArray<TerrainNode>): string {
     const rows = canonical(leaves).map((leaf) => `${leaf.level}:${centroidKey(leaf)}`);
     return fnv1a(rows.join('|'));
 }
 
-function meshHash(leaves: ReadonlyArray<CbtNode>): string {
+function meshHash(leaves: ReadonlyArray<TerrainNode>): string {
     const mesh = emitMeshFromLeaves(canonical(leaves), GOLD_RADIUS);
     let acc = '';
     for (let i = 0; i < mesh.positions.length; i++) acc += q(mesh.positions[i]) + ',';
@@ -69,8 +69,8 @@ function meshHash(leaves: ReadonlyArray<CbtNode>): string {
  * geometry is determined purely by the classify threshold + bisection, and the
  * hashes are stable across structural refactors (e.g. the typed-array pool).
  */
-function runScenario(): CbtState {
-    const state = new CbtState(GOLD_RADIUS, GOLD_MAX_DEPTH);
+function runScenario(): TerrainState {
+    const state = new TerrainState(GOLD_RADIUS, GOLD_MAX_DEPTH);
 
     for (let round = 0; round < 6; round++) {
         const leaves = state.getLeafNodes();
@@ -86,7 +86,7 @@ function runScenario(): CbtState {
     return state;
 }
 
-describe('CBT golden master', () => {
+describe('TERRAIN golden master', () => {
     it('produces a stable tree topology', () => {
         const leaves = runScenario().getLeafNodes();
         expect(leaves.length).toBeGreaterThan(8);

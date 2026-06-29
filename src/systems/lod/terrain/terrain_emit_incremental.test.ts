@@ -1,16 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { CbtEmitCache, emitMeshFromLeaves, type EmitResult } from './cbt_emit';
-import { CbtState } from './cbt_state';
+import { TerrainEmitCache, emitMeshFromLeaves, type EmitResult } from './terrain_emit';
+import { TerrainState } from './terrain_state';
 
 /**
- * The incremental emitter (CbtEmitCache) must produce byte-identical output to
+ * The incremental emitter (TerrainEmitCache) must produce byte-identical output to
  * the full emitter, while only recomputing slots whose geometry changed.
  */
 
 const RADIUS = 1000;
 const MAX_DEPTH = 24;
 
-function refineNear(state: CbtState, target: [number, number, number], iterations: number): void {
+function refineNear(state: TerrainState, target: [number, number, number], iterations: number): void {
     for (let i = 0; i < iterations; i++) {
         const leaves = state.getLeafNodes();
         let best = leaves[0];
@@ -38,22 +38,22 @@ function expectMeshEqual(a: EmitResult, b: EmitResult): void {
     expect(Array.from(a.indices)).toEqual(Array.from(b.indices));
 }
 
-describe('CbtEmitCache (incremental mesh)', () => {
+describe('TerrainEmitCache (incremental mesh)', () => {
     it('matches the full emitter byte-for-byte', () => {
-        const state = new CbtState(RADIUS, MAX_DEPTH);
+        const state = new TerrainState(RADIUS, MAX_DEPTH);
         refineNear(state, [RADIUS, 0, 0], 120);
         const leaves = state.getLeafNodes();
 
         const full = emitMeshFromLeaves(leaves, RADIUS);
-        const cache = new CbtEmitCache();
+        const cache = new TerrainEmitCache();
         const inc = cache.emit(leaves, RADIUS);
 
         expectMeshEqual(inc, full);
     });
 
     it('stays identical after further refinement (cache reuse + invalidation)', () => {
-        const state = new CbtState(RADIUS, MAX_DEPTH);
-        const cache = new CbtEmitCache();
+        const state = new TerrainState(RADIUS, MAX_DEPTH);
+        const cache = new TerrainEmitCache();
 
         refineNear(state, [RADIUS, 0, 0], 60);
         cache.emit(state.getLeafNodes(), RADIUS); // warm the cache
@@ -67,11 +67,11 @@ describe('CbtEmitCache (incremental mesh)', () => {
     });
 
     it('recomputes nothing when the tree is unchanged', () => {
-        const state = new CbtState(RADIUS, MAX_DEPTH);
+        const state = new TerrainState(RADIUS, MAX_DEPTH);
         refineNear(state, [RADIUS, 0, 0], 80);
         const leaves = state.getLeafNodes();
 
-        const cache = new CbtEmitCache();
+        const cache = new TerrainEmitCache();
         cache.emit(leaves, RADIUS);
         expect(cache.recomputed).toBeGreaterThan(0); // first pass computes all
 
@@ -80,9 +80,9 @@ describe('CbtEmitCache (incremental mesh)', () => {
     });
 
     it('recomputes only the changed slots after a single split', () => {
-        const state = new CbtState(RADIUS, MAX_DEPTH);
+        const state = new TerrainState(RADIUS, MAX_DEPTH);
         refineNear(state, [RADIUS, 0, 0], 80);
-        const cache = new CbtEmitCache();
+        const cache = new TerrainEmitCache();
         cache.emit(state.getLeafNodes(), RADIUS);
 
         // Split a guaranteed-shallow leaf (well below maxDepth) so the split is a

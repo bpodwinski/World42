@@ -5,7 +5,7 @@ import type { LoadedSystem } from './stellar_catalog_loader';
  * value). When active, loads ONLY the dedicated {@link BENCH_SYSTEM_ID} system and
  * freezes its planet rotation so the surface stays still under the camera.
  *
- * Pairs with scripts/cbt_perf_capture.mjs / cbt_perf_matrix.mjs.
+ * Pairs with scripts/terrain_perf_capture.mjs / terrain_perf_matrix.mjs.
  */
 
 /** Dedicated benchmark system id (see data.json). */

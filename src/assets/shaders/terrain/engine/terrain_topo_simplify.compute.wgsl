@@ -1,4 +1,4 @@
-// OCBT engine — Simplify pass (one thread per simplification-list entry). Faithful
+// TERRAIN engine — Simplify pass (one thread per simplification-list entry). Faithful
 // port of SimplifyElement (update_utilities.hlsl): collapse the diamond (currentID +
 // its pair across n0) back up one level (heapID/2), and the facing twin-pair if
 // present. The kept slots (currentID, twinLowID) survive; the pair + twinHigh are
@@ -7,8 +7,8 @@
 // no ping-pong is needed (matches the reference). Survivors that touch a changed
 // neighbour are appended to the simplify-propagation list.
 //
-// Composed after: engineWgslPreamble + ocbt_u64.wgsl + ocbt_pool.wgsl + common.
-// pool_tree(1) is declared by ocbt_pool.wgsl but unused -> stripped (do not bind).
+// Composed after: engineWgslPreamble + terrain_u64.wgsl + terrain_pool.wgsl + common.
+// pool_tree(1) is declared by terrain_pool.wgsl but unused -> stripped (do not bind).
 
 @group(0) @binding(2) var<storage, read_write> heapID       : array<vec2<u32>>;
 @group(0) @binding(3) var<storage, read_write> neighbors    : array<u32>;
@@ -46,15 +46,15 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>,
     setNb(currentID, 1u, pn2);       // n1 = pair's old BASE
     setNb(currentID, 2u, twinLowID); // n2 = facing twin (or INVALID)
     setBd(currentID, pairID, pn2, ST_MERGED, FLAG_VISIBLE | FLAG_MODIFIED);
-    if (pn2 != OCBT_INVALID) {
+    if (pn2 != TERRAIN_INVALID) {
         let loc = atomicAdd(&propagate[1], 1u);
         atomicStore(&propagate[2u + loc], currentID);
     }
-    setBd(pairID, OCBT_INVALID, OCBT_INVALID, ST_MERGED, 0u);
+    setBd(pairID, TERRAIN_INVALID, TERRAIN_INVALID, ST_MERGED, 0u);
     pool_setBitAtomic(pairID, false);
 
     // Collapse the facing twin-pair the same way, if present.
-    if (twinLowID != OCBT_INVALID) {
+    if (twinLowID != TERRAIN_INVALID) {
         let lfn2 = nb(twinLowID, 2u);
         let hfn2 = nb(twinHighID, 2u);
         heapID[twinLowID] = u64_shr(heapID[twinLowID], 1u);
@@ -63,11 +63,11 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>,
         setNb(twinLowID, 1u, hfn2);
         setNb(twinLowID, 2u, currentID);
         setBd(twinLowID, twinHighID, hfn2, ST_MERGED, FLAG_VISIBLE | FLAG_MODIFIED);
-        if (hfn2 != OCBT_INVALID) {
+        if (hfn2 != TERRAIN_INVALID) {
             let loc = atomicAdd(&propagate[1], 1u);
             atomicStore(&propagate[2u + loc], twinLowID);
         }
-        setBd(twinHighID, OCBT_INVALID, OCBT_INVALID, ST_MERGED, 0u);
+        setBd(twinHighID, TERRAIN_INVALID, TERRAIN_INVALID, ST_MERGED, 0u);
         pool_setBitAtomic(twinHighID, false);
     }
 }

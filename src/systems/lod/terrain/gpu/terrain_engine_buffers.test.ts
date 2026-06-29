@@ -17,12 +17,12 @@ import {
     N0,
     N1,
     N2,
-    OCBT_INVALID,
+    TERRAIN_INVALID,
     VISIBLE_BISECTOR,
     UNCHANGED_ELEMENT
-} from './ocbt_engine_buffers';
+} from './terrain_engine_buffers';
 
-describe('ocbt_engine_buffers — strides', () => {
+describe('terrain_engine_buffers — strides', () => {
     it('per-slot word counts scale with capacity', () => {
         expect(heapIdWords(8)).toBe(16);
         expect(neighborsWords(8)).toBe(24);
@@ -41,7 +41,7 @@ describe('ocbt_engine_buffers — strides', () => {
     });
 });
 
-describe('ocbt_engine_buffers — layout', () => {
+describe('terrain_engine_buffers — layout', () => {
     it('sizes the default 256K-slot engine', () => {
         const l = engineLayout();
         const cap = 1 << 18;
@@ -78,7 +78,7 @@ describe('ocbt_engine_buffers — layout', () => {
     });
 });
 
-describe('ocbt_engine_buffers — octahedron seed', () => {
+describe('terrain_engine_buffers — octahedron seed', () => {
     it('heapIDs are 8..15 with hi=0', () => {
         const seed = buildEngineSeed(1 << 18);
         expect(seed.liveCount).toBe(8);
@@ -132,19 +132,19 @@ describe('ocbt_engine_buffers — octahedron seed', () => {
         for (let i = 0; i < 8; i++) {
             const b = i * BISECTOR_DATA_WORDS;
             expect(seed.bisectorData[b + 0]).toBe(0); // pattern
-            expect(seed.bisectorData[b + 1]).toBe(OCBT_INVALID);
+            expect(seed.bisectorData[b + 1]).toBe(TERRAIN_INVALID);
             expect(seed.bisectorData[b + 5]).toBe(UNCHANGED_ELEMENT >>> 0);
             expect(seed.bisectorData[b + 6]).toBe(VISIBLE_BISECTOR);
         }
     });
 });
 
-describe('ocbt_engine_buffers — WGSL preamble', () => {
+describe('terrain_engine_buffers — WGSL preamble', () => {
     it('emits capacity, depth, sentinel and stride consts', () => {
         const p = engineWgslPreamble(1 << 18);
-        expect(p).toContain('const OCBT_CAPACITY : u32 = 262144u;');
-        expect(p).toContain('const OCBT_DEPTH : u32 = 18u;');
-        expect(p).toContain('const OCBT_INVALID : u32 = 4294967295u;');
+        expect(p).toContain('const TERRAIN_CAPACITY : u32 = 262144u;');
+        expect(p).toContain('const TERRAIN_DEPTH : u32 = 18u;');
+        expect(p).toContain('const TERRAIN_INVALID : u32 = 4294967295u;');
         expect(p).toContain('const BISECTOR_DATA_WORDS : u32 = 8u;');
     });
 });

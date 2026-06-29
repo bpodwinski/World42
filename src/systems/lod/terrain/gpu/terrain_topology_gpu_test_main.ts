@@ -1,30 +1,30 @@
 /**
- * Dev-only WebGPU test page: cross-checks the OCBT GPU concurrent topology engine
- * (`OcbtTopologyKernel`, the WGSL port of update_utilities.hlsl) against the proven
- * sequential CPU oracle (`OcbtTopology`). Both are driven to a fixpoint by the SAME
+ * Dev-only WebGPU test page: cross-checks the TERRAIN GPU concurrent topology engine
+ * (`TerrainTopologyKernel`, the WGSL port of update_utilities.hlsl) against the proven
+ * sequential CPU oracle (`TerrainTopology`). Both are driven to a fixpoint by the SAME
  * deterministic, convention-invariant per-face target-level predicate (face bits 8..15
- * are identical in the reference and ocbt_leb conventions), so a correct GPU engine
+ * are identical in the reference and terrain_leb conventions), so a correct GPU engine
  * must produce the oracle's exact conforming mesh. Closes the Phase 1c GPU validation
  * gate that Vitest cannot (no WebGPU in Node).
  *
  * The GPU stores heap ids in the REFERENCE leb convention; the oracle uses World42's
- * ocbt_leb convention; the two differ by a geometry-dependent per-level bit swap, so we
+ * terrain_leb convention; the two differ by a geometry-dependent per-level bit swap, so we
  * NEVER compare raw heap-id labels. Instead each side is decoded to GEOMETRY with its
  * own convention's spherical decoder and we compare the centroid sets:
  *   A. GPU leaf centroid set == oracle leaf centroid set (geometric mesh equality).
  *   B. neighbor reciprocity (slot-based, convention-free).
  *   C. zero T-junctions: every reciprocal neighbor shares a FULL edge (>=2 corners).
  *
- * Renders PASS/FAIL to the DOM and publishes `window.__OCBT_TOPO_RESULT__`. Reproduce:
- * `npm run serve`, open http://localhost:19000/ocbt-topo-test.html.
+ * Renders PASS/FAIL to the DOM and publishes `window.__TERRAIN_TOPO_RESULT__`. Reproduce:
+ * `npm run serve`, open http://localhost:19000/terrain-topo-test.html.
  */
 import { EngineManager } from '../../../../core/render/engine_manager';
-import { OcbtTopology } from './ocbt_topology';
-import { OcbtTopologyKernel, type OcbtGpuState } from './ocbt_topology_kernel';
-import { ocbtCorners, ocbtFaceOf, type V3 } from './ocbt_eval_leb';
+import { TerrainTopology } from './terrain_topology';
+import { TerrainTopologyKernel, type TerrainGpuState } from './terrain_topology_kernel';
+import { terrainCorners, terrainFaceOf, type V3 } from './terrain_eval_leb';
 import type { WebGPUEngine } from '@babylonjs/core';
 
-const INVALID = OcbtTopologyKernel.INVALID;
+const INVALID = TerrainTopologyKernel.INVALID;
 
 interface CaseResult {
     name: string;
@@ -34,7 +34,7 @@ interface CaseResult {
 
 declare global {
     interface Window {
-        __OCBT_TOPO_RESULT__?: {
+        __TERRAIN_TOPO_RESULT__?: {
             pass: boolean;
             cases: CaseResult[];
             error?: string;
@@ -67,15 +67,15 @@ function centroidKey(a: V3, b: V3, c: V3): string {
 }
 
 // Convention-invariant face index (top heap bits) — shared with the GPU decoder.
-const faceOf = ocbtFaceOf;
+const faceOf = terrainFaceOf;
 // `gpuCorners` (the proven reference-convention decoder) now lives in the shared
-// ocbt_eval_leb module; the GPU's ocbt_eval_leb.wgsl is its bit-for-bit twin.
-const gpuCorners = ocbtCorners;
+// terrain_eval_leb module; the GPU's terrain_eval_leb.wgsl is its bit-for-bit twin.
+const gpuCorners = terrainCorners;
 
 /** Drive the CPU oracle to its conforming fixpoint under the per-face predicate. */
 function runOracle(scenario: Scenario): { centroids: string[]; count: number } {
     const maxLevel = Math.max(...scenario.faceDepths);
-    const topo = new OcbtTopology(maxLevel + 4); // cap margin; the predicate stops first
+    const topo = new TerrainTopology(maxLevel + 4); // cap margin; the predicate stops first
     for (let pass = 0; pass < 100000; pass++) {
         const toSplit: number[] = [];
         for (const leaf of topo.leaves()) {
@@ -97,7 +97,7 @@ function runOracle(scenario: Scenario): { centroids: string[]; count: number } {
 }
 
 interface GpuRun {
-    state: OcbtGpuState;
+    state: TerrainGpuState;
     /** EvaluateLEB output: capacity * 9 f32 (c0.xyz, c1.xyz, c2.xyz per slot). */
     positions: Float32Array;
     frames: number;
@@ -106,10 +106,10 @@ interface GpuRun {
 
 /** Run split or merge frames until the live count is stable for 2 frames (fixpoint). */
 async function fixpoint(
-    kernel: OcbtTopologyKernel,
+    kernel: TerrainTopologyKernel,
     merge: boolean,
     maxFrames: number
-): Promise<{ state: OcbtGpuState; frames: number; converged: boolean }> {
+): Promise<{ state: TerrainGpuState; frames: number; converged: boolean }> {
     let prevCount = (await kernel.readState()).count;
     let stable = 0;
     let frames = 0;
@@ -132,7 +132,7 @@ async function fixpoint(
 
 /** Drive the GPU kernel: refine to faceDepths, then (optionally) coarsen to `coarse`. */
 async function runGpu(engine: WebGPUEngine, scenario: Scenario, useIndirect: boolean): Promise<GpuRun> {
-    const kernel = new OcbtTopologyKernel(engine, scenario.capacity, 'predicate', useIndirect);
+    const kernel = new TerrainTopologyKernel(engine, scenario.capacity, 'predicate', useIndirect);
     try {
         await kernel.whenReady();
         kernel.uploadSeed(); // self-primes the sum-tree (runReduce) for frame 0
@@ -162,7 +162,7 @@ async function runGpu(engine: WebGPUEngine, scenario: Scenario, useIndirect: boo
 }
 
 /** GPU live leaf centroids (reference-convention decode), sorted. */
-function gpuCentroids(gpu: OcbtGpuState): string[] {
+function gpuCentroids(gpu: TerrainGpuState): string[] {
     const out: string[] = [];
     for (let s = 0; s < gpu.heapID.length; s++) {
         const h = gpu.heapID[s];
@@ -185,7 +185,7 @@ function checkGeometry(gpu: string[], oracle: string[]): string | null {
 }
 
 /** B. Every non-INVALID GPU neighbor reciprocates (symmetry). */
-function checkReciprocity(gpu: OcbtGpuState): string | null {
+function checkReciprocity(gpu: TerrainGpuState): string | null {
     const nb = gpu.neighbors;
     for (let s = 0; s < gpu.heapID.length; s++) {
         if (gpu.heapID[s] === 0) continue;
@@ -205,7 +205,7 @@ function checkReciprocity(gpu: OcbtGpuState): string | null {
 }
 
 /** C. Zero T-junctions: each reciprocal neighbor pair shares a FULL edge (>=2 corners). */
-function checkWatertight(gpu: OcbtGpuState): string | null {
+function checkWatertight(gpu: TerrainGpuState): string | null {
     const tol = 1e-6;
     const N = gpu.heapID.length;
     const corners: (V3[] | null)[] = new Array(N).fill(null);
@@ -243,15 +243,15 @@ function checkWatertight(gpu: OcbtGpuState): string | null {
 }
 
 /**
- * D. The GPU EvaluateLEB decoder (ocbt_eval_leb.wgsl) matches the proven TS decoder
- * (ocbtCorners) for every live slot — proves the render-path decoder bit-for-bit.
+ * D. The GPU EvaluateLEB decoder (terrain_eval_leb.wgsl) matches the proven TS decoder
+ * (terrainCorners) for every live slot — proves the render-path decoder bit-for-bit.
  */
-function checkEvalLeb(gpu: OcbtGpuState, positions: Float32Array): string | null {
+function checkEvalLeb(gpu: TerrainGpuState, positions: Float32Array): string | null {
     const tol = 1e-5; // f32 GPU vs f64 TS spherical decode
     for (let s = 0; s < gpu.heapID.length; s++) {
         const h = gpu.heapID[s];
         if (h === 0) continue;
-        const tri = ocbtCorners(h);
+        const tri = terrainCorners(h);
         const b = s * 9;
         for (let c = 0; c < 3; c++) {
             for (let k = 0; k < 3; k++) {
@@ -343,7 +343,7 @@ async function main(): Promise<void> {
         engine = await EngineManager.Create(canvas);
     } catch (e) {
         const error = `WebGPU unavailable: ${String(e)}`;
-        window.__OCBT_TOPO_RESULT__ = { pass: false, cases, error };
+        window.__TERRAIN_TOPO_RESULT__ = { pass: false, cases, error };
         render(out, cases, false, error);
         return;
     }
@@ -358,11 +358,11 @@ async function main(): Promise<void> {
             }
         }
         const pass = cases.every((c) => c.pass);
-        window.__OCBT_TOPO_RESULT__ = { pass, cases };
+        window.__TERRAIN_TOPO_RESULT__ = { pass, cases };
         render(out, cases, pass);
     } catch (e) {
         const error = String((e as Error)?.stack ?? e);
-        window.__OCBT_TOPO_RESULT__ = { pass: false, cases, error };
+        window.__TERRAIN_TOPO_RESULT__ = { pass: false, cases, error };
         render(out, cases, false, error);
     } finally {
         engine.dispose();

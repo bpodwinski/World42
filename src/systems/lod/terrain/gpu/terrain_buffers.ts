@@ -1,22 +1,22 @@
 /**
- * OCBT pool buffer layout — the single source of truth for the GPU pool's buffer
+ * TERRAIN pool buffer layout — the single source of truth for the GPU pool's buffer
  * sizes, binding slots, and the WGSL `const` preamble. Shared by the TS mirror, the
  * kernel (which creates the actual Babylon `StorageBuffer`s from these sizes), and
  * the WGSL (which is composed with `poolWgslPreamble(...)` prepended before
- * `ocbt_pool.wgsl`). Keeping the dimensions here — and pure, with no Babylon import —
+ * `terrain_pool.wgsl`). Keeping the dimensions here — and pure, with no Babylon import —
  * lets them be unit-tested in Node and guarantees the CPU mirror, the buffers, and
  * the shader agree on capacity.
  *
- * Layout (simple per-slot tree, matching `ocbt_cpu_mirror.ts` and `ocbt_pool.wgsl`):
+ * Layout (simple per-slot tree, matching `terrain_cpu_mirror.ts` and `terrain_pool.wgsl`):
  *   binding 0  pool_bitfield : array<atomic<u32>>  — capacity/32 words (1 bit/slot)
  *   binding 1  pool_tree     : array<u32>          — 2*capacity words (1-indexed sum-tree)
  */
 import {
-    OCBT_DEFAULT_CAPACITY,
+    TERRAIN_DEFAULT_CAPACITY,
     assertPowerOfTwo,
     bitfieldWordCount,
     log2PowerOfTwo
-} from './ocbt_pool';
+} from './terrain_pool';
 
 /** Binding slot of the pool allocation bitfield (group 0). */
 export const POOL_BITFIELD_BINDING = 0;
@@ -51,7 +51,7 @@ export interface PoolBufferLayout {
     readonly treeBinding: number;
 }
 
-export function poolLayout(capacity: number = OCBT_DEFAULT_CAPACITY): PoolBufferLayout {
+export function poolLayout(capacity: number = TERRAIN_DEFAULT_CAPACITY): PoolBufferLayout {
     assertPowerOfTwo(capacity);
     const bitfieldWords = poolBitfieldWords(capacity);
     const treeWords = poolTreeWords(capacity);
@@ -71,15 +71,15 @@ export function poolLayout(capacity: number = OCBT_DEFAULT_CAPACITY): PoolBuffer
 }
 
 /**
- * WGSL `const` preamble that the shader composer prepends before `ocbt_pool.wgsl`.
- * Emits `OCBT_CAPACITY` and `OCBT_DEPTH` so the GPU core's loop bounds and the slot
- * offset (`id - OCBT_CAPACITY`) are specialized to this capacity.
+ * WGSL `const` preamble that the shader composer prepends before `terrain_pool.wgsl`.
+ * Emits `TERRAIN_CAPACITY` and `TERRAIN_DEPTH` so the GPU core's loop bounds and the slot
+ * offset (`id - TERRAIN_CAPACITY`) are specialized to this capacity.
  */
-export function poolWgslPreamble(capacity: number = OCBT_DEFAULT_CAPACITY): string {
+export function poolWgslPreamble(capacity: number = TERRAIN_DEFAULT_CAPACITY): string {
     assertPowerOfTwo(capacity);
     const depth = log2PowerOfTwo(capacity);
     return (
-        `const OCBT_CAPACITY : u32 = ${capacity >>> 0}u;\n` +
-        `const OCBT_DEPTH : u32 = ${depth}u;\n`
+        `const TERRAIN_CAPACITY : u32 = ${capacity >>> 0}u;\n` +
+        `const TERRAIN_DEPTH : u32 = ${depth}u;\n`
     );
 }

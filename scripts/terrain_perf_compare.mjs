@@ -2,11 +2,11 @@ import { readFileSync } from 'node:fs';
 import process from 'node:process';
 
 /**
- * Diff two CBT perf capture JSON files (produced by cbt_perf_capture.mjs).
+ * Diff two TERRAIN perf capture JSON files (produced by terrain_perf_capture.mjs).
  *
  * Usage:
- *   node scripts/cbt_perf_compare.mjs <baseline.json> <candidate.json>
- *   node scripts/cbt_perf_compare.mjs baseline phase1     # resolves output/perf/<name>.json
+ *   node scripts/terrain_perf_compare.mjs <baseline.json> <candidate.json>
+ *   node scripts/terrain_perf_compare.mjs baseline phase1     # resolves output/perf/<name>.json
  */
 
 function resolvePath(arg) {
@@ -33,7 +33,7 @@ function fmt(n) {
 
 const [, , baseArg, candArg] = process.argv;
 if (!baseArg || !candArg) {
-    console.error('Usage: node scripts/cbt_perf_compare.mjs <baseline> <candidate>');
+    console.error('Usage: node scripts/terrain_perf_compare.mjs <baseline> <candidate>');
     process.exit(1);
 }
 

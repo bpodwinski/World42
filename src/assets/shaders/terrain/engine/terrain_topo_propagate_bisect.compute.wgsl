@@ -1,10 +1,10 @@
-// OCBT engine — PropagateBisect pass (one thread per propagate-list entry). Faithful
+// TERRAIN engine — PropagateBisect pass (one thread per propagate-list entry). Faithful
 // port of PropagateBisectElement (update_utilities.hlsl): restores neighbor
 // reciprocity for the freshly-created siblings whose split-edge partner referenced the
 // pre-split parent. Runs AFTER the ping-pong swap, so `neighbors` here is the NEXT
 // (now current) buffer holding the new topology written by CopyNeighbors + Bisect.
 //
-// Composed after: engineWgslPreamble + ocbt_u64.wgsl + common.
+// Composed after: engineWgslPreamble + terrain_u64.wgsl + common.
 
 @group(0) @binding(3) var<storage, read_write> neighbors    : array<u32>;
 @group(0) @binding(5) var<storage, read_write> bisectorData : array<u32>;
@@ -23,7 +23,7 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>,
 
     let parentID = bdf(currentID, BD_PROPAGATION);
     let problematic = bdf(currentID, BD_PROBLEMATIC);
-    if (problematic == OCBT_INVALID) { return; }
+    if (problematic == TERRAIN_INVALID) { return; }
 
     let tPattern = bdf(problematic, BD_PATTERN);
     let tgt = problematic;
@@ -48,6 +48,6 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>,
         nbset(tgt, 2u, currentID);
     }
 
-    bisectorData[currentID * BD_WORDS + BD_PROBLEMATIC] = OCBT_INVALID;
+    bisectorData[currentID * BD_WORDS + BD_PROBLEMATIC] = TERRAIN_INVALID;
     bisectorData[currentID * BD_WORDS + BD_STATE] = ST_UNCHANGED;
 }

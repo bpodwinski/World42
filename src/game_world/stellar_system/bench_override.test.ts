@@ -44,7 +44,7 @@ describe('parseBenchAlgorithm', () => {
 
     it('returns true for any non-empty bench param', () => {
         expect(parseBenchAlgorithm('?bench=1')).toBe(true);
-        expect(parseBenchAlgorithm('?bench=cbt-ocbt')).toBe(true);
+        expect(parseBenchAlgorithm('?bench=terrain-terrain')).toBe(true);
     });
 });
 

@@ -38,7 +38,7 @@
 
 ## Agent Workflow
 - Read `AI_CONTEXT.md` before changing architecture, coordinate-space logic, terrain LOD, workers, shaders, or camera behavior.
-- Prefer focused changes that preserve the existing CDLOD, CBT/OCBT, camera, worker, and shader contracts.
+- Prefer focused changes that preserve the existing CDLOD, TERRAIN/TERRAIN, camera, worker, and shader contracts.
 - Do not rewrite Claude skills into Codex skills unless the user explicitly asks for skill migration.
 - Do not edit `.claude/worktrees/` unless the user explicitly asks for Claude worktree maintenance.
 - Keep generated validation artifacts under `output/playwright/`.

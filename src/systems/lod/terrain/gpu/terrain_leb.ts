@@ -1,12 +1,12 @@
 /**
- * Heap-id depth helper for the OCBT path. The vertex decode itself lives in
- * `ocbt_eval_leb.ts` (`ocbtCorners`, the single canonical reference-convention matrix
+ * Heap-id depth helper for the TERRAIN path. The vertex decode itself lives in
+ * `terrain_eval_leb.ts` (`terrainCorners`, the single canonical reference-convention matrix
  * decoder); the legacy recursive-slerp `lebDecode` / `lebFaceCorners` were removed when
  * the oracle and GPU unified on that decoder. Only `lebDepth` remains here, used by
- * `ocbt_eval_leb.ts` to derive a node's tree depth from its heap id.
+ * `terrain_eval_leb.ts` to derive a node's tree depth from its heap id.
  *
  * heapID is a JS number (exact for depth < 53); the GPU carries it as the u64 emulation
- * (`ocbt_u64`). depth = firstbithigh = the bit length minus one.
+ * (`terrain_u64`). depth = firstbithigh = the bit length minus one.
  */
 
 /**

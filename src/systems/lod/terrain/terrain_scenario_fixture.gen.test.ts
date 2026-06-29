@@ -1,28 +1,28 @@
 /**
- * Generator (not a behavioral test) for the Rust CBT scenario fixture. It is
- * SKIPPED in normal runs and only executes when GEN_CBT_FIXTURE=1, so it does not
- * affect the golden suite. It runs through vitest (not raw node) because the cbt
+ * Generator (not a behavioral test) for the Rust TERRAIN scenario fixture. It is
+ * SKIPPED in normal runs and only executes when GEN_TERRAIN_FIXTURE=1, so it does not
+ * affect the golden suite. It runs through vitest (not raw node) because the terrain
  * modules import each other with extensionless TS specifiers.
  *
  * Regenerate after changing the TS pipeline (state/classify/emit/noise):
- *   GEN_CBT_FIXTURE=1 npx vitest run cbt_scenario_fixture.gen
+ *   GEN_TERRAIN_FIXTURE=1 npx vitest run terrain_scenario_fixture.gen
  *
- * Drives the REAL pipeline (CbtState + classifyLeaves + emit, exactly as
- * LocalCbtSource) for a fixed frame sequence — camera close (refine) then receding
+ * Drives the REAL pipeline (TerrainState + classifyLeaves + emit, exactly as
+ * LocalTerrainSource) for a fixed frame sequence — camera close (refine) then receding
  * (merge), with backside + frustum culling — and dumps inputs + final topology +
- * final geometry as IEEE-754 hex bits to terrain/tests/cbt_scenario_fixture.txt.
- * The Rust test (cbt_state.rs / cbt_emit.rs) replays it and asserts bit-equality.
+ * final geometry as IEEE-754 hex bits to terrain/tests/terrain_scenario_fixture.txt.
+ * The Rust test (terrain_state.rs / terrain_emit.rs) replays it and asserts bit-equality.
  */
 import { it, expect } from 'vitest';
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { Frustum, Matrix, Vector3, type Plane } from '@babylonjs/core';
-import { CbtState } from './cbt_state';
-import { classifyLeaves } from './cbt_classify';
-import { emitMeshFromLeaves } from './cbt_emit';
-import { DEFAULT_NOISE } from './cbt_noise';
+import { TerrainState } from './terrain_state';
+import { classifyLeaves } from './terrain_classify';
+import { emitMeshFromLeaves } from './terrain_emit';
+import { DEFAULT_NOISE } from './terrain_noise';
 
-const GEN = process.env.GEN_CBT_FIXTURE === '1';
+const GEN = process.env.GEN_TERRAIN_FIXTURE === '1';
 
 const buf = new ArrayBuffer(8);
 const f = new Float64Array(buf);
@@ -32,7 +32,7 @@ function b(x: number): string {
     return u[0].toString(16).padStart(16, '0');
 }
 
-it.runIf(GEN)('generates the CBT scenario fixture', () => {
+it.runIf(GEN)('generates the TERRAIN scenario fixture', () => {
     const radius = 2440.0; // ~Mercury, SCALE_FACTOR=1
     const maxDepth = 16;
     const noise = { ...DEFAULT_NOISE };
@@ -62,7 +62,7 @@ it.runIf(GEN)('generates the CBT scenario fixture', () => {
     const cameras: Vector3[] = [];
     for (let i = 0; i < iters; i++) cameras.push(i < 24 ? camNear : camFar);
 
-    const state = new CbtState(radius, maxDepth);
+    const state = new TerrainState(radius, maxDepth);
     for (let i = 0; i < iters; i++) {
         const leaves = state.getLeafNodes();
         const { splitCandidates, mergeParents } = classifyLeaves({
@@ -90,7 +90,7 @@ it.runIf(GEN)('generates the CBT scenario fixture', () => {
     const geom = emitMeshFromLeaves(finalLeaves, radius, { noise });
 
     const lines: string[] = [];
-    lines.push('# cbt scenario fixture — f64 values are IEEE-754 hex bits');
+    lines.push('# terrain scenario fixture — f64 values are IEEE-754 hex bits');
     lines.push(
         `C ${b(radius)} ${maxDepth} ${noise.seed} ${noise.octaves} ${b(
             noise.baseFrequency
@@ -128,7 +128,7 @@ it.runIf(GEN)('generates the CBT scenario fixture', () => {
         ).join(' ')}`
     );
 
-    const outPath = join(process.cwd(), 'terrain', 'tests', 'cbt_scenario_fixture.txt');
+    const outPath = join(process.cwd(), 'terrain', 'tests', 'terrain_scenario_fixture.txt');
     mkdirSync(dirname(outPath), { recursive: true });
     writeFileSync(outPath, lines.join('\n') + '\n', 'utf8');
     // eslint-disable-next-line no-console

@@ -8,46 +8,46 @@ import { DisposableRegistry } from '../core/lifecycle/disposable_registry';
 import type { StarGlowSource, StarOccluder } from '../core/render/star_raymarch_postprocess';
 import type { AtmosphereSource } from '../core/render/atmosphere_postprocess';
 import {
-    createCBTForSystem,
+    createTerrainForSystem,
     type LoadedSystem,
-    type PlanetCBT,
+    type PlanetTerrain,
 } from '../game_world/stellar_system/stellar_catalog_loader';
 import {
-    CbtScheduler,
-    type CbtAggregateStats,
-    type CbtPlanetInfo,
-} from '../systems/lod/cbt/cbt_scheduler';
+    TerrainScheduler,
+    type TerrainAggregateStats,
+    type TerrainPlanetInfo,
+} from '../systems/lod/terrain/terrain_scheduler';
 import {
-    CBT_QUALITY_PRESETS,
+    TERRAIN_QUALITY_PRESETS,
     noiseForQuality,
-    type CbtQualityLevel,
-} from '../systems/lod/cbt/cbt_quality';
+    type TerrainQualityLevel,
+} from '../systems/lod/terrain/terrain_quality';
 import { resolveEffectiveProfile } from '../game_world/stellar_system/terrain_profile_store';
 
 /**
- * CBT quality preset. Change this to tune mesh density, max depth and terrain
- * detail in one place: 'low' | 'medium' | 'high' | 'ultra' (see cbt_quality.ts).
+ * TERRAIN quality preset. Change this to tune mesh density, max depth and terrain
+ * detail in one place: 'low' | 'medium' | 'high' | 'ultra' (see terrain_quality.ts).
  */
-const CBT_QUALITY: CbtQualityLevel = 'high';
+const TERRAIN_QUALITY: TerrainQualityLevel = 'high';
 
 export type LodController = {
     resetNow: () => void;
-    /** Aggregate CBT telemetry for the perf HUD / headless capture. */
-    getCbtStats: () => CbtAggregateStats;
-    /** Per-planet centers/radii for deterministic headless capture (CBT planets). */
-    getCbtPlanetInfo: () => CbtPlanetInfo[];
-    /** Analytic hard-floor camera-vs-ground collision for CBT/OCBT planets. */
+    /** Aggregate TERRAIN telemetry for the perf HUD / headless capture. */
+    getTerrainStats: () => TerrainAggregateStats;
+    /** Per-planet centers/radii for deterministic headless capture (TERRAIN planets). */
+    getTerrainPlanetInfo: () => TerrainPlanetInfo[];
+    /** Analytic hard-floor camera-vs-ground collision for TERRAIN/TERRAIN planets. */
     resolveGroundCollision: (clearanceSim: number) => void;
-    /** Nearest CBT/OCBT planet + terrain-aware ground radius under the camera (HUD altitude). */
-    getCbtGroundInfo: () => {
+    /** Nearest TERRAIN/TERRAIN planet + terrain-aware ground radius under the camera (HUD altitude). */
+    getTerrainGroundInfo: () => {
         key: string;
         distSim: number;
         groundRSim: number;
         radiusSim: number;
     } | null;
-    /** Drives the heavy OCBT compute loop — invoked by the Frame Graph's OCBT compute task. */
-    runOcbtCompute: () => void;
-    /** Hand the OCBT compute loop to the Frame Graph (called once the graph is built). */
+    /** Drives the heavy TERRAIN compute loop — invoked by the Frame Graph's TERRAIN compute task. */
+    runTerrainCompute: () => void;
+    /** Hand the TERRAIN compute loop to the Frame Graph (called once the graph is built). */
     setComputeOwnedByGraph: (owned: boolean) => void;
     /** Hot-rebuild every planet using `profileId` from its (now overridden) profile — no reload. */
     rebuildProfile: (profileId: string) => void;
@@ -65,7 +65,7 @@ export type LodSetupResult = {
 };
 
 type PlanetShadowSource = {
-    entity: PlanetCBT['entity'];
+    entity: PlanetTerrain['entity'];
     radiusSim: number;
     starPosWorldDouble: Vector3 | null;
 };
@@ -77,42 +77,42 @@ export function setupLodAndShadows(
     loadedSystems: Map<string, LoadedSystem>,
     disposables: DisposableRegistry
 ): LodSetupResult {
-    const mergedCBT = new Map<string, PlanetCBT>();
+    const mergedTerrain = new Map<string, PlanetTerrain>();
 
     for (const system of loadedSystems.values()) {
-        const quality = CBT_QUALITY_PRESETS[CBT_QUALITY];
-        const cbt = createCBTForSystem(scene, camera, system, {
+        const quality = TERRAIN_QUALITY_PRESETS[TERRAIN_QUALITY];
+        const terrain = createTerrainForSystem(scene, camera, system, {
             noise: noiseForQuality(quality),
             engine,
         });
 
-        for (const [name, planet] of cbt.entries()) {
-            mergedCBT.set(`${system.systemId}:${name}`, planet);
+        for (const [name, planet] of terrain.entries()) {
+            mergedTerrain.set(`${system.systemId}:${name}`, planet);
         }
     }
 
-    const cbtPlanets = Array.from(mergedCBT.values()).map((planet) => planet.runtime);
-    const cbtScheduler = new CbtScheduler(scene, camera, cbtPlanets, {
+    const terrainPlanets = Array.from(mergedTerrain.values()).map((planet) => planet.runtime);
+    const terrainScheduler = new TerrainScheduler(scene, camera, terrainPlanets, {
         budgetMs: 2,
     });
     // Refine toward the spawn camera before the first render so the spawn planet
     // is not shown at minimum LOD while the per-frame budget ramps up.
-    cbtScheduler.prewarm();
-    cbtScheduler.start();
-    disposables.add(() => cbtScheduler.dispose());
+    terrainScheduler.prewarm();
+    terrainScheduler.start();
+    disposables.add(() => terrainScheduler.dispose());
 
     const lod: LodController = {
-        resetNow: () => cbtScheduler.resetNow(),
-        getCbtStats: () => cbtScheduler.getStats(),
-        getCbtPlanetInfo: () => cbtScheduler.getPlanetInfo(),
+        resetNow: () => terrainScheduler.resetNow(),
+        getTerrainStats: () => terrainScheduler.getStats(),
+        getTerrainPlanetInfo: () => terrainScheduler.getPlanetInfo(),
         resolveGroundCollision: (clearanceSim: number) =>
-            cbtScheduler.resolveGroundCollision(clearanceSim),
-        getCbtGroundInfo: () => cbtScheduler.getNearestGroundInfo(),
-        runOcbtCompute: () => cbtScheduler.runCompute(),
+            terrainScheduler.resolveGroundCollision(clearanceSim),
+        getTerrainGroundInfo: () => terrainScheduler.getNearestGroundInfo(),
+        runTerrainCompute: () => terrainScheduler.runCompute(),
         setComputeOwnedByGraph: (owned: boolean) =>
-            cbtScheduler.setGraphOwnsCompute(owned),
+            terrainScheduler.setGraphOwnsCompute(owned),
         rebuildProfile: (profileId: string) => {
-            for (const planet of mergedCBT.values()) {
+            for (const planet of mergedTerrain.values()) {
                 if (planet.profile !== profileId) continue;
                 planet.runtime.rebuildTerrain(
                     resolveEffectiveProfile(profileId, planet.lightingOverride)
@@ -122,7 +122,7 @@ export function setupLodAndShadows(
     };
 
     const mergedShadowPlanets = new Map<string, PlanetShadowSource>();
-    for (const [key, planet] of mergedCBT.entries()) {
+    for (const [key, planet] of mergedTerrain.entries()) {
         mergedShadowPlanets.set(key, {
             entity: planet.entity,
             radiusSim: planet.radiusSim,
@@ -153,7 +153,7 @@ export function setupLodAndShadows(
 
     // Atmospheric planets (bodies whose resolved lighting carries an atmosphere block).
     const atmospheres: AtmosphereSource[] = [];
-    for (const planet of mergedCBT.values()) {
+    for (const planet of mergedTerrain.values()) {
         if (!planet.atmosphere) continue;
         atmospheres.push({
             centerWorldDouble: planet.entity.doublepos,

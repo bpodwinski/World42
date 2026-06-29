@@ -1,11 +1,11 @@
-// OCBT engine — PrepareSimplify pass (one thread per simplify-list entry). Faithful
+// TERRAIN engine — PrepareSimplify pass (one thread per simplify-list entry). Faithful
 // port of PrepareSimplifyElement (update_utilities.hlsl): for each even-heap-id
 // simplify candidate, verify its full collapse neighbourhood (the pair across n0 and,
 // if present, the facing twin-pair) are all SIMPLIFY at the SAME depth and that this
 // candidate owns the collapse (lowest heap id of the twin-pair). Survivors are appended
 // to the simplification list for the Simplify pass.
 //
-// Composed after: engineWgslPreamble + ocbt_u64.wgsl + common.
+// Composed after: engineWgslPreamble + terrain_u64.wgsl + common.
 // Reads the CURRENT (live) neighbor buffer. bisectorData read-only here.
 
 @group(0) @binding(2)  var<storage, read>       heapID         : array<vec2<u32>>;
@@ -28,7 +28,7 @@ fn st(s : u32) -> u32 { return bisectorData[s * BD_WORDS + BD_STATE]; }
 fn anyFinerNeighbor(s : u32, d : u32) -> bool {
     for (var k = 0u; k < 3u; k = k + 1u) {
         let n = nb(s, k);
-        if (n != OCBT_INVALID && u64_depth(heapID[n]) > d) { return true; }
+        if (n != TERRAIN_INVALID && u64_depth(heapID[n]) > d) { return true; }
     }
     return false;
 }
@@ -38,7 +38,7 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>,
         @builtin(num_workgroups) nwg : vec3<u32>) {
     let listIdx = linear_id(gid, nwg.x);
     if (listIdx >= atomicLoad(&classification[SIMPLIFY_COUNTER])) { return; }
-    let currentID = atomicLoad(&classification[CLASSIFY_COUNTER_OFFSET + OCBT_CAPACITY + listIdx]);
+    let currentID = atomicLoad(&classification[CLASSIFY_COUNTER_OFFSET + TERRAIN_CAPACITY + listIdx]);
 
     let cHeap = heapID[currentID];
     let currentDepth = u64_depth(cHeap);
@@ -49,7 +49,7 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>,
 
     let twinLowID = nb(pairID, 0u);          // pair's n0
     let twinHighID = nb(currentID, 1u);      // current's n1
-    if (twinLowID != OCBT_INVALID) {
+    if (twinLowID != TERRAIN_INVALID) {
         let twinLowHeap = heapID[twinLowID];
         // The smaller heap id of the facing twin-pair owns the collapse.
         if (u64_gt(cHeap, twinLowHeap)) { return; }
@@ -62,7 +62,7 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>,
     // Conformity guard: refuse if any diamond member still has a finer neighbor (else the
     // split pass re-splits it next frame -> the split/merge limit cycle / flicker).
     if (anyFinerNeighbor(currentID, currentDepth) || anyFinerNeighbor(pairID, currentDepth)) { return; }
-    if (twinLowID != OCBT_INVALID) {
+    if (twinLowID != TERRAIN_INVALID) {
         if (anyFinerNeighbor(twinLowID, currentDepth) || anyFinerNeighbor(twinHighID, currentDepth)) { return; }
     }
 

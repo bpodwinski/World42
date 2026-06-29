@@ -1,4 +1,4 @@
-// OCBT engine — Allocate pass (one thread per allocate-list entry). Faithful port of
+// TERRAIN engine — Allocate pass (one thread per allocate-list entry). Faithful port of
 // AllocateElement (update_utilities.hlsl): for each winner of the Split pass, reserve
 // countOneBits(pattern) fresh pool slots by taking a disjoint base cursor via
 // atomicAdd(memory[0]) and mapping each handle through pool_decodeBitComplement on the
@@ -6,8 +6,8 @@
 // bisector's indices[]. Does NOT set pool bits here (the tree must stay frozen during
 // allocation) — Bisect sets them afterwards.
 //
-// Composed after: engineWgslPreamble + ocbt_u64.wgsl + ocbt_pool.wgsl + common.
-// pool_bitfield(0) is declared by ocbt_pool.wgsl but unused here -> stripped (do not
+// Composed after: engineWgslPreamble + terrain_u64.wgsl + terrain_pool.wgsl + common.
+// pool_bitfield(0) is declared by terrain_pool.wgsl but unused here -> stripped (do not
 // bind). pool_tree(1) is read by pool_decodeBitComplement.
 
 @group(0) @binding(5)  var<storage, read_write> bisectorData : array<u32>;

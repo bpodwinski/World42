@@ -70,9 +70,9 @@ convergence burst).
 ### Knobs (perf levers, all live-tunable)
 | Knob | Global | What it isolates |
 |------|--------|------------------|
-| `perfMask` | `__ocbtPerfMask` | fragment blocks: bit0 slope normal, bit1 **df64 ground detail**, bit2 crater rays, bit3 AO, bit4 GGX spec (31 = skip all shading) |
-| `rebakeEvery` | `__ocbtRebakeEvery` | OCBT re-bake throttle (1 = every frame/old, 3 = default, higher = cheaper motion) |
-| `df64NearKm` | `__ocbtDf64NearKm` | eval df64→f32 cutoff distance (the per-vertex noise precision band) |
+| `perfMask` | `__terrainPerfMask` | fragment blocks: bit0 slope normal, bit1 **df64 ground detail**, bit2 crater rays, bit3 AO, bit4 GGX spec (31 = skip all shading) |
+| `rebakeEvery` | `__terrainRebakeEvery` | OCBT re-bake throttle (1 = every frame/old, 3 = default, higher = cheaper motion) |
+| `df64NearKm` | `__terrainDf64NearKm` | eval df64→f32 cutoff distance (the per-vertex noise precision band) |
 | `hwScale` | `setHardwareScaling` | render resolution (fragment load); `<1` supersamples |
 
 ## Metrics (what each column means)
@@ -86,7 +86,7 @@ convergence burst).
 - **CPUrndr%** — renderer main-thread busy fraction via CDP `Performance.getMetrics` `TaskDuration`.
   A **high CPUrndr% with low GPU%** means a CPU/sync stall (e.g. a per-frame GPU readback), not a
   GPU-compute bottleneck — different fix entirely.
-- **leaves / draws** — `getStats().cbt.leafCount` and `drawCalls` (cheap structure, sampled once).
+- **leaves / draws** — `getStats().terrain.leafCount` and `drawCalls` (cheap structure, sampled once).
 
 ## Diagnosing a bottleneck (decision tree)
 
@@ -133,13 +133,13 @@ instance counts, validation errors) use the **webgpu-inspector** plugin (separat
 | Method | Use |
 |--------|-----|
 | `enableCapture(on)` | arm the in-app instrumentation counters (call once) |
-| `getStats()` | `{ fps, frameMs, gpuMs(broken), drawCalls, osGpu, cbt:{leafCount,…} }` |
+| `getStats()` | `{ fps, frameMs, gpuMs(broken), drawCalls, osGpu, terrain:{leafCount,…} }` |
 | `getPlanets()` | `[{ key, center:[x,y,z], radiusSim }]` |
 | `setCameraDoublePos(x,y,z)` | **teleport** (calls `resetNow` → convergence burst) |
 | `nudgeCameraDoublePos(dx,dy,dz)` | **drift** without a LOD reset (real piloting; engages the re-bake gate) |
 | `lookAtDoublePos(x,y,z)` | aim at a WorldDouble point |
 | `setHardwareScaling(level)` | engine render scale (`<1` supersamples — saturate the GPU) |
-| `setPerfMask(mask)` | fragment perf-mask (or set `window.__ocbtPerfMask`) |
+| `setPerfMask(mask)` | fragment perf-mask (or set `window.__terrainPerfMask`) |
 
 `nudgeCameraDoublePos` and `setHardwareScaling` exist specifically for this harness; keep them.
 

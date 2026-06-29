@@ -1,5 +1,5 @@
 import { bench, describe } from 'vitest';
-import { DEFAULT_NOISE, fbmNoise, type NoiseParams } from './cbt_noise';
+import { DEFAULT_NOISE, fbmNoise, type NoiseParams } from './terrain_noise';
 
 // A spread of sample points on the unit sphere so the perm table / branch
 // predictor see varied input rather than one hot cell.

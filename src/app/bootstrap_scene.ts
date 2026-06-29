@@ -13,7 +13,7 @@ import { MouseSteerControlManager } from '../core/control/mouse_steer_control_ma
 import { GuiManager } from '../core/gui/gui_manager';
 import { DisposableRegistry } from '../core/lifecycle/disposable_registry';
 import { ScaleManager } from '../core/scale/scale_manager';
-import { DEFAULT_NOISE, fbmNoise } from '../systems/lod/cbt/cbt_noise';
+import { DEFAULT_NOISE, fbmNoise } from '../systems/lod/terrain/terrain_noise';
 import planetsJson from '../game_world/stellar_system/data.json';
 import {
     listStellarSystems,
@@ -122,8 +122,8 @@ export async function bootstrapScene(
     // the clearance dwarfs that sub-metre difference, so the camera sits a fixed low
     // altitude above the actual surface whatever the local relief.
     //
-    // Clearance is ~7 km: the GPU CBT is depth-capped (GPU_MAX_DEPTH=18 → ~24 km
-    // finest triangles, see references/13_gpu_cbt_webgpu.md), so very close to the
+    // Clearance is ~7 km: the GPU TERRAIN is depth-capped (GPU_MAX_DEPTH=18 → ~24 km
+    // finest triangles, see references/13_gpu_terrain_webgpu.md), so very close to the
     // surface the coarse facets straddle the camera and the mesh breaks up (cracks
     // show the skybox). Empirically the floor is ~4 km above the pole surface; 7 km
     // gives a clean, watertight near-surface view with margin. To hug the ground

@@ -3,7 +3,7 @@
  *
  * Measures the per-pixel shading grain at a deterministic raking-light ground pose by comparing the
  * NATIVE render against a SUPERSAMPLED render of the SAME frame (the alias-free ground truth). Topology
- * is FROZEN during the sweep (__ocbtFreezeTopology) so native and SSAA share the EXACT same leaf set —
+ * is FROZEN during the sweep (__terrainFreezeTopology) so native and SSAA share the EXACT same leaf set —
  * the only difference is the fragment sample rate, so the delta is PURE shading aliasing (no geometric
  * LOD difference). The reference is produced for free by the browser: at hwScale 0.25 the engine renders
  * the canvas backing-store at 4x and the compositor downscales it to the CSS size, so page.screenshot
@@ -47,7 +47,7 @@ const MASKS = arg('masks', '0,1,2,4').split(',').map((s) => parseInt(s, 10));
 const KEEP = arg('keep', false) === true;
 // --saveRef captures the SSAA band as a FIXED reference (run it once with the AA-OFF build); --useRef
 // compares native against that saved reference instead of a fresh same-AA SSAA. This is required to tune
-// CBT_NORMAL_AA itself: a same-AA SSAA reference flattens with the AA, so the RMSE degenerates to 0; an
+// TERRAIN_NORMAL_AA itself: a same-AA SSAA reference flattens with the AA, so the RMSE degenerates to 0; an
 // AA-off supersampled reference is the true anti-aliased image, so over-smoothing shows as RMSE rising.
 const SAVE_REF = arg('saveRef', false) === true;
 const USE_REF = arg('useRef', false) === true;
@@ -210,7 +210,7 @@ try {
     console.log('  ' + '-'.repeat(60));
     const rows = [];
     for (const mask of MASKS) {
-        await page.evaluate((m) => { window.__ocbtPerfMask = m | 0; }, mask);
+        await page.evaluate((m) => { window.__terrainPerfMask = m | 0; }, mask);
         await page.evaluate(() => window.__world42Perf.setHardwareScaling(1));
         await sleep(500);
         const nat = await shoot(page, CLIP);
@@ -241,7 +241,7 @@ try {
     }
 
     await page.evaluate(() => {
-        window.__ocbtPerfMask = 0;
+        window.__terrainPerfMask = 0;
         window.__world42Perf.setFreezeTopology(false);
         window.__world42Bench.releasePose();
     });

@@ -1,11 +1,11 @@
-// OCBT concurrent-topology engine — shared pure helpers (NO buffer declarations,
+// TERRAIN concurrent-topology engine — shared pure helpers (NO buffer declarations,
 // NO entry point). Each pass file declares its own buffers (with the correct
 // atomic-ness per pass — bisectorData is array<atomic<u32>> in Split but plain
 // array<u32> elsewhere, which a single shared decl could not express) and appends
 // this include for the consts + heap-id math + the deterministic classify predicate.
 //
-// Composed AFTER: engineWgslPreamble (OCBT_CAPACITY/OCBT_DEPTH/OCBT_INVALID/
-// BISECTOR_DATA_WORDS) + ocbt_u64.wgsl (u64 = vec2<u32> helpers). Mirrors the
+// Composed AFTER: engineWgslPreamble (TERRAIN_CAPACITY/TERRAIN_DEPTH/TERRAIN_INVALID/
+// BISECTOR_DATA_WORDS) + terrain_u64.wgsl (u64 = vec2<u32> helpers). Mirrors the
 // reference update_utilities.hlsl constants exactly. No semicolons inside line
 // comments (Babylon WGSL preprocessor limitation).
 
@@ -37,7 +37,7 @@ const SIMPLIFY_COUNTER        : u32 = 1u;
 const CLASSIFY_COUNTER_OFFSET : u32 = 2u;
 
 // ---- BisectorData flat field offsets (slot*8 + field) ----------------------------
-// Mirror of BD_* in ocbt_engine_buffers.ts.
+// Mirror of BD_* in terrain_engine_buffers.ts.
 const BD_PATTERN     : u32 = 0u;
 const BD_INDEX0      : u32 = 1u;
 const BD_INDEX1      : u32 = 2u;

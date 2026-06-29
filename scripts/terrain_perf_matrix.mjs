@@ -8,12 +8,12 @@ import process from 'node:process';
  * dedicated benchmark planet, then print side-by-side comparison tables
  * (one row per altitude, one column per backend).
  *
- * Starts a single dev server, then runs scripts/cbt_perf_capture.mjs once per
+ * Starts a single dev server, then runs scripts/terrain_perf_capture.mjs once per
  * backend (so each writes output/perf/<algo>.json), and tabulates the results.
  *
  * Usage:
- *   node scripts/cbt_perf_matrix.mjs
- *   node scripts/cbt_perf_matrix.mjs --algos "cdlod,cbt-ocbt" --altitudes "20,3,1.08"
+ *   node scripts/terrain_perf_matrix.mjs
+ *   node scripts/terrain_perf_matrix.mjs --algos "cdlod,terrain-terrain" --altitudes "20,3,1.08"
  *
  * Requires Playwright (the capture prints the install hint if missing).
  */
@@ -24,7 +24,7 @@ function arg(name, fallback) {
     return i >= 0 && argv[i + 1] ? argv[i + 1] : fallback;
 }
 
-const ALGOS = arg('algos', 'cdlod,cbt-gpu,cbt-cpu,cbt-ocbt')
+const ALGOS = arg('algos', 'cdlod,terrain-gpu,terrain-cpu,terrain-terrain')
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean);
@@ -82,7 +82,7 @@ function startDevServer() {
 
 function runCapture(algo, serverUrl) {
     return new Promise((resolve, reject) => {
-        const args = ['scripts/cbt_perf_capture.mjs', '--lod', algo, '--label', algo];
+        const args = ['scripts/terrain_perf_capture.mjs', '--lod', algo, '--label', algo];
         if (altitudesArg) args.push('--altitudes', altitudesArg);
         const child = spawn(process.execPath, args, {
             cwd: process.cwd(),

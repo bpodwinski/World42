@@ -1,10 +1,10 @@
-// OCBT engine — Reset pass (1 thread). Port of ResetBuffers (update_utilities.hlsl),
+// TERRAIN engine — Reset pass (1 thread). Port of ResetBuffers (update_utilities.hlsl),
 // reduced to the buffers the topology cross-check uses (no simplify / indirect-draw).
 // Zeroes the per-frame work counters and primes the free-slot memory budget from the
 // pool sum-tree (which MUST have been reduced from the current bitfield first).
 //
-// Composed after: engineWgslPreamble + ocbt_u64.wgsl + ocbt_pool.wgsl + common.
-// pool_bitfield(0) is declared by ocbt_pool.wgsl but unused here -> reflection strips
+// Composed after: engineWgslPreamble + terrain_u64.wgsl + terrain_pool.wgsl + common.
+// pool_bitfield(0) is declared by terrain_pool.wgsl but unused here -> reflection strips
 // it (do not bind it). pool_tree(1) is read by pool_freeCount().
 
 @group(0) @binding(6)  var<storage, read_write> classification : array<atomic<u32>>;

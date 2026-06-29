@@ -1,13 +1,13 @@
-# 🌐 OCBT — Pool-based Concurrent Binary Tree terrain engine
+# 🌐 TERRAIN — Pool-based Concurrent Binary Tree terrain engine
 
 GPU terrain LOD engine based on **"Concurrent Binary Trees for Large-Scale Game
-Components"** (Benyoub & Dupuy, HPG 2024). The CBT is used as a **fixed-capacity memory
+Components"** (Benyoub & Dupuy, HPG 2024). The TERRAIN is used as a **fixed-capacity memory
 pool allocator**; the triangulation is stored as **explicit bisectors** (heap id +
 neighbour links) rather than implicitly in a `2^D` bitfield. Result: per-frame cost and
 memory are **decoupled from subdivision depth** — they scale with the fixed pool capacity
 and the live triangle count, not `2^depth`.
 
-This replaces the implicit GPU CBT path (`../gpu/`, Dupuy 2021) whose `O(2^D)`
+This replaces the implicit GPU TERRAIN path (`../gpu/`, Dupuy 2021) whose `O(2^D)`
 sum-reduction capped playable depth at ~25.
 
 > Status: **Phases 0–2 complete, Phase 3 (precision/perf) substantially complete.** The
@@ -19,14 +19,14 @@ sum-reduction capped playable depth at ~25.
 
 ## 🚀 Enable & validate
 
-- **In-app (dev):** open the live app with `?cbt=ocbt` (e.g. `http://localhost:19000/?cbt=ocbt`).
+- **In-app (dev):** open the live app with `?terrain=terrain` (e.g. `http://localhost:19000/?terrain=terrain`).
   Wired in [`../../../../app/setup_lod_and_shadows.ts`](../../../../app/setup_lod_and_shadows.ts);
-  backend selected by the `cbtType: 'cpu' | 'gpu-implicit' | 'gpu-ocbt'` enum in
-  [`../cbt_scheduler.ts`](../cbt_scheduler.ts) (`createSource`). Tuning constants
+  backend selected by the `terrainType: 'cpu' | 'gpu-implicit' | 'gpu-terrain'` enum in
+  [`../terrain_scheduler.ts`](../terrain_scheduler.ts) (`createSource`). Tuning constants
   (capacity, maxLevel, split/merge px) live in that `createSource` branch.
-- **GPU topology cross-check (dev page):** `http://localhost:19000/ocbt-topo-test.html`
+- **GPU topology cross-check (dev page):** `http://localhost:19000/terrain-topo-test.html`
   runs every scenario on **both** the direct and indirect-dispatch paths and compares the
-  GPU mesh to the sequential CPU oracle by geometry. Publishes `window.__OCBT_TOPO_RESULT__`
+  GPU mesh to the sequential CPU oracle by geometry. Publishes `window.__TERRAIN_TOPO_RESULT__`
   (`{pass, cases}`); currently **20/20 green**. Entry gated dev-only in `rspack.config.js`.
 - **Unit tests:** `npm test` — the pool allocator, u64/f64 emulation, LEB decode, and the
   full CPU topology oracle (incl. an adversarial stress suite) are covered in Node/Vitest
@@ -38,35 +38,35 @@ sum-reduction capped playable depth at ~25.
 
 WebGPU only. The engine is a **GPU-resident bisector pool**; the main thread only writes a
 few uniforms and issues dispatches per frame. Two consumers share the same kernel:
-- the **render path** (`OcbtSource`, metric classify, df64 eval, compaction, indirect dispatch),
-- the **cross-check** (`ocbt_topology_gpu_test_main`, predicate classify, f32 eval) which
+- the **render path** (`TerrainSource`, metric classify, df64 eval, compaction, indirect dispatch),
+- the **cross-check** (`terrain_topology_gpu_test_main`, predicate classify, f32 eval) which
   proves the GPU engine against the CPU oracle.
 
-### TypeScript (`src/systems/lod/cbt/ocbt/`)
+### TypeScript (`src/systems/lod/terrain/gpu/`)
 
 | File | Role |
 |---|---|
-| `ocbt_pool.ts` | Pool constants/offsets/masks (single source for TS + WGSL). |
-| `ocbt_u64.ts` / `ocbt_f64.ts` | CPU mirrors of the emulated u64 (`vec2<u32>`) and df64 (double-single) ops — the oracles for the WGSL emulation tests. |
-| `ocbt_leb.ts` | Legacy LEB decode (World42 `cbt_leb` convention) — used by the oracle. |
-| `ocbt_eval_leb.ts` | **Reference-convention** vertex decode (`ocbtCorners`, `GPU_FACE_CORNERS`) — the convention the GPU engine actually stores heap ids in. Render path uses THIS, not `ocbt_leb`. |
-| `ocbt_cpu_mirror.ts` | CPU mirror of the pool allocator (Phase 0 oracle). |
-| `ocbt_topology.ts` | **CPU oracle** of the full topology engine (explicit bisectors, LEPP split, conservative merge, depth cap). The gold standard the GPU is checked against. |
-| `ocbt_buffers.ts` / `ocbt_engine_buffers.ts` | Buffer sizing + binding map + octahedron seed (single source of truth, Node-testable). |
-| `ocbt_topology_kernel.ts` | **The kernel.** Owns every StorageBuffer + ComputeShader, builds the seed, runs the per-frame pass order. `classifyMode: 'predicate' | 'metric'`, `useIndirect` flag. |
-| `ocbt_render_material.ts` | WGSL render material (implicit mesh; VS reads the compacted index list + camera-relative positions buffer). |
-| `ocbt_source.ts` | `CbtGeometrySource` impl: owns kernel + mesh + material, drives the per-frame metric + camera + frustum, `forcedInstanceCount` from readback. |
-| `*.test.ts` | Vitest suites. `ocbt_topology_stress.test.ts` is the adversarial watertightness suite. |
-| `ocbt_*_gpu_test_main.ts` | Dev-page entry points (pool + topology cross-checks). |
+| `terrain_pool.ts` | Pool constants/offsets/masks (single source for TS + WGSL). |
+| `terrain_u64.ts` / `terrain_f64.ts` | CPU mirrors of the emulated u64 (`vec2<u32>`) and df64 (double-single) ops — the oracles for the WGSL emulation tests. |
+| `terrain_leb.ts` | Legacy LEB decode (World42 `terrain_leb` convention) — used by the oracle. |
+| `terrain_eval_leb.ts` | **Reference-convention** vertex decode (`terrainCorners`, `GPU_FACE_CORNERS`) — the convention the GPU engine actually stores heap ids in. Render path uses THIS, not `terrain_leb`. |
+| `terrain_cpu_mirror.ts` | CPU mirror of the pool allocator (Phase 0 oracle). |
+| `terrain_topology.ts` | **CPU oracle** of the full topology engine (explicit bisectors, LEPP split, conservative merge, depth cap). The gold standard the GPU is checked against. |
+| `terrain_buffers.ts` / `terrain_engine_buffers.ts` | Buffer sizing + binding map + octahedron seed (single source of truth, Node-testable). |
+| `terrain_topology_kernel.ts` | **The kernel.** Owns every StorageBuffer + ComputeShader, builds the seed, runs the per-frame pass order. `classifyMode: 'predicate' | 'metric'`, `useIndirect` flag. |
+| `terrain_render_material.ts` | WGSL render material (implicit mesh; VS reads the compacted index list + camera-relative positions buffer). |
+| `terrain_source.ts` | `TerrainGeometrySource` impl: owns kernel + mesh + material, drives the per-frame metric + camera + frustum, `forcedInstanceCount` from readback. |
+| `*.test.ts` | Vitest suites. `terrain_topology_stress.test.ts` is the adversarial watertightness suite. |
+| `terrain_*_gpu_test_main.ts` | Dev-page entry points (pool + topology cross-checks). |
 
-### WGSL (`src/assets/shaders/cbt/ocbt/`)
+### WGSL (`src/assets/shaders/terrain/engine/`)
 
-`ocbt_u64.wgsl`, `ocbt_f64.wgsl` (emulation), `ocbt_pool.wgsl` (allocator),
-`ocbt_eval_leb.wgsl` (reference decode), `ocbt_topo_common.wgsl` (shared consts/helpers),
+`terrain_u64.wgsl`, `terrain_f64.wgsl` (emulation), `terrain_pool.wgsl` (allocator),
+`terrain_eval_leb.wgsl` (reference decode), `terrain_topo_common.wgsl` (shared consts/helpers),
 and one `*.compute.wgsl` per pass: `reset`, `classify` (+`classify_metric`), `split`,
 `allocate`, `copy_neighbors`, `bisect`, `propagate_bisect`, `prepare_simplify`, `simplify`,
 `propagate_simplify`, `eval_leb` (+`eval_leb_f64`), `compact`, `prepare_indirect`,
-`ocbt_pool_reduce`.
+`terrain_pool_reduce`.
 
 ---
 
@@ -99,12 +99,12 @@ then (render):  EvalLeb (df64, camera-relative) → Compact (live → index list
    `evaluate_neighbors` requires a **consistently-oriented** octahedron (every shared edge
    traversed in opposite directions by its two faces). World42's `lebFaceCorners` +
    `ROOT_NEIGHBORS` wind the 4 top faces opposite to the 4 bottom — so the GPU seed
-   (`ROOT_NEIGHBORS_W42` in `ocbt_engine_buffers.ts`) swaps L/R for the top faces, and the
-   matching `GPU_FACE_CORNERS` (in `ocbt_eval_leb.ts`) swaps their l/r. This single fix made
+   (`ROOT_NEIGHBORS_W42` in `terrain_engine_buffers.ts`) swaps L/R for the top faces, and the
+   matching `GPU_FACE_CORNERS` (in `terrain_eval_leb.ts`) swaps their l/r. This single fix made
    geometry decode + watertightness + conformity counts all correct.
 2. **Decode convention.** The GPU stores heap ids in the **reference leb** convention
    (seed v0=right, v1=apex, v2=left, spherical midpoints) over `GPU_FACE_CORNERS` — NOT the
-   legacy `ocbt_leb`/`cbt_leb` convention. The render path must decode with `ocbt_eval_leb`.
+   legacy `terrain_leb`/`terrain_leb` convention. The render path must decode with `terrain_eval_leb`.
 3. **Precision (Phase 3).** WGSL has no native f64 and World42's `doublepos` is f32. The
    depth-24 f32 ceiling has two causes: the normalize chain in the decode, and the
    per-vertex `dir*radius` (~0.24 m ULP at planet scale). Fix: decode in **df64** and emit
@@ -129,7 +129,7 @@ candidate counts).
 
 **Below paper parity:**
 
-| Aspect | Reference (`large_cbt`) | Here | Note |
+| Aspect | Reference (`large_terrain`) | Here | Note |
 |---|---|---|---|
 | Depth precision | **native FP64** → depth 63 clean | **emulated df64** + f32 floating-origin | usable ~L45; structural hard cap 60 (u64). *The main gap — a WGSL limitation, not a port bug.* |
 | Sum-reduce | packed variable-bit-width tree | simple `2·capacity` tree | the dominant remaining `O(capacity)` cost |

@@ -1,9 +1,9 @@
 import { Matrix, Vector3 } from '@babylonjs/core';
-import type { CbtClassifyParams } from '../cbt_classify';
-import { CbtState, type CbtNode } from '../cbt_state';
+import type { TerrainClassifyParams } from '../terrain_classify';
+import { TerrainState, type TerrainNode } from '../terrain_state';
 
 /**
- * Deterministic CBT fixtures shared by benchmarks and regression tests.
+ * Deterministic TERRAIN fixtures shared by benchmarks and regression tests.
  *
  * Everything here is seedless and platform-stable: no time, no RNG. Two calls
  * with the same arguments always produce byte-identical structures, which is
@@ -17,7 +17,7 @@ export const FIXTURE_RADIUS = 1000;
 export const FIXTURE_MAX_DEPTH = 24;
 
 /**
- * Grow a {@link CbtState} to at least `targetLeaves` leaves via uniform
+ * Grow a {@link TerrainState} to at least `targetLeaves` leaves via uniform
  * breadth-first splitting (every current leaf is split once per round, so the
  * leaf count roughly doubles each round). Deterministic and balanced.
  *
@@ -28,8 +28,8 @@ export function growUniform(
     targetLeaves: number,
     radius: number = FIXTURE_RADIUS,
     maxDepth: number = FIXTURE_MAX_DEPTH
-): CbtState {
-    const state = new CbtState(radius, maxDepth);
+): TerrainState {
+    const state = new TerrainState(radius, maxDepth);
     while (state.leafCount < targetLeaves) {
         const before = state.leafCount;
         const ids = state.getLeafNodes().map((leaf) => leaf.id);
@@ -47,7 +47,7 @@ export function makeLeafSet(
     targetLeaves: number,
     radius: number = FIXTURE_RADIUS,
     maxDepth: number = FIXTURE_MAX_DEPTH
-): CbtNode[] {
+): TerrainNode[] {
     return growUniform(targetLeaves, radius, maxDepth).getLeafNodes();
 }
 
@@ -63,15 +63,15 @@ export type ClassifyFixtureOpts = {
 };
 
 /**
- * Build a stable {@link CbtClassifyParams} for a leaf set, with the camera
+ * Build a stable {@link TerrainClassifyParams} for a leaf set, with the camera
  * placed on the +Z axis looking at a planet centered at the origin. The render
  * parent matrix is identity, so planet-local == render-space for the fixture.
  */
 export function makeClassifyParams(
-    leaves: ReadonlyArray<CbtNode>,
+    leaves: ReadonlyArray<TerrainNode>,
     radius: number = FIXTURE_RADIUS,
     opts: ClassifyFixtureOpts = {}
-): CbtClassifyParams {
+): TerrainClassifyParams {
     const {
         cameraDistance = radius * 1.5,
         viewportHeightPx = 1080,

@@ -1,6 +1,6 @@
 import { Vector3 } from '@babylonjs/core';
 
-export type CbtNode = {
+export type TerrainNode = {
     id: number;
     level: number;
     parentId: number | null;
@@ -88,7 +88,7 @@ const INITIAL_CAPACITY = 4096;
  * level). Decimation is conservative: a diamond collapses only when all four of
  * its triangles are leaves.
  */
-export class CbtState {
+export class TerrainState {
     private cap = 0;
     private verts!: Float64Array; // cap*9 — apex(0-2) left(3-5) right(6-8)
     private level!: Uint8Array;
@@ -104,8 +104,8 @@ export class CbtState {
     private _leafCount = 0;
 
     private leafCacheDirty = true;
-    private leafCache: CbtNode[] = [];
-    private nodePool: CbtNode[] = [];
+    private leafCache: TerrainNode[] = [];
+    private nodePool: TerrainNode[] = [];
 
     private readonly tmpMid = new Vector3();
 
@@ -138,9 +138,9 @@ export class CbtState {
         return this._leafCount;
     }
 
-    getLeafNodes(): CbtNode[] {
+    getLeafNodes(): TerrainNode[] {
         if (!this.leafCacheDirty) return this.leafCache;
-        const out: CbtNode[] = [];
+        const out: TerrainNode[] = [];
         for (let slot = 0; slot < this.nextFresh; slot++) {
             if (!this.testBit(this.alive, slot)) continue;
             if (!this.testBit(this.leafBits, slot)) continue;
@@ -279,7 +279,7 @@ export class CbtState {
         v[o + 8] = r.z * radius;
     }
 
-    private materialize(slot: number): CbtNode {
+    private materialize(slot: number): TerrainNode {
         const o = slot * 9;
         const v = this.verts;
         const c0 = this.child0[slot];

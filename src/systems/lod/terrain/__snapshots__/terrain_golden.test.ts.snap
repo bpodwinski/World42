@@ -1,5 +1,5 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`CBT golden master > produces a stable tree topology 1`] = `"c377937b"`;
+exports[`TERRAIN golden master > produces a stable tree topology 1`] = `"c377937b"`;
 
-exports[`CBT golden master > produces stable emitted geometry 1`] = `"7db0fc90"`;
+exports[`TERRAIN golden master > produces stable emitted geometry 1`] = `"7db0fc90"`;

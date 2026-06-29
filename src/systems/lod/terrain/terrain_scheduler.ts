@@ -11,12 +11,12 @@ import type {
     FloatingEntityInterface,
     OriginCamera,
 } from '../../../core/camera/camera_manager';
-import type { EmitResult } from './cbt_emit';
+import type { EmitResult } from './terrain_emit';
 import {
-    type CbtFrameParams,
-    type CbtGeometrySource,
-    type CbtSourceStats,
-} from './cbt_geometry_source';
+    type TerrainFrameParams,
+    type TerrainGeometrySource,
+    type TerrainSourceStats,
+} from './terrain_geometry_source';
 import {
     DEFAULT_CRATERS,
     DEFAULT_NOISE,
@@ -24,16 +24,16 @@ import {
     fbmGroundHeight,
     type CraterParams,
     type NoiseParams
-} from './cbt_noise';
-import { DEFAULT_LOD, type OcbtLodParams } from './cbt_lod';
-import { OcbtSource } from './ocbt/ocbt_source';
+} from './terrain_noise';
+import { DEFAULT_LOD, type TerrainLodParams } from './terrain_lod';
+import { TerrainSource } from './gpu/terrain_source';
 import type { WebGPUEngine } from '@babylonjs/core';
 import type { ResolvedLighting } from '../../../game_world/stellar_system/planet_lighting';
 
-/** Geometry backend for a CBT planet. */
-export type CbtType = 'gpu-ocbt';
+/** Geometry backend for a TERRAIN planet. */
+export type TerrainType = 'gpu-terrain';
 
-export type CbtPlanetOptions = {
+export type TerrainPlanetOptions = {
     key: string;
     entity: FloatingEntityInterface;
     renderParent: TransformNode;
@@ -47,12 +47,12 @@ export type CbtPlanetOptions = {
     craters?: CraterParams;
     /** Per-planet resolved lighting params (from planet_lighting.json). */
     lighting?: ResolvedLighting;
-    /** OCBT LOD / pool knobs. Default DEFAULT_LOD. */
-    lod?: OcbtLodParams;
+    /** TERRAIN LOD / pool knobs. Default DEFAULT_LOD. */
+    lod?: TerrainLodParams;
 };
 
-/** Per-planet telemetry, refreshed on each {@link CbtPlanet.update}. */
-export type CbtStats = {
+/** Per-planet telemetry, refreshed on each {@link TerrainPlanet.update}. */
+export type TerrainStats = {
     leafCount: number;
     splitsThisFrame: number;
     mergesThisFrame: number;
@@ -61,15 +61,15 @@ export type CbtStats = {
 };
 
 /** Minimal per-planet geometry for deterministic headless capture. */
-export type CbtPlanetInfo = {
+export type TerrainPlanetInfo = {
     key: string;
     /** Planet center in WorldDouble (sim units). */
     center: [number, number, number];
     radiusSim: number;
 };
 
-/** Scene-wide CBT telemetry aggregated across all planets. */
-export type CbtAggregateStats = {
+/** Scene-wide TERRAIN telemetry aggregated across all planets. */
+export type TerrainAggregateStats = {
     planetCount: number;
     leafCount: number;
     splitsThisFrame: number;
@@ -79,15 +79,15 @@ export type CbtAggregateStats = {
     /** Worst-case rebuild ms across planets. */
     rebuildMs: number;
     vertexCount: number;
-    /** OCBT compute GPU time (ms, last-second average), summed across planets — topology bucket. */
-    ocbtTopoMs: number;
-    /** OCBT EvaluateLEB (df64 noise) GPU time (ms), summed across planets. */
-    ocbtEvalMs: number;
-    /** OCBT draw-compaction GPU time (ms), summed across planets. */
-    ocbtCompactMs: number;
+    /** TERRAIN compute GPU time (ms, last-second average), summed across planets — topology bucket. */
+    terrainTopoMs: number;
+    /** TERRAIN EvaluateLEB (df64 noise) GPU time (ms), summed across planets. */
+    terrainEvalMs: number;
+    /** TERRAIN draw-compaction GPU time (ms), summed across planets. */
+    terrainCompactMs: number;
 };
 
-export class CbtPlanet {
+export class TerrainPlanet {
     readonly key: string;
     readonly entity: FloatingEntityInterface;
     readonly radiusSim: number;
@@ -97,14 +97,14 @@ export class CbtPlanet {
     // flood the WebGPU driver with 224 compute pipelines at startup (one per planet
     // × 14 shaders). Creation is deferred until the camera is actually close enough
     // to need terrain detail for this planet.
-    private source: CbtGeometrySource | null = null;
-    private sourceOpts: CbtPlanetOptions;
+    private source: TerrainGeometrySource | null = null;
+    private sourceOpts: TerrainPlanetOptions;
 
     private debugLod = false;
     private pendingWireframe = false;
     private pendingDebugLod = false;
     private _visible = true;
-    private readonly stats: CbtStats = {
+    private readonly stats: TerrainStats = {
         leafCount: 0,
         splitsThisFrame: 0,
         mergesThisFrame: 0,
@@ -116,12 +116,12 @@ export class CbtPlanet {
     private readonly starColor: Vector3;
     private noise: NoiseParams;
     private craters: CraterParams;
-    private lod: OcbtLodParams;
+    private lod: TerrainLodParams;
 
     constructor(
         private scene: Scene,
         private camera: OriginCamera,
-        opts: CbtPlanetOptions
+        opts: TerrainPlanetOptions
     ) {
         this.key = opts.key;
         this.entity = opts.entity;
@@ -136,7 +136,7 @@ export class CbtPlanet {
         // Source is NOT created here — deferred to the first update() call.
     }
 
-    private getOrCreateSource(): CbtGeometrySource {
+    private getOrCreateSource(): TerrainGeometrySource {
         if (!this.source) {
             this.source = this.createSource(this.sourceOpts);
             this.source.refresh();
@@ -148,20 +148,20 @@ export class CbtPlanet {
         return this.source;
     }
 
-    private createSource(opts: CbtPlanetOptions): CbtGeometrySource {
+    private createSource(opts: TerrainPlanetOptions): TerrainGeometrySource {
         const engine = this.scene.getEngine();
-        // OCBT (pool-CBT, HPG 2024): cost decoupled from subdivision depth via fixed
+        // TERRAIN (pool-TERRAIN, HPG 2024): cost decoupled from subdivision depth via fixed
         // pool capacity. Owns its own mesh/material; the listener is telemetry-only.
         // Right-sized to the measured ground peak (~401k live leaves at the grazing pole on Dev/Moon,
         // split 16px): 1<<19 = 524 288 slots holds it with ~24% headroom while halving the O(capacity)
         // topology passes (copy_neighbors / reduce / classify) and freeing ~190 MB VRAM per planet vs
         // 1<<20. Do NOT drop to 1<<18 (262k < the 401k peak → the limb under-tessellates). The readback
-        // saturation guard in OcbtSource warns once if any planet's live count approaches this pool.
+        // saturation guard in TerrainSource warns once if any planet's live count approaches this pool.
         // LOD / pool knobs now come from the (per-profile) lod block — see DEFAULT_LOD for the prior
         // hardcoded values and the rationale (pool sizing, hysteresis MERGE < SPLIT/sqrt(2), min/max
         // level). capacity = 1 << capacityPow.
         const lod = this.lod;
-        return new OcbtSource(
+        return new TerrainSource(
             engine as WebGPUEngine,
             this.scene,
             {
@@ -186,7 +186,7 @@ export class CbtPlanet {
 
     private onSourceUpdate = (
         _geometry: EmitResult | null,
-        stats: CbtSourceStats
+        stats: TerrainSourceStats
     ): void => {
         this.stats.classifyMs = stats.classifyMs;
         this.stats.splitsThisFrame = stats.splitsThisFrame;
@@ -204,7 +204,7 @@ export class CbtPlanet {
     private readonly tmpCollInv = new Matrix();
 
     /**
-     * Analytic hard-floor ground collision. The CBT/OCBT surface has no CPU mesh
+     * Analytic hard-floor ground collision. The TERRAIN/TERRAIN surface has no CPU mesh
      * (it lives only in GPU buffers / is procedurally bounded), so Babylon mesh
      * collision can't see it. Instead we clamp the camera against the SAME fbm
      * height field the shader renders:
@@ -241,7 +241,7 @@ export class CbtPlanet {
         this.renderParent.getWorldMatrix().invertToRef(this.tmpCollInv);
         Vector3.TransformNormalToRef(this.tmpCollOffset, this.tmpCollInv, this.tmpCollDir);
         this.tmpCollDir.normalize();
-        // Match the VISIBLE OCBT surface (macro + distance-faded detail), not the macro-only
+        // Match the VISIBLE TERRAIN surface (macro + distance-faded detail), not the macro-only
         // field — else the camera floats over detail troughs. camDist = camera->ground point
         // (radially, dist - radius) so the per-octave fade matches the shader's vertex fade.
         const camDistKm = Math.max(dist - this.radiusSim, 0);
@@ -275,7 +275,7 @@ export class CbtPlanet {
     /**
      * Hot-rebuild this planet's terrain with new baked params (noise / craters / lighting) WITHOUT a
      * page reload. Those constants are compiled into both WGSL programs (the df64 eval kernel and the
-     * render material), so the OCBT source is disposed and recreated; the topology re-converges over
+     * render material), so the TERRAIN source is disposed and recreated; the topology re-converges over
      * the next frames. The new mesh joins scene.meshes — the live frame-graph object list — so it is
      * picked up automatically. If the source was not created yet (inactive/far planet) the params are
      * just stored and take effect when it is first created.
@@ -284,7 +284,7 @@ export class CbtPlanet {
         noise?: NoiseParams;
         craters?: CraterParams;
         lighting?: ResolvedLighting;
-        lod?: OcbtLodParams;
+        lod?: TerrainLodParams;
     }): void {
         if (params.noise) this.noise = params.noise;
         if (params.craters) this.craters = params.craters;
@@ -330,11 +330,11 @@ export class CbtPlanet {
         return { distSim: dist, groundRSim: groundR };
     }
 
-    getStats(): Readonly<CbtStats> {
+    getStats(): Readonly<TerrainStats> {
         return this.stats;
     }
 
-    /** OCBT compute GPU timings (ms) for the perf HUD; zeros until the source is created. */
+    /** TERRAIN compute GPU timings (ms) for the perf HUD; zeros until the source is created. */
     getGpuTimings(): { topoMs: number; evalMs: number; compactMs: number } {
         return this.source?.getGpuTimings?.() ?? { topoMs: 0, evalMs: 0, compactMs: 0 };
     }
@@ -351,7 +351,7 @@ export class CbtPlanet {
 
     /**
      * Show/hide the planet mesh. Called by the scheduler when the planet leaves/enters the
-     * camera frustum: an off-screen OCBT mesh has procedural bounds (alwaysSelectAsActiveMesh)
+     * camera frustum: an off-screen TERRAIN mesh has procedural bounds (alwaysSelectAsActiveMesh)
      * so Babylon never culls it — without this it keeps drawing its full leaf set every frame.
      * No-op if unchanged; forwarded to the source (which disables the Babylon mesh) once created.
      */
@@ -389,14 +389,14 @@ export class CbtPlanet {
     }
 }
 
-export type CbtSchedulerOptions = {
+export type TerrainSchedulerOptions = {
     budgetMs?: number;
     /** Exclude off-screen (out-of-frustum) leaves from split candidates (default true). */
     frustumCull?: boolean;
 };
 
-export class CbtScheduler {
-    private planets: CbtPlanet[] = [];
+export class TerrainScheduler {
+    private planets: TerrainPlanet[] = [];
     private observer: Observer<Scene> | null = null;
     private budgetMs: number;
     private robin = 0;
@@ -409,7 +409,7 @@ export class CbtScheduler {
     private framePlanes: ReadonlyArray<Plane> | null = null;
     /**
      * While false, the onBeforeRender observer drives the heavy compute loop — the startup transient
-     * before the Frame Graph is built. Once the graph's OCBT compute task takes ownership it is flipped
+     * before the Frame Graph is built. Once the graph's TERRAIN compute task takes ownership it is flipped
      * true, so the heavy loop runs ONLY from the graph task (no double-tick). See setGraphOwnsCompute.
      */
     private graphOwnsCompute = false;
@@ -418,8 +418,8 @@ export class CbtScheduler {
     constructor(
         private scene: Scene,
         private camera: OriginCamera,
-        planets: CbtPlanet[],
-        options: CbtSchedulerOptions = {}
+        planets: TerrainPlanet[],
+        options: TerrainSchedulerOptions = {}
     ) {
         this.planets = planets;
         this.budgetMs = options.budgetMs ?? 2;
@@ -442,14 +442,14 @@ export class CbtScheduler {
         window.addEventListener('keydown', this.onKeyDown);
     }
 
-    setPlanets(planets: CbtPlanet[]): void {
+    setPlanets(planets: TerrainPlanet[]): void {
         this.planets = planets;
         this.robin = 0;
     }
 
-    /** Aggregate CBT telemetry across all planets for HUD / capture. */
-    getStats(): CbtAggregateStats {
-        const agg: CbtAggregateStats = {
+    /** Aggregate TERRAIN telemetry across all planets for HUD / capture. */
+    getStats(): TerrainAggregateStats {
+        const agg: TerrainAggregateStats = {
             planetCount: this.planets.length,
             leafCount: 0,
             splitsThisFrame: 0,
@@ -457,9 +457,9 @@ export class CbtScheduler {
             classifyMs: 0,
             rebuildMs: 0,
             vertexCount: 0,
-            ocbtTopoMs: 0,
-            ocbtEvalMs: 0,
-            ocbtCompactMs: 0,
+            terrainTopoMs: 0,
+            terrainEvalMs: 0,
+            terrainCompactMs: 0,
         };
         for (const planet of this.planets) {
             const s = planet.getStats();
@@ -470,15 +470,15 @@ export class CbtScheduler {
             agg.rebuildMs = Math.max(agg.rebuildMs, s.rebuildMs);
             agg.vertexCount += s.leafCount * 3;
             const t = planet.getGpuTimings();
-            agg.ocbtTopoMs += t.topoMs;
-            agg.ocbtEvalMs += t.evalMs;
-            agg.ocbtCompactMs += t.compactMs;
+            agg.terrainTopoMs += t.topoMs;
+            agg.terrainEvalMs += t.evalMs;
+            agg.terrainCompactMs += t.compactMs;
         }
         return agg;
     }
 
     /**
-     * Analytic hard-floor ground collision against the CBT/OCBT planets. The
+     * Analytic hard-floor ground collision against the TERRAIN/TERRAIN planets. The
      * camera can only be inside one planet's surface at a time, so we stop at the
      * first that clamps. Call once per frame AFTER the camera control has moved.
      */
@@ -489,7 +489,7 @@ export class CbtScheduler {
     }
 
     /**
-     * Nearest CBT/OCBT planet to the camera with its terrain-aware ground info, for the HUD
+     * Nearest TERRAIN/TERRAIN planet to the camera with its terrain-aware ground info, for the HUD
      * altitude read-out (so altitude is measured above the actual terrain, not sea level).
      */
     getNearestGroundInfo(): {
@@ -498,7 +498,7 @@ export class CbtScheduler {
         groundRSim: number;
         radiusSim: number;
     } | null {
-        let best: CbtPlanet | null = null;
+        let best: TerrainPlanet | null = null;
         let bestDist = Infinity;
         for (const planet of this.planets) {
             const d = Vector3.Distance(this.camera.doublepos, planet.entity.doublepos);
@@ -513,7 +513,7 @@ export class CbtScheduler {
     }
 
     /** Per-planet centers/radii for deterministic headless capture paths. */
-    getPlanetInfo(): CbtPlanetInfo[] {
+    getPlanetInfo(): TerrainPlanetInfo[] {
         return this.planets.map((planet) => ({
             key: planet.key,
             center: [
@@ -597,7 +597,7 @@ export class CbtScheduler {
     private readonly tmpCenterRender = new Vector3();
 
     /**
-     * Render-space bounding-sphere vs frustum test. Babylon never frustum-culls the OCBT mesh
+     * Render-space bounding-sphere vs frustum test. Babylon never frustum-culls the TERRAIN mesh
      * (alwaysSelectAsActiveMesh — procedural bounds), so an off-screen planet would otherwise
      * keep drawing its full leaf set AND keep refining every frame. We do the cull here.
      *
@@ -607,7 +607,7 @@ export class CbtScheduler {
      * always kept (its sphere surrounds the origin), so the ground planet never flickers off.
      */
     private isPlanetVisible(
-        planet: CbtPlanet,
+        planet: TerrainPlanet,
         planes: ReadonlyArray<Plane> | null
     ): boolean {
         if (!planes) return true;
@@ -626,7 +626,7 @@ export class CbtScheduler {
      * onBeforeRender observer. Always runs the cheap visibility cull (must precede Babylon's
      * active-mesh evaluation so the FrameGraphObjectList sees this frame's enabled set). The heavy
      * compute loop runs here ONLY during the startup transient before the Frame Graph takes over —
-     * once {@link setGraphOwnsCompute} is flipped, the graph's OCBT compute task drives runCompute().
+     * once {@link setGraphOwnsCompute} is flipped, the graph's TERRAIN compute task drives runCompute().
      */
     private tick = (): void => {
         this.runVisibility();
@@ -635,7 +635,7 @@ export class CbtScheduler {
 
     /**
      * Cheap per-frame pass: compute this frame's render-space frustum planes and cull off-screen
-     * planet meshes (an off-screen OCBT mesh has procedural bounds → Babylon never frustum-culls it).
+     * planet meshes (an off-screen TERRAIN mesh has procedural bounds → Babylon never frustum-culls it).
      * An invisible planet is also frozen in runCompute(). Stashes the planes for runCompute() to reuse;
      * under floating origin those render-space planes are orientation-only, so they remain valid after
      * the camera fold that runs between this pass and the compute task.
@@ -662,7 +662,7 @@ export class CbtScheduler {
     }
 
     /**
-     * Heavy per-frame pass: the budgeted, round-robin OCBT topology/eval/compact compute. Driven by
+     * Heavy per-frame pass: the budgeted, round-robin TERRAIN topology/eval/compact compute. Driven by
      * the Frame Graph compute task (or, before the graph is ready, by tick()). Reads the planes stashed
      * by runVisibility().
      */
@@ -678,7 +678,7 @@ export class CbtScheduler {
         const K = viewH / (2 * Math.tan(this.camera.fov * 0.5));
 
         // Skip threshold: if the root node SSE is below this, the planet will never
-        // split — no GPU compute needed. 4 px = half the OCBT merge threshold (8 px),
+        // split — no GPU compute needed. 4 px = half the TERRAIN merge threshold (8 px),
         // giving a 2× safety margin so inter-system planets are always culled while
         // a planet the camera is approaching stays active well before it would split.
         const SKIP_SSE_PX = 4.0;
@@ -705,7 +705,7 @@ export class CbtScheduler {
     }
 
     /**
-     * Hand ownership of the heavy compute loop to the Frame Graph's OCBT compute task. Called once the
+     * Hand ownership of the heavy compute loop to the Frame Graph's TERRAIN compute task. Called once the
      * graph has been built (see attachFrameGraph's onGraphReady). Until then tick() runs runCompute()
      * itself so the startup transient (before scene.frameGraph is installed) is not frozen.
      */

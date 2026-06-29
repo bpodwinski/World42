@@ -1,5 +1,5 @@
 // Longest-edge-bisection decode for the octahedron quad-sphere, WGSL. Mirrors the
-// CPU CbtState.subdivide exactly: a triangle (A=apex, L=left, R=right) bisects its
+// CPU TerrainState.subdivide exactly: a triangle (A=apex, L=left, R=right) bisects its
 // base edge (L,R) at VC = normalize(L+R); child0 = (VC, A, L), child1 = (VC, R, A).
 // The 8 octahedron faces are the depth-3 nodes (ids 8..15). A heap node (id, depth)
 // (depth >= 3) decodes to its leaf triangle by selecting the face from the high
@@ -14,7 +14,7 @@ struct LebTri {
     r : vec3<f32>,
 };
 
-// Octahedron faces, mirror of ROOT_ALR + VX in cbt_state.ts (apex, left, right).
+// Octahedron faces, mirror of ROOT_ALR + VX in terrain_state.ts (apex, left, right).
 fn leb_faceCorners(face : u32) -> LebTri {
     switch (face) {
         case 0u: { return LebTri(vec3<f32>(0.0, 1.0, 0.0), vec3<f32>(1.0, 0.0, 0.0), vec3<f32>(0.0, 0.0, 1.0)); }
@@ -34,7 +34,7 @@ fn leb_decode(id : u32, depth : u32) -> LebTri {
     // Dupuy longest-edge-bisection convention (leb__SplittingMatrix): the split
     // edge is (v0, v2) and the apex is the MIDDLE vertex v1; child0 = (v0, M, v1),
     // child1 = (v1, M, v2), M = mid(v0, v2). This is the convention the same-depth
-    // neighbor decode (cbt_conform.wgsl) is built for, so decode + neighbor agree
+    // neighbor decode (terrain_conform.wgsl) is built for, so decode + neighbor agree
     // and the mesh is watertight within a face. Feed the face as (v0=L, v1=apex,
     // v2=R) so the first bisection splits the equatorial hypotenuse (L,R).
     var v0 = fc.l;

@@ -1,4 +1,4 @@
-// OCBT engine — Bisect pass (one thread per allocate-list entry). Faithful port of
+// TERRAIN engine — Bisect pass (one thread per allocate-list entry). Faithful port of
 // BisectElement + evaluate_neighbors (update_utilities.hlsl), adapted to the flat
 // buffers. Each winner subdivides per its accumulated pattern (CENTER / RIGHT_DOUBLE /
 // LEFT_DOUBLE / TRIPLE), REUSING its own slot as child0 and the freshly-allocated
@@ -7,10 +7,10 @@
 // for the reciprocity fixup, marks the new pool slots allocated, and appends the
 // CENTER/RIGHT_DOUBLE propagation entry.
 //
-// Composed after: engineWgslPreamble + ocbt_u64.wgsl + ocbt_pool.wgsl + common.
+// Composed after: engineWgslPreamble + terrain_u64.wgsl + terrain_pool.wgsl + common.
 // neighbors    = CURRENT (this-frame) buffer, read-only (parent neighbors).
 // neighborsOut = NEXT (ping-pong) buffer, written here.
-// pool_tree(1) is declared by ocbt_pool.wgsl but unused here -> stripped (do not bind).
+// pool_tree(1) is declared by terrain_pool.wgsl but unused here -> stripped (do not bind).
 
 @group(0) @binding(2) var<storage, read_write> heapID       : array<vec2<u32>>;
 @group(0) @binding(3) var<storage, read>       neighbors    : array<u32>;
@@ -43,8 +43,8 @@ struct Eval { x : u32, y : u32 };
 // Port of evaluate_neighbors: which two child slots of `bisectorID` face `currentID`.
 fn evaluate_neighbors(currentID : u32, bisectorID : u32) -> Eval {
     var r : Eval;
-    r.x = OCBT_INVALID;
-    r.y = OCBT_INVALID;
+    r.x = TERRAIN_INVALID;
+    r.y = TERRAIN_INVALID;
     let pat = bd_pattern(bisectorID);
     let n0 = cn(bisectorID, 0u);
     let n1 = cn(bisectorID, 1u);
@@ -87,14 +87,14 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>,
     let s2 = bd_idx(currentID, 2u);
 
     // heap ids use the REFERENCE leb convention (faithful port). It differs from
-    // World42's ocbt_leb by a geometry-dependent per-level bit-swap, so the cross-check
+    // World42's terrain_leb by a geometry-dependent per-level bit-swap, so the cross-check
     // decodes GPU heap ids with a reference-convention decoder and compares GEOMETRY,
     // never raw heap-id labels (which only match within one convention).
     if (pattern == CENTER_SPLIT) {
         var ev : Eval;
-        ev.x = OCBT_INVALID;
-        ev.y = OCBT_INVALID;
-        if (p_n2 != OCBT_INVALID) { ev = evaluate_neighbors(currentID, p_n2); }
+        ev.x = TERRAIN_INVALID;
+        ev.y = TERRAIN_INVALID;
+        if (p_n2 != TERRAIN_INVALID) { ev = evaluate_neighbors(currentID, p_n2); }
 
         heapID[currentID] = heap_2h(baseHeap);
         heapID[s0] = heap_2hp1(baseHeap);
@@ -102,7 +102,7 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>,
         setNbOut(currentID, s0, ev.x, p_n0);
         setNbOut(s0, ev.y, currentID, p_n1);
 
-        setBd(currentID, currentID, OCBT_INVALID);
+        setBd(currentID, currentID, TERRAIN_INVALID);
         setBd(s0, currentID, p_n1);
 
         let loc = atomicAdd(&propagate[0], 1u);
@@ -110,9 +110,9 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>,
     } else if (pattern == RIGHT_DOUBLE) {
         let ev0 = evaluate_neighbors(currentID, p_n0);
         var ev1 : Eval;
-        ev1.x = OCBT_INVALID;
-        ev1.y = OCBT_INVALID;
-        if (p_n2 != OCBT_INVALID) { ev1 = evaluate_neighbors(currentID, p_n2); }
+        ev1.x = TERRAIN_INVALID;
+        ev1.y = TERRAIN_INVALID;
+        if (p_n2 != TERRAIN_INVALID) { ev1 = evaluate_neighbors(currentID, p_n2); }
 
         heapID[currentID] = heap_4h(baseHeap);
         heapID[s0] = heap_2hp1(baseHeap);
@@ -122,18 +122,18 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>,
         setNbOut(s0, ev1.y, currentID, p_n1);
         setNbOut(s1, ev0.y, currentID, ev1.x);
 
-        setBd(currentID, currentID, OCBT_INVALID);
+        setBd(currentID, currentID, TERRAIN_INVALID);
         setBd(s0, currentID, p_n1);
-        setBd(s1, currentID, OCBT_INVALID);
+        setBd(s1, currentID, TERRAIN_INVALID);
 
         let loc = atomicAdd(&propagate[0], 1u);
         atomicStore(&propagate[2u + loc], s0);
     } else if (pattern == LEFT_DOUBLE) {
         let ev0 = evaluate_neighbors(currentID, p_n1);
         var ev1 : Eval;
-        ev1.x = OCBT_INVALID;
-        ev1.y = OCBT_INVALID;
-        if (p_n2 != OCBT_INVALID) { ev1 = evaluate_neighbors(currentID, p_n2); }
+        ev1.x = TERRAIN_INVALID;
+        ev1.y = TERRAIN_INVALID;
+        if (p_n2 != TERRAIN_INVALID) { ev1 = evaluate_neighbors(currentID, p_n2); }
 
         heapID[currentID] = heap_2h(baseHeap);
         heapID[s0] = heap_4hpk(baseHeap, 2u);
@@ -143,17 +143,17 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>,
         setNbOut(s0, s1, ev0.x, ev1.y);
         setNbOut(s1, ev0.y, s0, currentID);
 
-        setBd(currentID, currentID, OCBT_INVALID);
-        setBd(s0, currentID, OCBT_INVALID);
-        setBd(s1, currentID, OCBT_INVALID);
+        setBd(currentID, currentID, TERRAIN_INVALID);
+        setBd(s0, currentID, TERRAIN_INVALID);
+        setBd(s1, currentID, TERRAIN_INVALID);
         // LEFT_DOUBLE emits no propagation entry (reference).
     } else { // TRIPLE
         let ev0 = evaluate_neighbors(currentID, p_n0);
         let ev1 = evaluate_neighbors(currentID, p_n1);
         var ev2 : Eval;
-        ev2.x = OCBT_INVALID;
-        ev2.y = OCBT_INVALID;
-        if (p_n2 != OCBT_INVALID) { ev2 = evaluate_neighbors(currentID, p_n2); }
+        ev2.x = TERRAIN_INVALID;
+        ev2.y = TERRAIN_INVALID;
+        if (p_n2 != TERRAIN_INVALID) { ev2 = evaluate_neighbors(currentID, p_n2); }
 
         heapID[currentID] = heap_4h(baseHeap);
         heapID[s0] = heap_4hpk(baseHeap, 2u);
@@ -165,10 +165,10 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>,
         setNbOut(s1, ev0.y, currentID, ev2.x);
         setNbOut(s2, ev1.y, s0, currentID);
 
-        setBd(currentID, currentID, OCBT_INVALID);
-        setBd(s0, currentID, OCBT_INVALID);
-        setBd(s1, currentID, OCBT_INVALID);
-        setBd(s2, currentID, OCBT_INVALID);
+        setBd(currentID, currentID, TERRAIN_INVALID);
+        setBd(s0, currentID, TERRAIN_INVALID);
+        setBd(s1, currentID, TERRAIN_INVALID);
+        setBd(s2, currentID, TERRAIN_INVALID);
         // TRIPLE emits no propagation entry (reference).
     }
 

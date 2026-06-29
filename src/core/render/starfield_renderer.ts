@@ -116,7 +116,7 @@ export function createStarfieldRenderer(
 
     // Four-vertex quad template. Positions are all-zero dummies: the vertex shader
     // derives world-space positions from the StorageBuffer (identical pattern to
-    // createOcbtTemplateMesh in ocbt_render_material.ts).
+    // createTerrainTemplateMesh in terrain_render_material.ts).
     const mesh = new Mesh('starfield', scene);
     const vd = new VertexData();
     vd.positions = [0, 0, 0,  0, 0, 0,  0, 0, 0,  0, 0, 0];  // 4 × vec3 dummies

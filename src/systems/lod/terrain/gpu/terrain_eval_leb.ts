@@ -1,22 +1,22 @@
 /**
- * OCBT vertex decode — REFERENCE leb convention over the consistently-wound
+ * TERRAIN vertex decode — REFERENCE leb convention over the consistently-wound
  * octahedron. This is the convention the GPU concurrent topology engine actually
- * stores heap ids in (see ocbt_engine_buffers.ts: the seed is reoriented so every
+ * stores heap ids in (see terrain_engine_buffers.ts: the seed is reoriented so every
  * shared edge is traversed in opposite directions by its two faces, as the ported
- * `evaluate_neighbors` requires). It is DISTINCT from World42's legacy `ocbt_leb.ts`
- * / `cbt_leb.wgsl` convention (lebFaceCorners + v0=left seed), which the implicit
- * CBT path uses — the two differ by a geometry-dependent per-level bit swap, so the
- * OCBT render path MUST decode with THIS module, never the legacy one.
+ * `evaluate_neighbors` requires). It is DISTINCT from World42's legacy `terrain_leb.ts`
+ * / `terrain_leb.wgsl` convention (lebFaceCorners + v0=left seed), which the implicit
+ * TERRAIN path uses — the two differ by a geometry-dependent per-level bit swap, so the
+ * TERRAIN render path MUST decode with THIS module, never the legacy one.
  *
  * This is the proven decoder extracted verbatim from the Phase 1c cross-check
- * (`ocbt_topology_gpu_test_main.ts`, where it validated 10/10 against the CPU oracle
- * by geometry). The WGSL twin (`ocbt_eval_leb.wgsl`) mirrors it bit-for-bit and is
+ * (`terrain_topology_gpu_test_main.ts`, where it validated 10/10 against the CPU oracle
+ * by geometry). The WGSL twin (`terrain_eval_leb.wgsl`) mirrors it bit-for-bit and is
  * itself GPU-cross-checked against this TS.
  *
  * heapID is a JS number here (exact for depth < 53); the GPU carries it as u64
- * (`ocbt_u64`). Decode is the closed-form barycentric matrix (planar), projected once.
+ * (`terrain_u64`). Decode is the closed-form barycentric matrix (planar), projected once.
  */
-import { lebDepth } from './ocbt_leb';
+import { lebDepth } from './terrain_leb';
 
 export type V3 = [number, number, number];
 
@@ -40,7 +40,7 @@ const IDENTITY3: Mat3 = [
 /**
  * Per-bit LEB splitting matrices (reference leb.hlsl `leb__SplittingMatrix`, exact
  * {0, 0.5, 1}). bit0 keeps the parent's {apex, left} (child 2h); bit1 keeps {apex,
- * right} (child 2h+1) — the invariant the OCBT topology relies on for integer labeling.
+ * right} (child 2h+1) — the invariant the TERRAIN topology relies on for integer labeling.
  */
 const SPLIT: readonly [Mat3, Mat3] = [
     [
@@ -72,7 +72,7 @@ function mat3Mul(a: Mat3, b: Mat3): Mat3 {
 
 /**
  * Consistently-wound octahedron face corners {apex, left, right}. Matches the GPU
- * seed adjacency in ocbt_engine_buffers (top faces 0..3 have l/r swapped vs the
+ * seed adjacency in terrain_engine_buffers (top faces 0..3 have l/r swapped vs the
  * legacy lebFaceCorners; bottom faces 4..7 identical), so every shared edge is
  * traversed in opposite directions by its two faces — the orientation the reference
  * engine's neighbor logic assumes.
@@ -89,13 +89,13 @@ export const GPU_FACE_CORNERS: ReadonlyArray<{ a: V3; l: V3; r: V3 }> = [
 ];
 
 /** Octahedron face index (0..7) of a heap id at the given depth. */
-export function ocbtFaceOf(heapID: number, depth: number): number {
+export function terrainFaceOf(heapID: number, depth: number): number {
     return Math.floor(heapID / Math.pow(2, depth - 3)) - 8;
 }
 
 /**
  * Decode a heap id to its three unit-sphere corners (v0, v1, v2) in the REFERENCE
- * leb convention, via the CLOSED-FORM barycentric matrix (Dupuy large_cbt:
+ * leb convention, via the CLOSED-FORM barycentric matrix (Dupuy large_terrain:
  * leb__SplittingMatrix + leb_DecodeNodeAttributeArray). Build W = product of the
  * per-bit split matrices over the `steps = depth-3` path bits (MSB->LSB, each split
  * left-multiplied); then each leaf corner is the barycentric combination
@@ -108,9 +108,9 @@ export function ocbtFaceOf(heapID: number, depth: number): number {
  *
  * CRITICAL seed: v0=right, v1=apex, v2=left over GPU_FACE_CORNERS.
  */
-export function ocbtCorners(heapID: number): [V3, V3, V3] {
+export function terrainCorners(heapID: number): [V3, V3, V3] {
     const depth = lebDepth(heapID);
-    const face = ocbtFaceOf(heapID, depth);
+    const face = terrainFaceOf(heapID, depth);
     const fc = GPU_FACE_CORNERS[face];
     const seed: readonly [V3, V3, V3] = [fc.r, fc.a, fc.l]; // (v0,v1,v2) = (right, apex, left)
     const steps = depth - 3;

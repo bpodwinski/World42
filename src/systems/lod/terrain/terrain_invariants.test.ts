@@ -4,15 +4,15 @@ import {
     classifyLeaves,
     classifySplitCandidates,
     measureLeafProjectedAreas,
-} from './cbt_classify';
-import { emitMeshFromLeaves } from './cbt_emit';
-import { CbtState, type CbtNode } from './cbt_state';
-import { makeClassifyParams, makeLeafSet } from './__fixtures__/cbt_fixtures';
+} from './terrain_classify';
+import { emitMeshFromLeaves } from './terrain_emit';
+import { TerrainState, type TerrainNode } from './terrain_state';
+import { makeClassifyParams, makeLeafSet } from './__fixtures__/terrain_fixtures';
 
 const RADIUS = 1000;
 const MAX_DEPTH = 24;
 
-describe('CBT invariants — classification', () => {
+describe('TERRAIN invariants — classification', () => {
     it('split candidate order is deterministic for identical input', () => {
         const leaves = makeLeafSet(2000, RADIUS, MAX_DEPTH);
         const params = makeClassifyParams(leaves, RADIUS);
@@ -76,10 +76,10 @@ describe('CBT invariants — classification', () => {
     });
 });
 
-describe('CBT invariants — single-pass classify (Phase 1)', () => {
+describe('TERRAIN invariants — single-pass classify (Phase 1)', () => {
     // Build a tree with real parent/child structure so merge aggregation is exercised.
     function grownLeaves() {
-        const state = new CbtState(RADIUS, MAX_DEPTH);
+        const state = new TerrainState(RADIUS, MAX_DEPTH);
         for (let round = 0; round < 5; round++) {
             const ids = state.getLeafNodes().map((l) => l.id);
             state.splitByPriority(ids, ids.length);
@@ -132,7 +132,7 @@ describe('CBT invariants — single-pass classify (Phase 1)', () => {
     });
 });
 
-describe('CBT invariants — backside culling (Phase 2)', () => {
+describe('TERRAIN invariants — backside culling (Phase 2)', () => {
     const CULL_MIN_DOT = -0.05;
 
     // A vertex is behind the horizon for a camera at (0,0,cameraDistance).
@@ -189,7 +189,7 @@ describe('CBT invariants — backside culling (Phase 2)', () => {
 
     it('does NOT cull a huge coarse triangle that straddles the horizon (startup fix)', () => {
         // Camera just above the +y pole of the 8 root triangles, very low altitude.
-        const state = new CbtState(RADIUS, MAX_DEPTH);
+        const state = new TerrainState(RADIUS, MAX_DEPTH);
         const leaves = state.getLeafNodes(); // 8 coarse roots
         const params = makeClassifyParams(leaves, RADIUS);
         const altitude = RADIUS * 1.01;
@@ -207,7 +207,7 @@ describe('CBT invariants — backside culling (Phase 2)', () => {
 
     it('produces a materially smaller tree at a fixed camera pose (the structural win)', () => {
         function simulateLeafCount(cull: boolean): number {
-            const state = new CbtState(RADIUS, MAX_DEPTH);
+            const state = new TerrainState(RADIUS, MAX_DEPTH);
             for (let round = 0; round < 8; round++) {
                 const leaves = state.getLeafNodes();
                 const params = makeClassifyParams(leaves, RADIUS, { cameraDistance: RADIUS * 1.1 });
@@ -239,8 +239,8 @@ describe('CBT invariants — backside culling (Phase 2)', () => {
     });
 });
 
-describe('CBT invariants — frustum culling', () => {
-    function leaf(id: number, cx: number, cy: number, cz: number, size: number): CbtNode {
+describe('TERRAIN invariants — frustum culling', () => {
+    function leaf(id: number, cx: number, cy: number, cz: number, size: number): TerrainNode {
         return {
             id,
             level: 0,
@@ -288,9 +288,9 @@ describe('CBT invariants — frustum culling', () => {
     });
 });
 
-describe('CBT invariants — topology', () => {
+describe('TERRAIN invariants — topology', () => {
     it('conserves leaf count: +2 per conformal (diamond) split', () => {
-        const state = new CbtState(RADIUS, MAX_DEPTH);
+        const state = new TerrainState(RADIUS, MAX_DEPTH);
         const before = state.leafCount;
         const ids = state.getLeafNodes().map((l) => l.id);
         const splits = state.splitByPriority(ids, ids.length);
@@ -299,7 +299,7 @@ describe('CBT invariants — topology', () => {
     });
 
     it('conserves leaf count: -2 per diamond merge, restoring the coarse pair', () => {
-        const state = new CbtState(RADIUS, MAX_DEPTH);
+        const state = new TerrainState(RADIUS, MAX_DEPTH);
         const target = state.getLeafNodes()[0];
         state.splitByPriority([target.id], 1);
         expect(state.leafCount).toBe(10); // diamond split
@@ -324,7 +324,7 @@ describe('CBT invariants — topology', () => {
     });
 });
 
-describe('CBT invariants — emitted mesh', () => {
+describe('TERRAIN invariants — emitted mesh', () => {
     it('emits exactly 3 vertices and 3 indices per leaf', () => {
         const leaves = makeLeafSet(1000, RADIUS, MAX_DEPTH);
         const mesh = emitMeshFromLeaves(leaves, RADIUS);

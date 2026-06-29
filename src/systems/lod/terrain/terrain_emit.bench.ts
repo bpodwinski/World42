@@ -1,6 +1,6 @@
 import { bench, describe } from 'vitest';
-import { CbtEmitCache, emitMeshFromLeaves } from './cbt_emit';
-import { FIXTURE_RADIUS, makeLeafSet } from './__fixtures__/cbt_fixtures';
+import { TerrainEmitCache, emitMeshFromLeaves } from './terrain_emit';
+import { FIXTURE_RADIUS, makeLeafSet } from './__fixtures__/terrain_fixtures';
 
 /**
  * `emitMeshFromLeaves` runs a full mesh rebuild on every topology change. With
@@ -14,7 +14,7 @@ for (const size of SIZES) {
     const leaves = makeLeafSet(size);
 
     // Pre-warmed cache for the steady-state (no topology change) bench.
-    const warmCache = new CbtEmitCache();
+    const warmCache = new TerrainEmitCache();
     warmCache.emit(leaves, FIXTURE_RADIUS);
 
     describe(`emitMeshFromLeaves ~${size} leaves`, () => {

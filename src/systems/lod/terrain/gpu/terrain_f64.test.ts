@@ -12,7 +12,7 @@ import {
     df64InvSqrt,
     df64Sqrt,
     type DF64
-} from './ocbt_f64';
+} from './terrain_f64';
 
 const f = Math.fround;
 
@@ -32,7 +32,7 @@ function expectClose(got: number, want: number, rel = REL): void {
     expect(Math.abs(got - want)).toBeLessThanOrEqual(tol);
 }
 
-describe('ocbt_f64 — representation', () => {
+describe('terrain_f64 — representation', () => {
     it('round-trips a plain f32 exactly', () => {
         for (const x of [0, 1, -1, 0.5, 1234.5, f(Math.PI)]) {
             const d = df64FromNumber(x);
@@ -55,7 +55,7 @@ describe('ocbt_f64 — representation', () => {
     });
 });
 
-describe('ocbt_f64 — add / sub / mul vs host double', () => {
+describe('terrain_f64 — add / sub / mul vs host double', () => {
     it('matches host arithmetic across magnitudes', () => {
         const r = rng(0xc0ffee);
         for (let i = 0; i < 4000; i++) {
@@ -96,7 +96,7 @@ describe('ocbt_f64 — add / sub / mul vs host double', () => {
     });
 });
 
-describe('ocbt_f64 — recip / div / invsqrt / sqrt vs host double', () => {
+describe('terrain_f64 — recip / div / invsqrt / sqrt vs host double', () => {
     const r = rng(0xabcdef);
     it('recip and div match host', () => {
         for (let i = 0; i < 3000; i++) {

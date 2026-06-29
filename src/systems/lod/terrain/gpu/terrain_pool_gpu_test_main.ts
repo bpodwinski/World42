@@ -1,23 +1,23 @@
 /**
- * Dev-only WebGPU test page entry: cross-checks the OCBT GPU pool allocator
- * (`ocbt_pool.wgsl`, driven by `OcbtPoolGpuHarness`) against the CPU oracle
- * (`OcbtPool`). For each capacity x allocation pattern it asserts the GPU sum-tree,
+ * Dev-only WebGPU test page entry: cross-checks the TERRAIN GPU pool allocator
+ * (`terrain_pool.wgsl`, driven by `TerrainPoolGpuHarness`) against the CPU oracle
+ * (`TerrainPool`). For each capacity x allocation pattern it asserts the GPU sum-tree,
  * the allocated count, and the GPU `decode_bit` / `decode_bit_complement` outputs all
  * match the mirror bit-for-bit — closing the Phase 0 verification gate that Vitest
  * cannot (no WebGPU in Node).
  *
- * Renders a PASS/FAIL report to the DOM and publishes `window.__OCBT_GPU_RESULT__`
+ * Renders a PASS/FAIL report to the DOM and publishes `window.__TERRAIN_GPU_RESULT__`
  * (shape: `{ pass, cases:[{name,pass,detail}], error? }`). Isolated from the planet
  * scene: its own minimal WebGPU engine, no LOD, no catalog.
  *
- * Reproduce: `npm run serve`, open http://localhost:19000/ocbt-test.html — the page
+ * Reproduce: `npm run serve`, open http://localhost:19000/terrain-test.html — the page
  * shows `PASS — N/N cases`. The page is a dev-only build entry (see rspack.config.js)
  * and is excluded from production builds. For automation, navigate a WebGPU-enabled
- * browser to that URL and read `window.__OCBT_GPU_RESULT__.pass`.
+ * browser to that URL and read `window.__TERRAIN_GPU_RESULT__.pass`.
  */
 import { EngineManager } from '../../../../core/render/engine_manager';
-import { OcbtPool } from './ocbt_cpu_mirror';
-import { OcbtPoolGpuHarness } from './ocbt_pool_gpu_harness';
+import { TerrainPool } from './terrain_cpu_mirror';
+import { TerrainPoolGpuHarness } from './terrain_pool_gpu_harness';
 import type { WebGPUEngine } from '@babylonjs/core';
 
 interface CaseResult {
@@ -28,7 +28,7 @@ interface CaseResult {
 
 declare global {
     interface Window {
-        __OCBT_GPU_RESULT__?: {
+        __TERRAIN_GPU_RESULT__?: {
             pass: boolean;
             cases: CaseResult[];
             error?: string;
@@ -69,7 +69,7 @@ function checkCase(
     gpu: { tree: Uint32Array; decodeOut: Uint32Array; count: number }
 ): CaseResult {
     const label = `cap=${capacity} ${name}`;
-    const pool = new OcbtPool(capacity);
+    const pool = new TerrainPool(capacity);
     for (const s of slots) pool.setBit(s, true);
     const tree = pool.treeSnapshot();
     const count = pool.count();
@@ -137,7 +137,7 @@ async function main(): Promise<void> {
         engine = await EngineManager.Create(canvas);
     } catch (e) {
         const error = `WebGPU unavailable: ${String(e)}`;
-        window.__OCBT_GPU_RESULT__ = { pass: false, cases, error };
+        window.__TERRAIN_GPU_RESULT__ = { pass: false, cases, error };
         render(out, cases, false, error);
         return;
     }
@@ -145,7 +145,7 @@ async function main(): Promise<void> {
     try {
         // 8 = golden; 1024/16384 exercise multi-level reduce + larger readback.
         for (const capacity of [8, 1024, 16384]) {
-            const harness = new OcbtPoolGpuHarness(engine, capacity);
+            const harness = new TerrainPoolGpuHarness(engine, capacity);
             await harness.whenReady();
             for (const { name, slots } of patterns(capacity)) {
                 const gpu = await harness.run(slots);
@@ -154,11 +154,11 @@ async function main(): Promise<void> {
             harness.dispose();
         }
         const pass = cases.every((c) => c.pass);
-        window.__OCBT_GPU_RESULT__ = { pass, cases };
+        window.__TERRAIN_GPU_RESULT__ = { pass, cases };
         render(out, cases, pass);
     } catch (e) {
         const error = String((e as Error)?.stack ?? e);
-        window.__OCBT_GPU_RESULT__ = { pass: false, cases, error };
+        window.__TERRAIN_GPU_RESULT__ = { pass: false, cases, error };
         render(out, cases, false, error);
     } finally {
         engine.dispose();

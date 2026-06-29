@@ -1,10 +1,10 @@
 /**
- * GPU pool harness — drives the OCBT pool core (`ocbt_pool.wgsl`) on a real WebGPU
+ * GPU pool harness — drives the TERRAIN pool core (`terrain_pool.wgsl`) on a real WebGPU
  * device: uploads a bitfield, runs the leaf prepass + level reduce, then the decode
- * pass, and reads `pool_tree` and `decodeOut` back. Used by `ocbt_pool_gpu_test_main`
- * to cross-check the GPU allocator against the CPU oracle (`OcbtPool`), closing the
+ * pass, and reads `pool_tree` and `decodeOut` back. Used by `terrain_pool_gpu_test_main`
+ * to cross-check the GPU allocator against the CPU oracle (`TerrainPool`), closing the
  * Phase 0 verification ("readback GPU reduce == mirror"). Reuses the compute/readback
- * patterns from `gpu/gpu_cbt_kernel.ts` (composeCompute, per-level UBOs, 2D dispatch
+ * patterns from `gpu/gpu_terrain_kernel.ts` (composeCompute, per-level UBOs, 2D dispatch
  * spill, StorageBuffer.read).
  *
  * WebGPU only (compute). Capacity is the pool slot count (power of two).
@@ -16,11 +16,11 @@ import {
     UniformBuffer,
     type WebGPUEngine
 } from '@babylonjs/core';
-import ocbtPoolWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_pool.wgsl';
-import ocbtPoolReduceWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_pool_reduce.compute.wgsl';
-import ocbtPoolDecodeWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_pool_decode.compute.wgsl';
-import { poolLayout, poolWgslPreamble } from './ocbt_buffers';
-import { log2PowerOfTwo } from './ocbt_pool';
+import terrainPoolWgsl from '../../../../assets/shaders/terrain/engine/terrain_pool.wgsl';
+import terrainPoolReduceWgsl from '../../../../assets/shaders/terrain/engine/terrain_pool_reduce.compute.wgsl';
+import terrainPoolDecodeWgsl from '../../../../assets/shaders/terrain/engine/terrain_pool_decode.compute.wgsl';
+import { poolLayout, poolWgslPreamble } from './terrain_buffers';
+import { log2PowerOfTwo } from './terrain_pool';
 
 const WORKGROUP_SIZE = 256;
 const MAX_DIM = 65535;
@@ -42,7 +42,7 @@ export interface PoolGpuRunResult {
     count: number;
 }
 
-export class OcbtPoolGpuHarness {
+export class TerrainPoolGpuHarness {
     readonly capacity: number;
     readonly depth: number;
 
@@ -67,7 +67,7 @@ export class OcbtPoolGpuHarness {
             layout.bitfieldBytes,
             // STORAGE: compute. WRITE (CopyDst): CPU uploads the seed bitfield.
             Constants.BUFFER_CREATIONFLAG_STORAGE | Constants.BUFFER_CREATIONFLAG_WRITE,
-            'ocbt_pool_bitfield'
+            'terrain_pool_bitfield'
         );
         this.tree = new StorageBuffer(
             engine,
@@ -77,7 +77,7 @@ export class OcbtPoolGpuHarness {
             Constants.BUFFER_CREATIONFLAG_STORAGE |
                 Constants.BUFFER_CREATIONFLAG_READ |
                 Constants.BUFFER_CREATIONFLAG_WRITE,
-            'ocbt_pool_tree'
+            'terrain_pool_tree'
         );
         this.decodeBuf = new StorageBuffer(
             engine,
@@ -85,13 +85,13 @@ export class OcbtPoolGpuHarness {
             Constants.BUFFER_CREATIONFLAG_STORAGE |
                 Constants.BUFFER_CREATIONFLAG_READ |
                 Constants.BUFFER_CREATIONFLAG_WRITE,
-            'ocbt_pool_decode'
+            'terrain_pool_decode'
         );
 
         this.reduce = new ComputeShader(
-            'ocbt_pool_reduce',
+            'terrain_pool_reduce',
             engine,
-            { computeSource: preamble + ocbtPoolWgsl + '\n' + ocbtPoolReduceWgsl },
+            { computeSource: preamble + terrainPoolWgsl + '\n' + terrainPoolReduceWgsl },
             {
                 bindingsMapping: {
                     pool_bitfield: { group: 0, binding: 0 },
@@ -102,7 +102,7 @@ export class OcbtPoolGpuHarness {
         );
         this.reduce.onError = (_e, errors) => {
             // eslint-disable-next-line no-console
-            console.error(`[OcbtPoolGpuHarness] reduce compile error:\n${errors}`);
+            console.error(`[TerrainPoolGpuHarness] reduce compile error:\n${errors}`);
         };
         this.reduce.setStorageBuffer('pool_bitfield', this.bitfield);
         this.reduce.setStorageBuffer('pool_tree', this.tree);
@@ -112,9 +112,9 @@ export class OcbtPoolGpuHarness {
         // so reflection strips it from the layout — do NOT bind it here (binding an
         // absent slot invalidates the whole bind group).
         this.decode = new ComputeShader(
-            'ocbt_pool_decode',
+            'terrain_pool_decode',
             engine,
-            { computeSource: preamble + ocbtPoolWgsl + '\n' + ocbtPoolDecodeWgsl },
+            { computeSource: preamble + terrainPoolWgsl + '\n' + terrainPoolDecodeWgsl },
             {
                 bindingsMapping: {
                     pool_tree: { group: 0, binding: 1 },
@@ -124,7 +124,7 @@ export class OcbtPoolGpuHarness {
         );
         this.decode.onError = (_e, errors) => {
             // eslint-disable-next-line no-console
-            console.error(`[OcbtPoolGpuHarness] decode compile error:\n${errors}`);
+            console.error(`[TerrainPoolGpuHarness] decode compile error:\n${errors}`);
         };
         this.decode.setStorageBuffer('pool_tree', this.tree);
         this.decode.setStorageBuffer('decodeOut', this.decodeBuf);
@@ -132,7 +132,7 @@ export class OcbtPoolGpuHarness {
         // One UBO per level (0..depth). Reusing a single UBO across same-submit
         // dispatches coalesces to the last value, so each level needs its own.
         for (let level = 0; level <= this.depth; level++) {
-            const ubo = new UniformBuffer(engine, undefined, undefined, `ocbt_reduce_lvl_${level}`);
+            const ubo = new UniformBuffer(engine, undefined, undefined, `terrain_reduce_lvl_${level}`);
             ubo.addUniform('data', 4);
             ubo.updateInt4('data', level, 0, 0, 0);
             ubo.update();
@@ -144,7 +144,7 @@ export class OcbtPoolGpuHarness {
         const end = performance.now() + timeoutMs;
         while (!this.reduce.isReady() || !this.decode.isReady()) {
             if (performance.now() > end) {
-                throw new Error('OcbtPoolGpuHarness compute shaders not ready (timeout)');
+                throw new Error('TerrainPoolGpuHarness compute shaders not ready (timeout)');
             }
             await new Promise((r) => setTimeout(r, 10));
         }
@@ -161,7 +161,7 @@ export class OcbtPoolGpuHarness {
 
     /**
      * Upload the given allocated slots, run reduce + decode on the GPU, and read the
-     * tree and decode outputs back. The returned arrays are compared against `OcbtPool`
+     * tree and decode outputs back. The returned arrays are compared against `TerrainPool`
      * by the caller.
      */
     async run(allocatedSlots: Iterable<number>): Promise<PoolGpuRunResult> {

@@ -18,7 +18,7 @@
 // No depth write → terrain depth buffer is untouched.
 //
 // BJS WGSL note: BJS ShaderMaterial does NOT auto-inject the WebGPU NDC-Y flip that it
-// applies when transpiling GLSL. The Y-flip is done manually (same as ocbt_render_material).
+// applies when transpiling GLSL. The Y-flip is done manually (same as terrain_render_material).
 
 // [ra, dec, mag, bv] per star — positional data used for direction + scintillation seed.
 var<storage, read> starData   : array<vec4<f32>>;

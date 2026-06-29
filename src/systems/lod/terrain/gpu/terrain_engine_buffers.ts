@@ -1,15 +1,15 @@
 /**
- * OCBT concurrent-engine buffer layout — single source of truth for EVERY storage
+ * TERRAIN concurrent-engine buffer layout — single source of truth for EVERY storage
  * buffer the GPU concurrent bisector engine needs (the GPU twin of the sequential
- * CPU oracle `ocbt_topology.ts`). Pure sizing + binding indices + seed data, no
+ * CPU oracle `terrain_topology.ts`). Pure sizing + binding indices + seed data, no
  * Babylon import, so the whole layout is unit-testable in Node and the WGSL, the
  * kernel (which creates the real `StorageBuffer`s) and the CPU mirror cross-check all
  * agree on capacity/strides.
  *
  * Element addressing: every per-bisector buffer is indexed by POOL SLOT in
- * [0, CAPACITY). This is the OCBT pool model (cost decoupled from subdivision depth) —
+ * [0, CAPACITY). This is the TERRAIN pool model (cost decoupled from subdivision depth) —
  * the reference's `totalNumElements` maps to World42's pool `capacity`. The pool
- * bitfield + sum-tree (binding 0/1, reused from `ocbt_buffers.ts`) tell the engine
+ * bitfield + sum-tree (binding 0/1, reused from `terrain_buffers.ts`) tell the engine
  * which slots are live and feed `pool_decodeBitComplement` for allocation.
  *
  * Neighbor convention map (reference uint3 (n0,n1,n2)  <->  World42 [BASE,LEFT,RIGHT]):
@@ -28,17 +28,17 @@
  *   a WGSL struct array, so there is no std430 struct padding to reason about.
  */
 import {
-    OCBT_DEFAULT_CAPACITY,
+    TERRAIN_DEFAULT_CAPACITY,
     assertPowerOfTwo,
     bitfieldWordCount
-} from './ocbt_pool';
+} from './terrain_pool';
 
 const BYTES_PER_U32 = 4;
 
-// --- sentinels / enums (mirror bisector.hlsl + ocbt_topology.ts) ----------------
+// --- sentinels / enums (mirror bisector.hlsl + terrain_topology.ts) ----------------
 
 /** No neighbor / no index. Reference INVALID_POINTER = 0xFFFFFFFF. */
-export const OCBT_INVALID = 0xffffffff >>> 0;
+export const TERRAIN_INVALID = 0xffffffff >>> 0;
 
 /** subdivisionPattern bits (reference update_utilities.hlsl). */
 export const NO_SPLIT = 0x00;
@@ -67,19 +67,19 @@ export const N0 = 0; // World42 LEFT
 export const N1 = 1; // World42 RIGHT
 export const N2 = 2; // World42 BASE (twin / hypotenuse)
 
-// World42 mirror edge indices (ocbt_topology.ts).
+// World42 mirror edge indices (terrain_topology.ts).
 export const W42_BASE = 0;
 export const W42_LEFT = 1;
 export const W42_RIGHT = 2;
 
 // --- binding plan (group 0) -----------------------------------------------------
-// 0/1 reused from ocbt_buffers.ts (pool bitfield + sum-tree). The engine buffers
+// 0/1 reused from terrain_buffers.ts (pool bitfield + sum-tree). The engine buffers
 // continue from 2. Each pass binds the SUBSET it touches (Babylon strips unbound
 // slots via reflection, so a pass declares only what it reads/writes).
 
 export const BINDING = {
-    POOL_BITFIELD: 0, // array<atomic<u32>>  (ocbt_buffers)
-    POOL_TREE: 1, // array<u32>          (ocbt_buffers)
+    POOL_BITFIELD: 0, // array<atomic<u32>>  (terrain_buffers)
+    POOL_TREE: 1, // array<u32>          (terrain_buffers)
     HEAP_ID: 2, // array<u32> flat, 2/slot (u64 lo,hi) — NOT vec2 (avoid std430 stride)
     NEIGHBORS: 3, // array<u32> flat, 3/slot  PING (read this frame)
     NEIGHBORS_OUT: 4, // array<u32> flat, 3/slot  PONG (write this frame)
@@ -198,7 +198,7 @@ export function propagateWords(capacity: number): number {
 }
 
 export function engineLayout(
-    capacity: number = OCBT_DEFAULT_CAPACITY
+    capacity: number = TERRAIN_DEFAULT_CAPACITY
 ): EngineBufferLayout {
     assertPowerOfTwo(capacity);
     const depth = 31 - Math.clz32(capacity);
@@ -257,7 +257,7 @@ export function engineLayout(
 // edge is traversed in OPPOSITE directions by its two faces — standard manifold
 // orientation). This is REQUIRED by the ported reference engine: BisectElement's
 // `evaluate_neighbors` assumes a BASE-twin shares the split edge FLIPPED, which only
-// holds for consistent orientation. World42's ocbt_topology.ts ROOT_NEIGHBORS (and
+// holds for consistent orientation. World42's terrain_topology.ts ROOT_NEIGHBORS (and
 // lebFaceCorners) wind the 4 TOP faces opposite to the 4 BOTTOM faces, so vs that
 // mirror the top faces (0..3) have LEFT<->RIGHT swapped here; the bottom faces (4..7)
 // are identical. The matching consistently-wound face corners (top faces' l<->r
@@ -293,9 +293,9 @@ export interface EngineSeed {
  * reference (n0=LEFT, n1=RIGHT, n2=BASE). The caller uploads each prefix into the
  * front of its full-capacity buffer (the rest stays zero = free / heapID 0).
  */
-export function buildEngineSeed(capacity: number = OCBT_DEFAULT_CAPACITY): EngineSeed {
+export function buildEngineSeed(capacity: number = TERRAIN_DEFAULT_CAPACITY): EngineSeed {
     assertPowerOfTwo(capacity);
-    if (capacity < 8) throw new Error('OCBT capacity must hold the 8 root bisectors');
+    if (capacity < 8) throw new Error('TERRAIN capacity must hold the 8 root bisectors');
     const heapID = new Uint32Array(8 * HEAP_ID_WORDS);
     const neighbors = new Uint32Array(8 * NEIGHBORS_WORDS);
     const bisectorData = new Uint32Array(8 * BISECTOR_DATA_WORDS);
@@ -311,13 +311,13 @@ export function buildEngineSeed(capacity: number = OCBT_DEFAULT_CAPACITY): Engin
         // state=UNCHANGED(0), flags=VISIBLE, propagationID=INVALID.
         const b = i * BISECTOR_DATA_WORDS;
         bisectorData[b + BD_PATTERN] = NO_SPLIT;
-        bisectorData[b + BD_INDEX0] = OCBT_INVALID;
-        bisectorData[b + BD_INDEX1] = OCBT_INVALID;
-        bisectorData[b + BD_INDEX2] = OCBT_INVALID;
-        bisectorData[b + BD_PROBLEMATIC] = OCBT_INVALID;
+        bisectorData[b + BD_INDEX0] = TERRAIN_INVALID;
+        bisectorData[b + BD_INDEX1] = TERRAIN_INVALID;
+        bisectorData[b + BD_INDEX2] = TERRAIN_INVALID;
+        bisectorData[b + BD_PROBLEMATIC] = TERRAIN_INVALID;
         bisectorData[b + BD_STATE] = UNCHANGED_ELEMENT >>> 0;
         bisectorData[b + BD_FLAGS] = VISIBLE_BISECTOR;
-        bisectorData[b + BD_PROPAGATION] = OCBT_INVALID;
+        bisectorData[b + BD_PROPAGATION] = TERRAIN_INVALID;
     }
     const bitfield = new Uint32Array(bitfieldWordCount(capacity));
     bitfield[0] = 0xff; // slots 0..7 allocated
@@ -329,14 +329,14 @@ export function buildEngineSeed(capacity: number = OCBT_DEFAULT_CAPACITY): Engin
  * and the sentinels, so the WGSL and this TS layout cannot drift.
  */
 export function engineWgslPreamble(
-    capacity: number = OCBT_DEFAULT_CAPACITY
+    capacity: number = TERRAIN_DEFAULT_CAPACITY
 ): string {
     assertPowerOfTwo(capacity);
     const depth = 31 - Math.clz32(capacity);
     return (
-        `const OCBT_CAPACITY : u32 = ${capacity >>> 0}u;\n` +
-        `const OCBT_DEPTH : u32 = ${depth}u;\n` +
-        `const OCBT_INVALID : u32 = 4294967295u;\n` +
+        `const TERRAIN_CAPACITY : u32 = ${capacity >>> 0}u;\n` +
+        `const TERRAIN_DEPTH : u32 = ${depth}u;\n` +
+        `const TERRAIN_INVALID : u32 = 4294967295u;\n` +
         `const BISECTOR_DATA_WORDS : u32 = ${BISECTOR_DATA_WORDS}u;\n`
     );
 }

@@ -1,10 +1,10 @@
-// OCBT engine — PropagateSimplify pass (one thread per simplify-propagation entry).
+// TERRAIN engine — PropagateSimplify pass (one thread per simplify-propagation entry).
 // Faithful port of PropagateElementSimplify (update_utilities.hlsl): after a collapse,
 // repoint the affected neighbour's references from the deleted pair to the surviving
 // (risen) slot. Three cases: neighbour unchanged; neighbour also merged but still
 // alive; neighbour merged AND gone (fix its pair instead). In-place on the live buffer.
 //
-// Composed after: engineWgslPreamble + ocbt_u64.wgsl + common.
+// Composed after: engineWgslPreamble + terrain_u64.wgsl + common.
 
 @group(0) @binding(2) var<storage, read>       heapID       : array<vec2<u32>>;
 @group(0) @binding(3) var<storage, read_write> neighbors    : array<u32>;
@@ -24,7 +24,7 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>,
 
     let deletedPair = bdf(currentID, BD_PROPAGATION);
     let neighborID = bdf(currentID, BD_PROBLEMATIC);
-    if (neighborID == OCBT_INVALID) { return; }
+    if (neighborID == TERRAIN_INVALID) { return; }
 
     let nState = bdf(neighborID, BD_STATE);
     if (nState != ST_MERGED) {
@@ -46,5 +46,5 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>,
         }
     }
 
-    bisectorData[currentID * BD_WORDS + BD_PROBLEMATIC] = OCBT_INVALID;
+    bisectorData[currentID * BD_WORDS + BD_PROBLEMATIC] = TERRAIN_INVALID;
 }

@@ -1,7 +1,7 @@
-// u64 emulation for the OCBT path. WGSL has no 64-bit integer type, yet OCBT heap
+// u64 emulation for the TERRAIN path. WGSL has no 64-bit integer type, yet TERRAIN heap
 // IDs need ~63 bits at terrain depth ~60, so a u64 is carried as a vec2<u32> =
 // (lo, hi): .x holds the low 32 bits, .y the high 32 bits. This mirrors
-// src/systems/lod/cbt/ocbt/ocbt_u64.ts EXACTLY (same lane layout, same branches),
+// src/systems/lod/terrain/gpu/terrain_u64.ts EXACTLY (same lane layout, same branches),
 // so the GPU and the CPU oracle decode every heap ID identically.
 //
 // Implemented set matches the native uint64_t ops used by leb.hlsl: firstLeadingBit

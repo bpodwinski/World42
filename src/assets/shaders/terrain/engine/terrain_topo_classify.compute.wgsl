@@ -1,14 +1,14 @@
-// OCBT engine — Classify pass (one thread per pool slot). Port of ClassifyElement
+// TERRAIN engine — Classify pass (one thread per pool slot). Port of ClassifyElement
 // (update_utilities.hlsl) with the camera/geometry metric REPLACED by a deterministic,
 // CONVENTION-INVARIANT per-face target-level predicate: refine a leaf while its level
 // (depth-3) is below its octahedron face's target level. The face is the top heap bits
-// (heap >> (depth-3) = 8..15), identical in the reference and ocbt_leb conventions, so
+// (heap >> (depth-3) = 8..15), identical in the reference and terrain_leb conventions, so
 // the concurrent GPU and the sequential CPU oracle refine the SAME geometric regions
 // and converge to the same conforming mesh — without depending on the (differing)
 // path-bit labeling. Resets each live slot's per-frame BisectorData fields and appends
 // BISECT candidates to the classification split list. Simplify (merge) is out of scope.
 //
-// Composed after: engineWgslPreamble + ocbt_u64.wgsl + common.
+// Composed after: engineWgslPreamble + terrain_u64.wgsl + common.
 //
 // faceTarget layout: 8 u32, faceTarget[f] = target LEVEL (depth-3) for face f (0..7).
 
@@ -21,7 +21,7 @@
 fn main(@builtin(global_invocation_id) gid : vec3<u32>,
         @builtin(num_workgroups) nwg : vec3<u32>) {
     let id = linear_id(gid, nwg.x);
-    if (id >= OCBT_CAPACITY) { return; }
+    if (id >= TERRAIN_CAPACITY) { return; }
 
     let heap = heapID[id];
     if (heap_is_zero(heap)) { return; }      // dead slot
@@ -31,7 +31,7 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>,
     let b = id * BD_WORDS;
     bisectorData[b + BD_PATTERN]     = NO_SPLIT;
     bisectorData[b + BD_STATE]       = ST_UNCHANGED;
-    bisectorData[b + BD_PROBLEMATIC] = OCBT_INVALID;
+    bisectorData[b + BD_PROBLEMATIC] = TERRAIN_INVALID;
     bisectorData[b + BD_FLAGS]       = FLAG_VISIBLE;
 
     // Compare this leaf's level to its face's target: below => split, above => simplify.
@@ -51,7 +51,7 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>,
         bisectorData[b + BD_STATE] = ST_SIMPLIFY;
         if (u64_bit(heap, 0u) == 0u) {
             let slot = atomicAdd(&classification[SIMPLIFY_COUNTER], 1u);
-            atomicStore(&classification[CLASSIFY_COUNTER_OFFSET + OCBT_CAPACITY + slot], id);
+            atomicStore(&classification[CLASSIFY_COUNTER_OFFSET + TERRAIN_CAPACITY + slot], id);
         }
     }
 }

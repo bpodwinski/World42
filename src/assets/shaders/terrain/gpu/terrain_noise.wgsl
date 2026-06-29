@@ -1,19 +1,19 @@
-// CBT procedural noise — WGSL port of _cbtNoise.glsl (itself a port of cbt_noise.ts).
+// TERRAIN procedural noise — WGSL port of _terrainNoise.glsl (itself a port of terrain_noise.ts).
 // Gustavson 3D simplex with analytic gradient + fbm. The includer must define the
 // baked constants and the permutation storage buffer BEFORE this file:
-//   const CBT_OCTAVES : i32 = ...;
-//   const CBT_BASE_FREQ : f32 = ...;   const CBT_BASE_AMP : f32 = ...;
-//   const CBT_LACUNARITY : f32 = ...;  const CBT_PERSISTENCE : f32 = ...;
-//   const CBT_GLOBAL_AMP : f32 = ...;
-//   var<storage, read> cbtPerm : array<u32>;   // 256 entries, values 0..255
+//   const TERRAIN_OCTAVES : i32 = ...;
+//   const TERRAIN_BASE_FREQ : f32 = ...;   const TERRAIN_BASE_AMP : f32 = ...;
+//   const TERRAIN_LACUNARITY : f32 = ...;  const TERRAIN_PERSISTENCE : f32 = ...;
+//   const TERRAIN_GLOBAL_AMP : f32 = ...;
+//   var<storage, read> terrainPerm : array<u32>;   // 256 entries, values 0..255
 // Callers of the *_at (continued-detail) helpers must ALSO define:
-//   const CBT_DETAIL_OCTAVES : i32 = ...;  // extra octaves past CBT_OCTAVES (0 = off)
-//   const CBT_DETAIL_RANGE : f32 = ...;    // fade-in distance in wavelengths (~60)
+//   const TERRAIN_DETAIL_OCTAVES : i32 = ...;  // extra octaves past TERRAIN_OCTAVES (0 = off)
+//   const TERRAIN_DETAIL_RANGE : f32 = ...;    // fade-in distance in wavelengths (~60)
 
-const CBT_MAX_OCTAVES: i32 = 12;
-const CBT_MAX_DETAIL: i32 = 12;
+const TERRAIN_MAX_OCTAVES: i32 = 12;
+const TERRAIN_MAX_DETAIL: i32 = 12;
 
-fn cbtGrad3(i: i32) -> vec3<f32> {
+fn terrainGrad3(i: i32) -> vec3<f32> {
     switch i % 12 {
         case 0: { return vec3<f32>(1.0, 1.0, 0.0); }
         case 1: { return vec3<f32>(-1.0, 1.0, 0.0); }
@@ -30,16 +30,16 @@ fn cbtGrad3(i: i32) -> vec3<f32> {
     }
 }
 
-fn cbtPermAt(i: i32) -> i32 {
-    return i32(cbtPerm[u32(i & 255)]);
+fn terrainPermAt(i: i32) -> i32 {
+    return i32(terrainPerm[u32(i & 255)]);
 }
 
-fn cbtCorner(d: vec3<f32>, gi: i32, n: ptr<function, f32>, grad: ptr<function, vec3<f32>>) {
+fn terrainCorner(d: vec3<f32>, gi: i32, n: ptr<function, f32>, grad: ptr<function, vec3<f32>>) {
     let t = 0.6 - dot(d, d);
     if t <= 0.0 {
         return;
     }
-    let g = cbtGrad3(gi % 12);
+    let g = terrainGrad3(gi % 12);
     let gd = dot(g, d);
     let t2 = t * t;
     let t3 = t2 * t;
@@ -49,7 +49,7 @@ fn cbtCorner(d: vec3<f32>, gi: i32, n: ptr<function, f32>, grad: ptr<function, v
 }
 
 // vec4(value, d/dx, d/dy, d/dz); value ~ [-1, 1].
-fn cbtSimplex3_d(p: vec3<f32>) -> vec4<f32> {
+fn terrainSimplex3_d(p: vec3<f32>) -> vec4<f32> {
     let F3 = 1.0 / 3.0;
     let G3 = 1.0 / 6.0;
 
@@ -83,15 +83,15 @@ fn cbtSimplex3_d(p: vec3<f32>) -> vec4<f32> {
     var n: f32 = 0.0;
     var grad: vec3<f32> = vec3<f32>(0.0);
 
-    let gi0 = cbtPermAt(ix + cbtPermAt(iy + cbtPermAt(iz)));
-    let gi1 = cbtPermAt(ix + e1i.x + cbtPermAt(iy + e1i.y + cbtPermAt(iz + e1i.z)));
-    let gi2 = cbtPermAt(ix + e2i.x + cbtPermAt(iy + e2i.y + cbtPermAt(iz + e2i.z)));
-    let gi3 = cbtPermAt(ix + 1 + cbtPermAt(iy + 1 + cbtPermAt(iz + 1)));
+    let gi0 = terrainPermAt(ix + terrainPermAt(iy + terrainPermAt(iz)));
+    let gi1 = terrainPermAt(ix + e1i.x + terrainPermAt(iy + e1i.y + terrainPermAt(iz + e1i.z)));
+    let gi2 = terrainPermAt(ix + e2i.x + terrainPermAt(iy + e2i.y + terrainPermAt(iz + e2i.z)));
+    let gi3 = terrainPermAt(ix + 1 + terrainPermAt(iy + 1 + terrainPermAt(iz + 1)));
 
-    cbtCorner(p0, gi0, &n, &grad);
-    cbtCorner(p1, gi1, &n, &grad);
-    cbtCorner(p2, gi2, &n, &grad);
-    cbtCorner(p3, gi3, &n, &grad);
+    terrainCorner(p0, gi0, &n, &grad);
+    terrainCorner(p1, gi1, &n, &grad);
+    terrainCorner(p2, gi2, &n, &grad);
+    terrainCorner(p3, gi3, &n, &grad);
 
     return vec4<f32>(32.0 * n, 32.0 * grad);
 }
@@ -99,12 +99,12 @@ fn cbtSimplex3_d(p: vec3<f32>) -> vec4<f32> {
 // --- CRATER FIELD (Worley cellular + radial profile, analytic gradient) -------------------
 // Real geometric craters: the DOMINANT relief of an airless body. Added to the fbm height AND
 // gradient so crater walls displace the geometry AND shade correctly (the gradient flows through
-// cbtNoiseNormalAt's tangent projection). Crater frequencies are low (cell >= ~20 km) so the cell
+// terrainNoiseNormalAt's tangent projection). Crater frequencies are low (cell >= ~20 km) so the cell
 // coords are EXACT in f32 — the df64 path reuses this verbatim on the narrowed dir. Same math is
-// mirrored in cbt_noise.ts (CPU, collision). Hash uses cbtPermAt ONLY (bit-identical f64/f32).
-// NOTE: the crater constants (CBT_CRATER_CLASSES / _SCALE / _RANGE / _NEAR, CBT_RIM_IRR / _FREQ,
-// CBT_CRATER_FRESH, CBT_RAY_CLASSES) and the craterParams() switch are INJECTED before this file by
-// craterHeaderWgsl() (cbt_noise.ts) from the active CraterParams — the SINGLE source of truth shared
+// mirrored in terrain_noise.ts (CPU, collision). Hash uses terrainPermAt ONLY (bit-identical f64/f32).
+// NOTE: the crater constants (TERRAIN_CRATER_CLASSES / _SCALE / _RANGE / _NEAR, TERRAIN_RIM_IRR / _FREQ,
+// TERRAIN_CRATER_FRESH, TERRAIN_RAY_CLASSES) and the craterParams() switch are INJECTED before this file by
+// craterHeaderWgsl() (terrain_noise.ts) from the active CraterParams — the SINGLE source of truth shared
 // with the CPU collision field. Do not redeclare them here. Per size-class params returned by
 // craterParams(k): x = cell size (km, -> freq = radiusKm/cell), y = crater radius (frac of cell),
 // z = depth (km), w = density (fraction of cells that spawn a crater). Big rare -> small frequent.
@@ -147,11 +147,11 @@ fn craterProfile(rn: f32, morph: f32, maturity: f32, hp: ptr<function, f32>, dhp
 // 27 neighbours suffice. Bypasses the fbm normalization (heights are already in km).
 fn craterField(dir: vec3<f32>, radiusKm: f32, camDistKm: f32, skipBig: bool, footprintKm: f32) -> vec4<f32> {
     var H = 0.0; var G = vec3<f32>(0.0);
-    for (var k = 0; k < CBT_CRATER_CLASSES; k = k + 1) {
+    for (var k = 0; k < TERRAIN_CRATER_CLASSES; k = k + 1) {
         let prm = craterParams(k);
         // Band-limit by camera distance: big classes (large cell) keep fade=1 always; small
         // classes fade out when far (sub-pixel) -> recovers cost from altitude + no shimmer.
-        let onKm = CBT_CRATER_RANGE * prm.x;
+        let onKm = TERRAIN_CRATER_RANGE * prm.x;
         let fade = 1.0 - smoothstep(onKm, onKm * 2.0, camDistKm);
         if fade <= 0.0 { continue; }
         // NORMAL-only Nyquist footprint fade (footprintKm>0): a crater whose radius (km) drops below
@@ -159,38 +159,38 @@ fn craterField(dir: vec3<f32>, radiusKm: f32, camDistKm: f32, skipBig: bool, foo
         // (not the height: far small craters are sub-pixel in silhouette anyway, collision stays
         // exact). This kills the "small craters shimmering at long range" without flattening relief.
         let craterKm = prm.y * prm.x; // nominal crater radius in km
-        let crFp = select(1.0, smoothstep(footprintKm * CBT_NORMAL_FP_LO, footprintKm * CBT_NORMAL_FP_HI, craterKm), footprintKm > 0.0);
+        let crFp = select(1.0, smoothstep(footprintKm * TERRAIN_NORMAL_FP_LO, footprintKm * TERRAIN_NORMAL_FP_HI, craterKm), footprintKm > 0.0);
         // skipBig (NORMAL path only): a crater much bigger than the camera distance has a far,
         // gradual wall -> ~flat locally -> drop it from the per-pixel gradient (keeps ~3 active
         // classes => 60 fps). The HEIGHT path passes skipBig=false so geometry/collision keep it.
-        if skipBig && camDistKm < prm.x * CBT_CRATER_NEAR { continue; }
+        if skipBig && camDistKm < prm.x * TERRAIN_CRATER_NEAR { continue; }
         let fk = radiusKm / prm.x;
         let P = dir * fk;
         let Pi = floor(P);
         // Irregular-rim warp field: ONE simplex sample per class (cheap), shared by the class's
         // craters. It varies across each crater (wavelength < crater) so rims become lumpy.
-        let irr = 1.0 + CBT_RIM_IRR * cbtSimplex3_d(P * CBT_RIM_FREQ).x;
+        let irr = 1.0 + TERRAIN_RIM_IRR * terrainSimplex3_d(P * TERRAIN_RIM_FREQ).x;
         var h = 0.0; var g = vec3<f32>(0.0);
         for (var dz = -1; dz <= 1; dz = dz + 1) {
             for (var dy = -1; dy <= 1; dy = dy + 1) {
                 for (var dx = -1; dx <= 1; dx = dx + 1) {
                     let ci = Pi + vec3<f32>(f32(dx), f32(dy), f32(dz));
                     let ix = i32(ci.x) & 255; let iy = i32(ci.y) & 255; let iz = i32(ci.z) & 255;
-                    let q0 = cbtPermAt(ix + cbtPermAt(iy + cbtPermAt(iz)));
+                    let q0 = terrainPermAt(ix + terrainPermAt(iy + terrainPermAt(iz)));
                     let rExist = f32(q0) * (1.0 / 256.0);
                     if rExist >= prm.w { continue; }
-                    let q1 = cbtPermAt(ix + 1 + cbtPermAt(iy + cbtPermAt(iz)));
-                    let q2 = cbtPermAt(ix + cbtPermAt(iy + 1 + cbtPermAt(iz)));
+                    let q1 = terrainPermAt(ix + 1 + terrainPermAt(iy + terrainPermAt(iz)));
+                    let q2 = terrainPermAt(ix + terrainPermAt(iy + 1 + terrainPermAt(iz)));
                     // Age hash (same cell hash the ray system uses for freshness) -> maturity 0..1.
                     // Fresh (low q3) craters are sharp AND emit bright rays; the rest are eroded.
-                    let q3 = cbtPermAt(ix + cbtPermAt(iy + cbtPermAt(iz + 1)));
+                    let q3 = terrainPermAt(ix + terrainPermAt(iy + terrainPermAt(iz + 1)));
                     let maturity = f32(q3) * (1.0 / 256.0);
                     let jitter = vec3<f32>(f32(q0), f32(q1), f32(q2)) * (1.0 / 256.0);
                     let rVar = f32(q1) * (1.0 / 256.0);
                     let rSize = f32(q2) * (1.0 / 256.0);
                     let center = ci + (vec3<f32>(0.15) + 0.7 * jitter);
                     let r0e = prm.y * (0.8 + 0.4 * rSize);
-                    let depe = prm.z * CBT_CRATER_SCALE * (0.6 + 0.8 * rVar);
+                    let depe = prm.z * TERRAIN_CRATER_SCALE * (0.6 + 0.8 * rVar);
                     let qd = P - center;
                     let dist = sqrt(dot(qd, qd));
                     let rEff = r0e * irr;
@@ -213,41 +213,41 @@ fn craterField(dir: vec3<f32>, radiusKm: f32, camDistKm: f32, skipBig: bool, foo
 }
 
 // fbm with analytic gradient. Returns vec4(height, dHeight/dp.xyz).
-fn cbtFbm_d(p: vec3<f32>) -> vec4<f32> {
+fn terrainFbm_d(p: vec3<f32>) -> vec4<f32> {
     var sum: f32 = 0.0;
     var maxPossible: f32 = 0.0;
     var grad: vec3<f32> = vec3<f32>(0.0);
-    var freq: f32 = CBT_BASE_FREQ;
-    var amp: f32 = CBT_BASE_AMP;
+    var freq: f32 = TERRAIN_BASE_FREQ;
+    var amp: f32 = TERRAIN_BASE_AMP;
 
-    for (var i: i32 = 0; i < CBT_MAX_OCTAVES; i = i + 1) {
-        if i >= CBT_OCTAVES {
+    for (var i: i32 = 0; i < TERRAIN_MAX_OCTAVES; i = i + 1) {
+        if i >= TERRAIN_OCTAVES {
             break;
         }
-        let sd = cbtSimplex3_d(p * freq);
+        let sd = terrainSimplex3_d(p * freq);
         sum = sum + sd.x * amp;
         grad = grad + sd.yzw * (amp * freq);
         maxPossible = maxPossible + amp;
-        freq = freq * CBT_LACUNARITY;
-        amp = amp * CBT_PERSISTENCE;
+        freq = freq * TERRAIN_LACUNARITY;
+        amp = amp * TERRAIN_PERSISTENCE;
     }
 
     if maxPossible <= 1e-12 {
         return vec4<f32>(0.0);
     }
-    let inv = CBT_GLOBAL_AMP / maxPossible;
+    let inv = TERRAIN_GLOBAL_AMP / maxPossible;
     return vec4<f32>(sum * inv, grad * inv);
 }
 
-fn cbtFbmHeight(dir: vec3<f32>) -> f32 {
-    return cbtFbm_d(dir).x;
+fn terrainFbmHeight(dir: vec3<f32>) -> f32 {
+    return terrainFbm_d(dir).x;
 }
 
 // Distance-band-limited fbm. Returns vec4(height, dHeight/dp).
 //
 // EVERY octave (macro AND continued-detail) is gated by a per-octave camera-distance fade:
 // a feature of wavelength wl(km) = radiusKm / freq is alive only while the camera is within
-// ~CBT_DETAIL_RANGE wavelengths of it, fading out over the next octave of distance. This is a
+// ~TERRAIN_DETAIL_RANGE wavelengths of it, fading out over the next octave of distance. This is a
 // Nyquist band-limit in BOTH directions:
 //   - far away, the fine octaves switch OFF before they project to sub-pixel, so neither the
 //     height nor the analytic normal (this same gradient) carries sub-pixel ripple => no
@@ -265,76 +265,76 @@ fn cbtFbmHeight(dir: vec3<f32>) -> f32 {
 // faded OUT of the gradient (not the height). At grazing the footprint along the view is huge, so the
 // fine octaves vanish from the normal there — exactly where the grain was. footprintKm <= 0 disables
 // it (height / collision callers pass 0, so geometry is never affected).
-const CBT_NORMAL_FP_LO: f32 = 2.0; // wl < 2*footprint -> octave fully dropped from the normal
-const CBT_NORMAL_FP_HI: f32 = 4.0; // wl > 4*footprint -> octave fully kept
+const TERRAIN_NORMAL_FP_LO: f32 = 2.0; // wl < 2*footprint -> octave fully dropped from the normal
+const TERRAIN_NORMAL_FP_HI: f32 = 4.0; // wl > 4*footprint -> octave fully kept
 
-fn cbtFbm_d_at(p: vec3<f32>, camDistKm: f32, radiusKm: f32, craterSkipBig: bool, footprintKm: f32) -> vec4<f32> {
+fn terrainFbm_d_at(p: vec3<f32>, camDistKm: f32, radiusKm: f32, craterSkipBig: bool, footprintKm: f32) -> vec4<f32> {
     var sum: f32 = 0.0;
     var maxMacro: f32 = 0.0;
     var grad: vec3<f32> = vec3<f32>(0.0);
-    var freq: f32 = CBT_BASE_FREQ;
-    var amp: f32 = CBT_BASE_AMP;
+    var freq: f32 = TERRAIN_BASE_FREQ;
+    var amp: f32 = TERRAIN_BASE_AMP;
 
-    for (var i: i32 = 0; i < CBT_MAX_OCTAVES; i = i + 1) {
-        if i >= CBT_OCTAVES { break; }
+    for (var i: i32 = 0; i < TERRAIN_MAX_OCTAVES; i = i + 1) {
+        if i >= TERRAIN_OCTAVES { break; }
         let wlKm = radiusKm / freq;
-        let onKm = CBT_DETAIL_RANGE * wlKm;
+        let onKm = TERRAIN_DETAIL_RANGE * wlKm;
         let fade = 1.0 - smoothstep(onKm, onKm * 2.0, camDistKm);
-        let fpFade = select(1.0, smoothstep(footprintKm * CBT_NORMAL_FP_LO, footprintKm * CBT_NORMAL_FP_HI, wlKm), footprintKm > 0.0);
-        let sd = cbtSimplex3_d(p * freq);
+        let fpFade = select(1.0, smoothstep(footprintKm * TERRAIN_NORMAL_FP_LO, footprintKm * TERRAIN_NORMAL_FP_HI, wlKm), footprintKm > 0.0);
+        let sd = terrainSimplex3_d(p * freq);
         sum = sum + sd.x * (amp * fade);
         grad = grad + sd.yzw * (amp * freq * fade * fpFade);
         // maxMacro takes the UNFADED amp -> normalization fixed, full macro at the surface.
         maxMacro = maxMacro + amp;
-        freq = freq * CBT_LACUNARITY;
-        amp = amp * CBT_PERSISTENCE;
+        freq = freq * TERRAIN_LACUNARITY;
+        amp = amp * TERRAIN_PERSISTENCE;
     }
 
     if maxMacro <= 1e-12 {
         return vec4<f32>(0.0);
     }
 
-    for (var j: i32 = 0; j < CBT_MAX_DETAIL; j = j + 1) {
-        if j >= CBT_DETAIL_OCTAVES { break; }
+    for (var j: i32 = 0; j < TERRAIN_MAX_DETAIL; j = j + 1) {
+        if j >= TERRAIN_DETAIL_OCTAVES { break; }
         let wlKm = radiusKm / freq;
-        let onKm = CBT_DETAIL_RANGE * wlKm;
+        let onKm = TERRAIN_DETAIL_RANGE * wlKm;
         let fade = 1.0 - smoothstep(onKm, onKm * 2.0, camDistKm);
         if fade > 0.0 {
-            let fpFade = select(1.0, smoothstep(footprintKm * CBT_NORMAL_FP_LO, footprintKm * CBT_NORMAL_FP_HI, wlKm), footprintKm > 0.0);
-            let sd = cbtSimplex3_d(p * freq);
+            let fpFade = select(1.0, smoothstep(footprintKm * TERRAIN_NORMAL_FP_LO, footprintKm * TERRAIN_NORMAL_FP_HI, wlKm), footprintKm > 0.0);
+            let sd = terrainSimplex3_d(p * freq);
             sum = sum + sd.x * (amp * fade);
             grad = grad + sd.yzw * (amp * freq * fade * fpFade);
         }
-        freq = freq * CBT_LACUNARITY;
-        amp = amp * CBT_PERSISTENCE;
+        freq = freq * TERRAIN_LACUNARITY;
+        amp = amp * TERRAIN_PERSISTENCE;
     }
 
-    let inv = CBT_GLOBAL_AMP / maxMacro;
+    let inv = TERRAIN_GLOBAL_AMP / maxMacro;
     // Craters are the dominant relief (added AFTER fbm normalization; already in km). No distance
     // fade: they are macro landforms whose shape must be stable from orbit to ground.
     let cr = craterField(p, radiusKm, camDistKm, craterSkipBig, footprintKm);
     return vec4<f32>(sum * inv + cr.x, grad * inv + cr.yzw);
 }
 
-fn cbtFbmHeightAt(dir: vec3<f32>, camDistKm: f32, radiusKm: f32) -> f32 {
+fn terrainFbmHeightAt(dir: vec3<f32>, camDistKm: f32, radiusKm: f32) -> f32 {
     // HEIGHT path: keep ALL crater classes (skipBig=false) so geometry is complete.
-    return cbtFbm_d_at(dir, camDistKm, radiusKm, false, 0.0).x;
+    return terrainFbm_d_at(dir, camDistKm, radiusKm, false, 0.0).x;
 }
 
-fn cbtSphereTangents(nrm: vec3<f32>, tang: ptr<function, vec3<f32>>, bitan: ptr<function, vec3<f32>>) {
+fn terrainSphereTangents(nrm: vec3<f32>, tang: ptr<function, vec3<f32>>, bitan: ptr<function, vec3<f32>>) {
     var a: vec3<f32>;
     if abs(nrm.y) > 0.9 { a = vec3<f32>(1.0, 0.0, 0.0); } else { a = vec3<f32>(0.0, 1.0, 0.0); }
     *tang = normalize(cross(nrm, a));
     *bitan = cross(nrm, *tang);
 }
 
-fn cbtNoiseNormal(dir: vec3<f32>, radius: f32) -> vec3<f32> {
+fn terrainNoiseNormal(dir: vec3<f32>, radius: f32) -> vec3<f32> {
     let nrm = normalize(dir);
     var tang: vec3<f32>;
     var bitan: vec3<f32>;
-    cbtSphereTangents(nrm, &tang, &bitan);
+    terrainSphereTangents(nrm, &tang, &bitan);
 
-    let grad = cbtFbm_d(nrm).yzw;
+    let grad = terrainFbm_d(nrm).yzw;
     let dhdt = dot(grad, tang);
     let dhdb = dot(grad, bitan);
 
@@ -348,23 +348,23 @@ fn cbtNoiseNormal(dir: vec3<f32>, radius: f32) -> vec3<f32> {
 // rim + radial bright RAYS. Returns an additive brightness (0 = none) the fragment adds to albedo.
 // Reuses the crater Worley but ONLY for fresh craters (a per-cell age hash) of the bigger classes
 // (the prominent ray systems). Cheap-skips non-existent / non-fresh cells before any sqrt.
-// CBT_CRATER_FRESH and CBT_RAY_CLASSES are injected by craterHeaderWgsl() (see note above).
-const CBT_RAY_N: i32 = 16;          // potential ray directions around a crater
-const CBT_RAY_REACH: f32 = 4.0;     // ray length in crater radii (rn)
-const CBT_HALO_H: f32 = 0.16;       // bright ejecta-halo strength
-const CBT_RAY_H: f32 = 0.24;        // bright ray strength (kept low: on the dark Mercury albedo
+// TERRAIN_CRATER_FRESH and TERRAIN_RAY_CLASSES are injected by craterHeaderWgsl() (see note above).
+const TERRAIN_RAY_N: i32 = 16;          // potential ray directions around a crater
+const TERRAIN_RAY_REACH: f32 = 4.0;     // ray length in crater radii (rn)
+const TERRAIN_HALO_H: f32 = 0.16;       // bright ejecta-halo strength
+const TERRAIN_RAY_H: f32 = 0.24;        // bright ray strength (kept low: on the dark Mercury albedo
                                      // a high value reads as hard white streaks)
 
 // Irregular radial spokes: periodic value-noise of the azimuth (N cells around the circle, wraps
 // seamlessly), hashed per crater, thresholded to sparse bright rays.
 fn craterRayStreak(a: f32, seed: i32) -> f32 {
     let u = a * (1.0 / 6.2831853) + 0.5;
-    let x = u * f32(CBT_RAY_N);
-    let i0 = i32(floor(x)) % CBT_RAY_N;
-    let i1 = (i0 + 1) % CBT_RAY_N;
+    let x = u * f32(TERRAIN_RAY_N);
+    let i0 = i32(floor(x)) % TERRAIN_RAY_N;
+    let i1 = (i0 + 1) % TERRAIN_RAY_N;
     let f = fract(x);
-    let h0 = f32(cbtPermAt(i0 + seed)) * (1.0 / 256.0);
-    let h1 = f32(cbtPermAt(i1 + seed)) * (1.0 / 256.0);
+    let h0 = f32(terrainPermAt(i0 + seed)) * (1.0 / 256.0);
+    let h1 = f32(terrainPermAt(i1 + seed)) * (1.0 / 256.0);
     let v = mix(h0, h1, f * f * (3.0 - 2.0 * f));
     // Soft, feathered spokes: a WIDE smooth ramp and NO squaring. Squaring concentrated the streak
     // into a hard bright core (a crisp white edge against the dark surface); a plain ramp keeps the
@@ -375,11 +375,11 @@ fn craterRayStreak(a: f32, seed: i32) -> f32 {
 fn craterRays(dir: vec3<f32>, radiusKm: f32, camDistKm: f32) -> f32 {
     let nrm = normalize(dir);
     var t1: vec3<f32>; var t2: vec3<f32>;
-    cbtSphereTangents(nrm, &t1, &t2);
+    terrainSphereTangents(nrm, &t1, &t2);
     var bright = 0.0;
-    for (var k = 0; k < CBT_RAY_CLASSES; k = k + 1) {
+    for (var k = 0; k < TERRAIN_RAY_CLASSES; k = k + 1) {
         let prm = craterParams(k);
-        let onKm = CBT_CRATER_RANGE * prm.x;
+        let onKm = TERRAIN_CRATER_RANGE * prm.x;
         let fade = 1.0 - smoothstep(onKm, onKm * 2.0, camDistKm);
         if fade <= 0.0 { continue; }
         let fk = radiusKm / prm.x;
@@ -390,29 +390,29 @@ fn craterRays(dir: vec3<f32>, radiusKm: f32, camDistKm: f32) -> f32 {
                 for (var dx = -1; dx <= 1; dx = dx + 1) {
                     let ci = Pi + vec3<f32>(f32(dx), f32(dy), f32(dz));
                     let ix = i32(ci.x) & 255; let iy = i32(ci.y) & 255; let iz = i32(ci.z) & 255;
-                    let q0 = cbtPermAt(ix + cbtPermAt(iy + cbtPermAt(iz)));
+                    let q0 = terrainPermAt(ix + terrainPermAt(iy + terrainPermAt(iz)));
                     if f32(q0) * (1.0 / 256.0) >= prm.w { continue; }
-                    let q3 = cbtPermAt(ix + cbtPermAt(iy + cbtPermAt(iz + 1)));
-                    if f32(q3) * (1.0 / 256.0) >= CBT_CRATER_FRESH { continue; }
-                    let q1 = cbtPermAt(ix + 1 + cbtPermAt(iy + cbtPermAt(iz)));
-                    let q2 = cbtPermAt(ix + cbtPermAt(iy + 1 + cbtPermAt(iz)));
+                    let q3 = terrainPermAt(ix + terrainPermAt(iy + terrainPermAt(iz + 1)));
+                    if f32(q3) * (1.0 / 256.0) >= TERRAIN_CRATER_FRESH { continue; }
+                    let q1 = terrainPermAt(ix + 1 + terrainPermAt(iy + terrainPermAt(iz)));
+                    let q2 = terrainPermAt(ix + terrainPermAt(iy + 1 + terrainPermAt(iz)));
                     let jitter = vec3<f32>(f32(q0), f32(q1), f32(q2)) * (1.0 / 256.0);
                     let center = ci + (vec3<f32>(0.15) + 0.7 * jitter);
                     let r0e = prm.y * (0.8 + 0.4 * (f32(q2) * (1.0 / 256.0)));
                     let qd = P - center;
                     let dist = sqrt(dot(qd, qd));
                     let rn = dist / r0e;
-                    if rn >= CBT_RAY_REACH { continue; }
+                    if rn >= TERRAIN_RAY_REACH { continue; }
                     // Soft diffuse halo: wide smooth ring (gentle inner rise + long outer fade).
-                    let halo = CBT_HALO_H * smoothstep(0.7, 1.2, rn) * (1.0 - smoothstep(1.2, 2.8, rn));
+                    let halo = TERRAIN_HALO_H * smoothstep(0.7, 1.2, rn) * (1.0 - smoothstep(1.2, 2.8, rn));
                     var rays = 0.0;
                     if rn > 0.9 {
                         let a = atan2(dot(qd, t2), dot(qd, t1));
                         // Gradual ramp-IN from the rim (no hard inner edge at rn=0.9) AND squared outer
                         // falloff -> the ray feathers in near the rim and out toward the tip, both soft.
                         let rampIn = smoothstep(0.9, 1.7, rn);
-                        let radial = 1.0 - smoothstep(0.9, CBT_RAY_REACH, rn);
-                        rays = CBT_RAY_H * craterRayStreak(a, q0) * rampIn * radial * radial;
+                        let radial = 1.0 - smoothstep(0.9, TERRAIN_RAY_REACH, rn);
+                        rays = TERRAIN_RAY_H * craterRayStreak(a, q0) * rampIn * radial * radial;
                     }
                     bright = bright + (halo + rays) * fade;
                 }
@@ -423,17 +423,17 @@ fn craterRays(dir: vec3<f32>, radiusKm: f32, camDistKm: f32) -> f32 {
 }
 
 // Per-pixel normal that INCLUDES the faded detail octaves, so shading matches the
-// continued-detail geometry from cbtFbm_d_at. camDistKm must be the same distance the
+// continued-detail geometry from terrainFbm_d_at. camDistKm must be the same distance the
 // height decode used for this surface point (length of the camera-relative position).
-fn cbtNoiseNormalAt(dir: vec3<f32>, radius: f32, camDistKm: f32, footprintKm: f32) -> vec3<f32> {
+fn terrainNoiseNormalAt(dir: vec3<f32>, radius: f32, camDistKm: f32, footprintKm: f32) -> vec3<f32> {
     let nrm = normalize(dir);
     var tang: vec3<f32>;
     var bitan: vec3<f32>;
-    cbtSphereTangents(nrm, &tang, &bitan);
+    terrainSphereTangents(nrm, &tang, &bitan);
 
     // NORMAL path: skipBig=true drops locally-flat huge craters from the per-pixel gradient (perf).
     // footprintKm Nyquist-fades sub-footprint octaves out of the gradient (grazing-sun grain fix).
-    let grad = cbtFbm_d_at(nrm, camDistKm, radius, true, footprintKm).yzw;
+    let grad = terrainFbm_d_at(nrm, camDistKm, radius, true, footprintKm).yzw;
     let dhdt = dot(grad, tang);
     let dhdb = dot(grad, bitan);
 
@@ -442,35 +442,35 @@ fn cbtNoiseNormalAt(dir: vec3<f32>, radius: f32, camDistKm: f32, footprintKm: f3
     return normalize(pn);
 }
 
-// fbm GRADIENT only (no craters), normalized -> = cbtFbm_d_at(...).yzw minus the crater add. Lets a
+// fbm GRADIENT only (no craters), normalized -> = terrainFbm_d_at(...).yzw minus the crater add. Lets a
 // caller evaluate craterField ONCE per pixel and SHARE its gradient across several normals instead
 // of recomputing the full 6x27 crater scan inside each (the per-pixel normal was built up to 3x).
 // macroOnly skips the continued-detail loop (the slope/AO normal wants a smooth landform only);
 // maxMacro (the normalization) sums only the macro amps either way, so the macro gradient is
 // identical with or without the detail octaves.
-fn cbtFbmGradAt_core(p: vec3<f32>, camDistKm: f32, radiusKm: f32, footprintKm: f32, macroOnly: bool) -> vec3<f32> {
+fn terrainFbmGradAt_core(p: vec3<f32>, camDistKm: f32, radiusKm: f32, footprintKm: f32, macroOnly: bool) -> vec3<f32> {
     var maxMacro: f32 = 0.0;
     var grad: vec3<f32> = vec3<f32>(0.0);
-    var freq: f32 = CBT_BASE_FREQ;
-    var amp: f32 = CBT_BASE_AMP;
+    var freq: f32 = TERRAIN_BASE_FREQ;
+    var amp: f32 = TERRAIN_BASE_AMP;
 
-    for (var i: i32 = 0; i < CBT_MAX_OCTAVES; i = i + 1) {
-        if i >= CBT_OCTAVES { break; }
+    for (var i: i32 = 0; i < TERRAIN_MAX_OCTAVES; i = i + 1) {
+        if i >= TERRAIN_OCTAVES { break; }
         let wlKm = radiusKm / freq;
-        let onKm = CBT_DETAIL_RANGE * wlKm;
+        let onKm = TERRAIN_DETAIL_RANGE * wlKm;
         let fade = 1.0 - smoothstep(onKm, onKm * 2.0, camDistKm);
-        let fpFade = select(1.0, smoothstep(footprintKm * CBT_NORMAL_FP_LO, footprintKm * CBT_NORMAL_FP_HI, wlKm), footprintKm > 0.0);
+        let fpFade = select(1.0, smoothstep(footprintKm * TERRAIN_NORMAL_FP_LO, footprintKm * TERRAIN_NORMAL_FP_HI, wlKm), footprintKm > 0.0);
         // OPT-3: skip the simplex eval for a fully-faded / sub-footprint octave (its grad add is 0
         // either way). maxMacro MUST stay OUTSIDE the guard — it normalizes the gradient and must sum
         // EVERY octave's amp regardless of fade, or the normal magnitude (and seam watertightness)
         // breaks. Bit-identical output to the unguarded loop; just drops a no-op simplex per faded octave.
         if fade * fpFade > 0.0 {
-            let sd = cbtSimplex3_d(p * freq);
+            let sd = terrainSimplex3_d(p * freq);
             grad = grad + sd.yzw * (amp * freq * fade * fpFade);
         }
         maxMacro = maxMacro + amp;
-        freq = freq * CBT_LACUNARITY;
-        amp = amp * CBT_PERSISTENCE;
+        freq = freq * TERRAIN_LACUNARITY;
+        amp = amp * TERRAIN_PERSISTENCE;
     }
 
     if maxMacro <= 1e-12 {
@@ -478,36 +478,36 @@ fn cbtFbmGradAt_core(p: vec3<f32>, camDistKm: f32, radiusKm: f32, footprintKm: f
     }
 
     if !macroOnly {
-        for (var j: i32 = 0; j < CBT_MAX_DETAIL; j = j + 1) {
-            if j >= CBT_DETAIL_OCTAVES { break; }
+        for (var j: i32 = 0; j < TERRAIN_MAX_DETAIL; j = j + 1) {
+            if j >= TERRAIN_DETAIL_OCTAVES { break; }
             let wlKm = radiusKm / freq;
-            let onKm = CBT_DETAIL_RANGE * wlKm;
+            let onKm = TERRAIN_DETAIL_RANGE * wlKm;
             let fade = 1.0 - smoothstep(onKm, onKm * 2.0, camDistKm);
             if fade > 0.0 {
-                let fpFade = select(1.0, smoothstep(footprintKm * CBT_NORMAL_FP_LO, footprintKm * CBT_NORMAL_FP_HI, wlKm), footprintKm > 0.0);
-                let sd = cbtSimplex3_d(p * freq);
+                let fpFade = select(1.0, smoothstep(footprintKm * TERRAIN_NORMAL_FP_LO, footprintKm * TERRAIN_NORMAL_FP_HI, wlKm), footprintKm > 0.0);
+                let sd = terrainSimplex3_d(p * freq);
                 grad = grad + sd.yzw * (amp * freq * fade * fpFade);
             }
-            freq = freq * CBT_LACUNARITY;
-            amp = amp * CBT_PERSISTENCE;
+            freq = freq * TERRAIN_LACUNARITY;
+            amp = amp * TERRAIN_PERSISTENCE;
         }
     }
 
-    let inv = CBT_GLOBAL_AMP / maxMacro;
+    let inv = TERRAIN_GLOBAL_AMP / maxMacro;
     return grad * inv;
 }
 
-// Twin of cbtNoiseNormalAt that takes a PRE-COMPUTED crater gradient (craterGrad) instead of running
-// craterField internally. Bit-identical to cbtNoiseNormalAt when
+// Twin of terrainNoiseNormalAt that takes a PRE-COMPUTED crater gradient (craterGrad) instead of running
+// craterField internally. Bit-identical to terrainNoiseNormalAt when
 //   craterGrad = craterField(dir, radius, camDistKm, true, footprintKm).yzw
 // — it just lets the fragment compute that ONCE and reuse it for the main + df64 normals.
-fn cbtNoiseNormalAtShared(dir: vec3<f32>, radius: f32, camDistKm: f32, footprintKm: f32, craterGrad: vec3<f32>) -> vec3<f32> {
+fn terrainNoiseNormalAtShared(dir: vec3<f32>, radius: f32, camDistKm: f32, footprintKm: f32, craterGrad: vec3<f32>) -> vec3<f32> {
     let nrm = normalize(dir);
     var tang: vec3<f32>;
     var bitan: vec3<f32>;
-    cbtSphereTangents(nrm, &tang, &bitan);
+    terrainSphereTangents(nrm, &tang, &bitan);
 
-    let grad = cbtFbmGradAt_core(nrm, camDistKm, radius, footprintKm, false) + craterGrad;
+    let grad = terrainFbmGradAt_core(nrm, camDistKm, radius, footprintKm, false) + craterGrad;
     let dhdt = dot(grad, tang);
     let dhdb = dot(grad, bitan);
 
@@ -524,13 +524,13 @@ fn cbtNoiseNormalAtShared(dir: vec3<f32>, radius: f32, camDistKm: f32, footprint
 // Reconstruct a sphere surface normal from a PRECOMPUTED height gradient (no fbm/crater eval). Used by
 // the per-vertex slope normal: the macro fbm gradient + crater gradient are evaluated PER VERTEX and
 // interpolated, so the fragment only does the cheap tangent projection here (kills the 2nd per-pixel
-// macro fbm). The slope normal is a fixed-footprint (CBT_SLOPE_DIST) SMOOTH landform normal, so the
+// macro fbm). The slope normal is a fixed-footprint (TERRAIN_SLOPE_DIST) SMOOTH landform normal, so the
 // per-vertex-then-interpolate approximation is invisible (shared edge verts share dir -> watertight).
-fn cbtNormalFromGrad(dir: vec3<f32>, radius: f32, grad: vec3<f32>) -> vec3<f32> {
+fn terrainNormalFromGrad(dir: vec3<f32>, radius: f32, grad: vec3<f32>) -> vec3<f32> {
     let nrm = normalize(dir);
     var tang: vec3<f32>;
     var bitan: vec3<f32>;
-    cbtSphereTangents(nrm, &tang, &bitan);
+    terrainSphereTangents(nrm, &tang, &bitan);
     let dhdt = dot(grad, tang);
     let dhdb = dot(grad, bitan);
     let sc = 1.0 / radius;
@@ -539,8 +539,8 @@ fn cbtNormalFromGrad(dir: vec3<f32>, radius: f32, grad: vec3<f32>) -> vec3<f32> 
 }
 
 // Per-PIXEL variant (kept for reference / fallback): evaluates the macro fbm gradient inline. The render
-// path uses the per-vertex `vSlopeFbmGrad` + cbtNormalFromGrad instead.
-fn cbtNoiseNormalSlope(dir: vec3<f32>, radius: f32, camDistKm: f32, craterGrad: vec3<f32>) -> vec3<f32> {
-    let grad = cbtFbmGradAt_core(normalize(dir), camDistKm, radius, 0.0, true) + craterGrad;
-    return cbtNormalFromGrad(dir, radius, grad);
+// path uses the per-vertex `vSlopeFbmGrad` + terrainNormalFromGrad instead.
+fn terrainNoiseNormalSlope(dir: vec3<f32>, radius: f32, camDistKm: f32, craterGrad: vec3<f32>) -> vec3<f32> {
+    let grad = terrainFbmGradAt_core(normalize(dir), camDistKm, radius, 0.0, true) + craterGrad;
+    return terrainNormalFromGrad(dir, radius, grad);
 }

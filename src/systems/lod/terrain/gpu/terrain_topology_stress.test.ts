@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { OcbtTopology, type BisectorView } from './ocbt_topology';
-import { ocbtCorners } from './ocbt_eval_leb';
+import { TerrainTopology, type BisectorView } from './terrain_topology';
+import { terrainCorners } from './terrain_eval_leb';
 
 type V3 = [number, number, number];
 
@@ -48,12 +48,12 @@ const near = (p: V3, qv: readonly number[], tol = 1e-6) =>
 function heapIdViolations(leaves: BisectorView[]): number {
     let bad = 0;
     for (const t of leaves) {
-        const cand = ocbtCorners(t.heapID);
+        const cand = terrainCorners(t.heapID);
         for (const s of [t.a, t.l, t.r]) if (!cand.some((c) => near(s, c))) bad++;
     }
     return bad;
 }
-function assertSound(topo: OcbtTopology, label: string): void {
+function assertSound(topo: TerrainTopology, label: string): void {
     const leaves = topo.leaves();
     expect(watertightViolations(leaves), `${label}: watertight`).toBe(0);
     expect(symmetryViolations(leaves), `${label}: symmetry`).toBe(0);
@@ -77,7 +77,7 @@ const centroid = (t: BisectorView): V3 => {
     return [x * i, y * i, z * i];
 };
 
-describe('OcbtTopology stress — crosses multiple grow() boundaries', () => {
+describe('TerrainTopology stress — crosses multiple grow() boundaries', () => {
     // Depth cap 19 keeps edges (~1e-5 on the unit sphere) well above the test's 1e-7
     // quantization grid (so shared verts collapse, distinct ones don't) while still
     // forcing >=2 pool grows (4096 -> 8192 -> 16384 slots). Deeper than ~20 the
@@ -85,7 +85,7 @@ describe('OcbtTopology stress — crosses multiple grow() boundaries', () => {
     it(
         'deep random refinement past 8192 slots stays watertight (>=2 grows)',
         () => {
-            const topo = new OcbtTopology(40);
+            const topo = new TerrainTopology(40);
             const rnd = lcg(0x1234_abcd);
             for (let iter = 0; iter < 7000; iter++) {
                 const leaves = topo.leaves();
@@ -100,9 +100,9 @@ describe('OcbtTopology stress — crosses multiple grow() boundaries', () => {
     );
 });
 
-describe('OcbtTopology stress — pole and seam targeting', () => {
+describe('TerrainTopology stress — pole and seam targeting', () => {
     it('refining hard at the +y pole (all 4 top faces meet) stays watertight', () => {
-        const topo = new OcbtTopology(34);
+        const topo = new TerrainTopology(34);
         const pole: V3 = [0, 1, 0];
         for (let iter = 0; iter < 1500; iter++) {
             const leaves = topo.leaves();
@@ -124,7 +124,7 @@ describe('OcbtTopology stress — pole and seam targeting', () => {
     });
 
     it('refining along an equatorial seam edge stays watertight', () => {
-        const topo = new OcbtTopology(34);
+        const topo = new TerrainTopology(34);
         const seamDir: V3 = (() => {
             const i = 1 / Math.hypot(1, 0, 1);
             return [i, 0, i]; // on the +x/+z seam between faces
@@ -149,9 +149,9 @@ describe('OcbtTopology stress — pole and seam targeting', () => {
     });
 });
 
-describe('OcbtTopology stress — interleaved split + merge', () => {
+describe('TerrainTopology stress — interleaved split + merge', () => {
     it('random split/merge churn stays watertight throughout', () => {
-        const topo = new OcbtTopology(30);
+        const topo = new TerrainTopology(30);
         const rnd = lcg(0xfeed_face);
         for (let iter = 0; iter < 3000; iter++) {
             if (rnd() < 0.35 && topo.leafCount > 8) {
@@ -169,7 +169,7 @@ describe('OcbtTopology stress — interleaved split + merge', () => {
     });
 });
 
-describe('OcbtTopology stress — many independent deep seeds', () => {
+describe('TerrainTopology stress — many independent deep seeds', () => {
     it('20 seeds of multi-target refinement all stay watertight', () => {
         const targetSets: V3[][] = [];
         for (let g = 0; g < 4; g++) {
@@ -185,7 +185,7 @@ describe('OcbtTopology stress — many independent deep seeds', () => {
             targetSets.push(set);
         }
         for (let seed = 0; seed < 20; seed++) {
-            const topo = new OcbtTopology(30);
+            const topo = new TerrainTopology(30);
             const rnd = lcg(0x2025 + seed * 131);
             const targets = targetSets[seed % targetSets.length];
             for (let iter = 0; iter < 600; iter++) {

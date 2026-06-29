@@ -1,7 +1,7 @@
 /**
- * CPU mirror of the OCBT pool allocator — the golden oracle for the GPU WGSL port
- * (`ocbt_pool.wgsl`) and the test reference. Faithful to the decode/reduce
- * semantics of `references/large_cbt/shaders/shader_lib/ocbt_generic.hlsl`:
+ * CPU mirror of the TERRAIN pool allocator — the golden oracle for the GPU WGSL port
+ * (`terrain_pool.wgsl`) and the test reference. Faithful to the decode/reduce
+ * semantics of `references/large_terrain/shaders/shader_lib/terrain_generic.hlsl`:
  *
  *  - `decodeBit(i)`            -> slot of the i-th ALLOCATED bit (ascending)
  *  - `decodeBitComplement(i)`  -> slot of the i-th FREE bit (ascending)
@@ -19,9 +19,9 @@ import {
     assertPowerOfTwo,
     bitfieldWordCount,
     log2PowerOfTwo,
-} from './ocbt_pool';
+} from './terrain_pool';
 
-export class OcbtPool {
+export class TerrainPool {
     readonly capacity: number;
     readonly depth: number;
     /** Packed allocation bitfield: bit = 1 means the slot is allocated. */
@@ -128,7 +128,7 @@ export class OcbtPool {
      */
     allocate(n = 1): number[] {
         if (n > this.freeCount()) {
-            throw new Error(`OCBT pool out of memory: need ${n}, free ${this.freeCount()}`);
+            throw new Error(`TERRAIN pool out of memory: need ${n}, free ${this.freeCount()}`);
         }
         const out: number[] = [];
         for (let k = 0; k < n; k++) {

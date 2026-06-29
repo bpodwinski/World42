@@ -1,7 +1,7 @@
-// OCBT PrepareIndirect (one thread). Reads the per-frame GPU work-list COUNTS and
+// TERRAIN PrepareIndirect (one thread). Reads the per-frame GPU work-list COUNTS and
 // writes dispatchIndirect workgroup args (ceil(count/256), with a 2D spill past 65535)
 // for the 7 work-list passes, so each dispatches over its candidate count instead of
-// the full pool capacity. Modeled on cbt_dispatch_args.compute.wgsl. Dispatched several
+// the full pool capacity. Modeled on terrain_dispatch_args.compute.wgsl. Dispatched several
 // times per frame (after each producer finalizes a count); each call rewrites ALL 7
 // records from the current counts, but a record is only CONSUMED after its producer ran.
 //

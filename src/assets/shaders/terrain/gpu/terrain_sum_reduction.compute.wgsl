@@ -1,14 +1,14 @@
-// CBT sum-reduction — one level per dispatch. Reduces depth `passDepth` from its
+// TERRAIN sum-reduction — one level per dispatch. Reduces depth `passDepth` from its
 // children at `passDepth + 1`. The driver dispatches levels D-1 .. 0 in order
-// (each level depends on the one below). Composed after a `const CBT_MAX_DEPTH`
-// line and the read/write heap core (cbt_heap_rw.wgsl), which owns binding(0).
+// (each level depends on the one below). Composed after a `const TERRAIN_MAX_DEPTH`
+// line and the read/write heap core (terrain_heap_rw.wgsl), which owns binding(0).
 
 // data.x = passDepth (packed as vec4<u32> to dodge UBO scalar-alignment surprises).
-struct CbtReduceParams {
+struct TerrainReduceParams {
     data : vec4<u32>,
 };
 
-@group(0) @binding(1) var<uniform> reduceParams : CbtReduceParams;
+@group(0) @binding(1) var<uniform> reduceParams : TerrainReduceParams;
 
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups) nwg : vec3<u32>) {
@@ -21,7 +21,7 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
         return;
     }
     let id = count + t;               // heap id at this depth
-    let x0 = cbt_heapRead(id << 1u, depth + 1u);
-    let x1 = cbt_heapRead((id << 1u) | 1u, depth + 1u);
-    cbt_heapWrite(id, depth, x0 + x1);
+    let x0 = terrain_heapRead(id << 1u, depth + 1u);
+    let x1 = terrain_heapRead((id << 1u) | 1u, depth + 1u);
+    terrain_heapWrite(id, depth, x0 + x1);
 }

@@ -1,5 +1,5 @@
 /**
- * OCBT concurrent-topology kernel — drives the GPU bisector engine (the WGSL port of
+ * TERRAIN concurrent-topology kernel — drives the GPU bisector engine (the WGSL port of
  * `update_utilities.hlsl`) on a real WebGPU device. Owns every StorageBuffer from
  * `engineLayout()`, builds each compute pass, uploads the octahedron seed, and runs
  * one refinement frame = Reset → Classify → Split → Allocate → CopyNeighbors → Bisect →
@@ -9,13 +9,13 @@
  *
  * Scope: this is the Phase 1c GPU↔mirror cross-check engine. Refinement is driven by a
  * deterministic, FP-free target-heapID ancestry predicate (set via {@link setTargets})
- * so the concurrent GPU and the sequential CPU oracle (`OcbtTopology`) provably
+ * so the concurrent GPU and the sequential CPU oracle (`TerrainTopology`) provably
  * converge to the same conforming leaf set. Passes dispatch DIRECTLY over the full pool
  * capacity with in-shader guards — correct (just not yet cost-optimal); the indirect
  * dispatch is a later perf pass.
  *
  * WebGPU only. Mirrors the buffer-creation-flag and whenReady/readback patterns of
- * `GpuCbtKernel` and `OcbtPoolGpuHarness`.
+ * `GpuTerrainKernel` and `TerrainPoolGpuHarness`.
  */
 import {
     ComputeShader,
@@ -24,36 +24,36 @@ import {
     UniformBuffer,
     type WebGPUEngine
 } from '@babylonjs/core';
-import ocbtU64Wgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_u64.wgsl';
-import ocbtPoolWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_pool.wgsl';
-import ocbtTopoCommonWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_common.wgsl';
-import ocbtTopoResetWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_reset.compute.wgsl';
-import ocbtTopoClassifyWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_classify.compute.wgsl';
-import ocbtTopoClassifyMetricWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_classify_metric.compute.wgsl';
-import ocbtTopoSplitWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_split.compute.wgsl';
-import ocbtTopoAllocateWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_allocate.compute.wgsl';
-import ocbtTopoCopyNeighborsWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_copy_neighbors.compute.wgsl';
-import ocbtTopoBisectWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_bisect.compute.wgsl';
-import ocbtTopoPropagateBisectWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_propagate_bisect.compute.wgsl';
-import ocbtTopoPrepareSimplifyWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_prepare_simplify.compute.wgsl';
-import ocbtTopoSimplifyWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_simplify.compute.wgsl';
-import ocbtTopoPropagateSimplifyWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_propagate_simplify.compute.wgsl';
-import ocbtPoolReduceWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_pool_reduce.compute.wgsl';
-import cbtNoiseWgsl from '../../../../assets/shaders/cbt/gpu/cbt_noise.wgsl';
+import terrainU64Wgsl from '../../../../assets/shaders/terrain/engine/terrain_u64.wgsl';
+import terrainPoolWgsl from '../../../../assets/shaders/terrain/engine/terrain_pool.wgsl';
+import terrainTopoCommonWgsl from '../../../../assets/shaders/terrain/engine/terrain_topo_common.wgsl';
+import terrainTopoResetWgsl from '../../../../assets/shaders/terrain/engine/terrain_topo_reset.compute.wgsl';
+import terrainTopoClassifyWgsl from '../../../../assets/shaders/terrain/engine/terrain_topo_classify.compute.wgsl';
+import terrainTopoClassifyMetricWgsl from '../../../../assets/shaders/terrain/engine/terrain_topo_classify_metric.compute.wgsl';
+import terrainTopoSplitWgsl from '../../../../assets/shaders/terrain/engine/terrain_topo_split.compute.wgsl';
+import terrainTopoAllocateWgsl from '../../../../assets/shaders/terrain/engine/terrain_topo_allocate.compute.wgsl';
+import terrainTopoCopyNeighborsWgsl from '../../../../assets/shaders/terrain/engine/terrain_topo_copy_neighbors.compute.wgsl';
+import terrainTopoBisectWgsl from '../../../../assets/shaders/terrain/engine/terrain_topo_bisect.compute.wgsl';
+import terrainTopoPropagateBisectWgsl from '../../../../assets/shaders/terrain/engine/terrain_topo_propagate_bisect.compute.wgsl';
+import terrainTopoPrepareSimplifyWgsl from '../../../../assets/shaders/terrain/engine/terrain_topo_prepare_simplify.compute.wgsl';
+import terrainTopoSimplifyWgsl from '../../../../assets/shaders/terrain/engine/terrain_topo_simplify.compute.wgsl';
+import terrainTopoPropagateSimplifyWgsl from '../../../../assets/shaders/terrain/engine/terrain_topo_propagate_simplify.compute.wgsl';
+import terrainPoolReduceWgsl from '../../../../assets/shaders/terrain/engine/terrain_pool_reduce.compute.wgsl';
+import terrainNoiseWgsl from '../../../../assets/shaders/terrain/gpu/terrain_noise.wgsl';
 import {
     buildPerm,
     craterHeaderWgsl,
     DEFAULT_CRATERS,
     type CraterParams,
     type NoiseParams
-} from '../cbt_noise';
-import ocbtEvalLebWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_eval_leb.wgsl';
-import ocbtF64Wgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_f64.wgsl';
-import cbtNoiseDf64Wgsl from '../../../../assets/shaders/cbt/ocbt/cbt_noise_df64.wgsl';
-import ocbtTopoEvalLebWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_eval_leb.compute.wgsl';
-import ocbtTopoEvalLebF64Wgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_eval_leb_f64.compute.wgsl';
-import ocbtTopoCompactWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_compact.compute.wgsl';
-import ocbtTopoPrepareIndirectWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_prepare_indirect.compute.wgsl';
+} from '../terrain_noise';
+import terrainEvalLebWgsl from '../../../../assets/shaders/terrain/engine/terrain_eval_leb.wgsl';
+import terrainF64Wgsl from '../../../../assets/shaders/terrain/engine/terrain_f64.wgsl';
+import terrainNoiseDf64Wgsl from '../../../../assets/shaders/terrain/engine/terrain_noise_df64.wgsl';
+import terrainTopoEvalLebWgsl from '../../../../assets/shaders/terrain/engine/terrain_topo_eval_leb.compute.wgsl';
+import terrainTopoEvalLebF64Wgsl from '../../../../assets/shaders/terrain/engine/terrain_topo_eval_leb_f64.compute.wgsl';
+import terrainTopoCompactWgsl from '../../../../assets/shaders/terrain/engine/terrain_topo_compact.compute.wgsl';
+import terrainTopoPrepareIndirectWgsl from '../../../../assets/shaders/terrain/engine/terrain_topo_prepare_indirect.compute.wgsl';
 import {
     engineLayout,
     engineWgslPreamble,
@@ -62,21 +62,21 @@ import {
     NEIGHBORS_WORDS,
     BISECTOR_DATA_WORDS,
     POSITIONS_WORDS,
-    OCBT_INVALID
-} from './ocbt_engine_buffers';
-import { log2PowerOfTwo } from './ocbt_pool';
+    TERRAIN_INVALID
+} from './terrain_engine_buffers';
+import { log2PowerOfTwo } from './terrain_pool';
 
 const WORKGROUP_SIZE = 256;
 const MAX_DIM = 65535;
 
 /** Number of octahedron faces (root bisectors). */
-export const OCBT_FACE_COUNT = 8;
+export const TERRAIN_FACE_COUNT = 8;
 
 /** Classify metric source: deterministic per-face predicate (cross-check) or camera. */
-export type OcbtClassifyMode = 'predicate' | 'metric';
+export type TerrainClassifyMode = 'predicate' | 'metric';
 
 /** Camera + threshold inputs for the metric classify (all in planet-local sim units). */
-export interface OcbtCameraParams {
+export interface TerrainCameraParams {
     camLocal: [number, number, number];
     radius: number;
     focalPx: number;
@@ -92,10 +92,10 @@ export interface OcbtCameraParams {
 }
 
 /** Live topology snapshot read back from the GPU for the cross-check. */
-export interface OcbtGpuState {
+export interface TerrainGpuState {
     /** Per-slot heap id (0 = dead slot). Length = capacity. */
     heapID: Float64Array;
-    /** Per-slot neighbor triples (n0,n1,n2); OCBT_INVALID = none. Length = capacity*3. */
+    /** Per-slot neighbor triples (n0,n1,n2); TERRAIN_INVALID = none. Length = capacity*3. */
     neighbors: Uint32Array;
     /** Live (allocated) slot count = pool_tree[1]. */
     count: number;
@@ -126,7 +126,7 @@ const ARG = {
 } as const;
 const ARG_RECORDS = 7;
 
-export class OcbtTopologyKernel {
+export class TerrainTopologyKernel {
     readonly capacity: number;
     readonly depth: number;
 
@@ -179,7 +179,7 @@ export class OcbtTopologyKernel {
     private readonly levelParams: UniformBuffer[] = [];
 
     /** Classify metric source. */
-    private readonly classifyMode: OcbtClassifyMode;
+    private readonly classifyMode: TerrainClassifyMode;
     /** Camera/threshold UBO for the metric classify (null in predicate mode). */
     private readonly classifyParams: UniformBuffer | null = null;
     /** Frustum-planes UBO for the metric classify (null in predicate mode). */
@@ -193,7 +193,7 @@ export class OcbtTopologyKernel {
     constructor(
         engine: WebGPUEngine,
         capacity: number,
-        classifyMode: OcbtClassifyMode = 'predicate',
+        classifyMode: TerrainClassifyMode = 'predicate',
         useIndirect = false,
         noise: NoiseParams | null = null,
         craters: CraterParams = DEFAULT_CRATERS
@@ -210,35 +210,35 @@ export class OcbtTopologyKernel {
         const mk = (bytes: number, flags: number, name: string) =>
             new StorageBuffer(engine, bytes, flags, name);
 
-        this.poolBitfield = mk(layout.bitfieldBytes, STORAGE | WRITE, 'ocbt_topo_bitfield');
-        this.poolTree = mk(layout.treeBytes, STORAGE | READ | WRITE, 'ocbt_topo_tree');
-        this.heapID = mk(layout.heapIdBytes, STORAGE | READ | WRITE, 'ocbt_topo_heapid');
-        this.nbA = mk(layout.neighborsBytes, STORAGE | READ | WRITE, 'ocbt_topo_nbA');
-        this.nbB = mk(layout.neighborsBytes, STORAGE | READ | WRITE, 'ocbt_topo_nbB');
-        this.bisectorData = mk(layout.bisectorDataBytes, STORAGE | WRITE, 'ocbt_topo_bisectordata');
-        this.classification = mk(layout.classificationBytes, STORAGE | WRITE, 'ocbt_topo_classify');
-        this.simplification = mk(layout.simplificationBytes, STORAGE | WRITE, 'ocbt_topo_simplify');
-        this.allocateBuf = mk(layout.allocateBytes, STORAGE | WRITE, 'ocbt_topo_allocate');
-        this.propagate = mk(layout.propagateBytes, STORAGE | WRITE, 'ocbt_topo_propagate');
-        this.memory = mk(layout.memoryBytes, STORAGE | WRITE, 'ocbt_topo_memory');
-        this.faceTargets = mk(OCBT_FACE_COUNT * 4, STORAGE | WRITE, 'ocbt_topo_facetargets');
+        this.poolBitfield = mk(layout.bitfieldBytes, STORAGE | WRITE, 'terrain_topo_bitfield');
+        this.poolTree = mk(layout.treeBytes, STORAGE | READ | WRITE, 'terrain_topo_tree');
+        this.heapID = mk(layout.heapIdBytes, STORAGE | READ | WRITE, 'terrain_topo_heapid');
+        this.nbA = mk(layout.neighborsBytes, STORAGE | READ | WRITE, 'terrain_topo_nbA');
+        this.nbB = mk(layout.neighborsBytes, STORAGE | READ | WRITE, 'terrain_topo_nbB');
+        this.bisectorData = mk(layout.bisectorDataBytes, STORAGE | WRITE, 'terrain_topo_bisectordata');
+        this.classification = mk(layout.classificationBytes, STORAGE | WRITE, 'terrain_topo_classify');
+        this.simplification = mk(layout.simplificationBytes, STORAGE | WRITE, 'terrain_topo_simplify');
+        this.allocateBuf = mk(layout.allocateBytes, STORAGE | WRITE, 'terrain_topo_allocate');
+        this.propagate = mk(layout.propagateBytes, STORAGE | WRITE, 'terrain_topo_propagate');
+        this.memory = mk(layout.memoryBytes, STORAGE | WRITE, 'terrain_topo_memory');
+        this.faceTargets = mk(TERRAIN_FACE_COUNT * 4, STORAGE | WRITE, 'terrain_topo_facetargets');
         // Metric (render) mode emits camera-relative [relative.xyz, dir.xyz] (18/slot) via
         // the df64 eval; predicate (cross-check) mode emits unit-dir corners (9/slot).
         const posWords = classifyMode === 'metric' ? 18 : POSITIONS_WORDS;
         this.positionsWords = posWords;
-        this.positions = mk(capacity * posWords * 4, STORAGE | READ | WRITE, 'ocbt_topo_positions');
+        this.positions = mk(capacity * posWords * 4, STORAGE | READ | WRITE, 'terrain_topo_positions');
         this.liveNeighbors = this.nbA;
 
         const onErr = (tag: string) => (_e: unknown, errors: string) => {
             // eslint-disable-next-line no-console
-            console.error(`[OcbtTopologyKernel] ${tag} compile error:\n${errors}`);
+            console.error(`[TerrainTopologyKernel] ${tag} compile error:\n${errors}`);
         };
 
         // --- reduce (reuse the pool reduce shader) ---
         this.reduce = new ComputeShader(
-            'ocbt_topo_reduce',
+            'terrain_topo_reduce',
             engine,
-            { computeSource: compose(ocbtPoolWgsl, ocbtPoolReduceWgsl) },
+            { computeSource: compose(terrainPoolWgsl, terrainPoolReduceWgsl) },
             {
                 bindingsMapping: {
                     pool_bitfield: { group: 0, binding: 0 },
@@ -253,9 +253,9 @@ export class OcbtTopologyKernel {
 
         // --- reset ---
         this.reset = new ComputeShader(
-            'ocbt_topo_reset',
+            'terrain_topo_reset',
             engine,
-            { computeSource: compose(ocbtU64Wgsl, ocbtPoolWgsl, ocbtTopoCommonWgsl, ocbtTopoResetWgsl) },
+            { computeSource: compose(terrainU64Wgsl, terrainPoolWgsl, terrainTopoCommonWgsl, terrainTopoResetWgsl) },
             {
                 bindingsMapping: {
                     pool_tree: { group: 0, binding: 1 },
@@ -278,9 +278,9 @@ export class OcbtTopologyKernel {
         // --- classify (predicate: faceTarget; metric: camera screen-space) ---
         if (classifyMode === 'metric') {
             this.classify = new ComputeShader(
-                'ocbt_topo_classify_metric',
+                'terrain_topo_classify_metric',
                 engine,
-                { computeSource: compose(ocbtU64Wgsl, ocbtTopoCommonWgsl, ocbtTopoClassifyMetricWgsl) },
+                { computeSource: compose(terrainU64Wgsl, terrainTopoCommonWgsl, terrainTopoClassifyMetricWgsl) },
                 {
                     bindingsMapping: {
                         heapID: { group: 0, binding: 2 },
@@ -293,7 +293,7 @@ export class OcbtTopologyKernel {
                 }
             );
             this.classify.onError = onErr('classify(metric)');
-            this.classifyParams = new UniformBuffer(engine, undefined, undefined, 'ocbt_classify_params');
+            this.classifyParams = new UniformBuffer(engine, undefined, undefined, 'terrain_classify_params');
             this.classifyParams.addUniform('camRadius', 4);
             this.classifyParams.addUniform('thresh', 4);
             this.classifyParams.addUniform('limits', 4);
@@ -302,7 +302,7 @@ export class OcbtTopologyKernel {
             this.classifyParams.updateFloat4('limits', 0, 0, 0, 0);
             this.classifyParams.update();
             // Frustum UBO (camera-relative planet-local planes). Default disabled.
-            this.frustumParams = new UniformBuffer(engine, undefined, undefined, 'ocbt_frustum_params');
+            this.frustumParams = new UniformBuffer(engine, undefined, undefined, 'terrain_frustum_params');
             this.frustumParams.addUniform('planes', 4, 6);
             this.frustumParams.addUniform('ctrl', 4);
             this.frustumParams.updateUniformArray('planes', new Float32Array(24), 24);
@@ -316,9 +316,9 @@ export class OcbtTopologyKernel {
             this.classify.setUniformBuffer('fp', this.frustumParams);
         } else {
             this.classify = new ComputeShader(
-                'ocbt_topo_classify',
+                'terrain_topo_classify',
                 engine,
-                { computeSource: compose(ocbtU64Wgsl, ocbtTopoCommonWgsl, ocbtTopoClassifyWgsl) },
+                { computeSource: compose(terrainU64Wgsl, terrainTopoCommonWgsl, terrainTopoClassifyWgsl) },
                 {
                     bindingsMapping: {
                         heapID: { group: 0, binding: 2 },
@@ -337,9 +337,9 @@ export class OcbtTopologyKernel {
 
         // --- split ---
         this.split = new ComputeShader(
-            'ocbt_topo_split',
+            'terrain_topo_split',
             engine,
-            { computeSource: compose(ocbtU64Wgsl, ocbtTopoCommonWgsl, ocbtTopoSplitWgsl) },
+            { computeSource: compose(terrainU64Wgsl, terrainTopoCommonWgsl, terrainTopoSplitWgsl) },
             {
                 bindingsMapping: {
                     heapID: { group: 0, binding: 2 },
@@ -360,9 +360,9 @@ export class OcbtTopologyKernel {
 
         // --- allocate ---
         this.allocate = new ComputeShader(
-            'ocbt_topo_allocate',
+            'terrain_topo_allocate',
             engine,
-            { computeSource: compose(ocbtU64Wgsl, ocbtPoolWgsl, ocbtTopoCommonWgsl, ocbtTopoAllocateWgsl) },
+            { computeSource: compose(terrainU64Wgsl, terrainPoolWgsl, terrainTopoCommonWgsl, terrainTopoAllocateWgsl) },
             {
                 bindingsMapping: {
                     pool_tree: { group: 0, binding: 1 },
@@ -380,9 +380,9 @@ export class OcbtTopologyKernel {
 
         // --- copy neighbors (ping-pong buffers bound per frame) ---
         this.copy = new ComputeShader(
-            'ocbt_topo_copy',
+            'terrain_topo_copy',
             engine,
-            { computeSource: compose(ocbtU64Wgsl, ocbtTopoCommonWgsl, ocbtTopoCopyNeighborsWgsl) },
+            { computeSource: compose(terrainU64Wgsl, terrainTopoCommonWgsl, terrainTopoCopyNeighborsWgsl) },
             {
                 bindingsMapping: {
                     nbIn: { group: 0, binding: 3 },
@@ -394,9 +394,9 @@ export class OcbtTopologyKernel {
 
         // --- bisect (ping-pong buffers bound per frame) ---
         this.bisect = new ComputeShader(
-            'ocbt_topo_bisect',
+            'terrain_topo_bisect',
             engine,
-            { computeSource: compose(ocbtU64Wgsl, ocbtPoolWgsl, ocbtTopoCommonWgsl, ocbtTopoBisectWgsl) },
+            { computeSource: compose(terrainU64Wgsl, terrainPoolWgsl, terrainTopoCommonWgsl, terrainTopoBisectWgsl) },
             {
                 bindingsMapping: {
                     pool_bitfield: { group: 0, binding: 0 },
@@ -418,9 +418,9 @@ export class OcbtTopologyKernel {
 
         // --- propagate bisect (neighbor buffer = post-swap "current", bound per frame) ---
         this.propagateBisect = new ComputeShader(
-            'ocbt_topo_propagate',
+            'terrain_topo_propagate',
             engine,
-            { computeSource: compose(ocbtU64Wgsl, ocbtTopoCommonWgsl, ocbtTopoPropagateBisectWgsl) },
+            { computeSource: compose(terrainU64Wgsl, terrainTopoCommonWgsl, terrainTopoPropagateBisectWgsl) },
             {
                 bindingsMapping: {
                     neighbors: { group: 0, binding: 3 },
@@ -435,9 +435,9 @@ export class OcbtTopologyKernel {
 
         // --- merge half: prepare-simplify / simplify / propagate-simplify ---
         this.prepareSimplify = new ComputeShader(
-            'ocbt_topo_prepare_simplify',
+            'terrain_topo_prepare_simplify',
             engine,
-            { computeSource: compose(ocbtU64Wgsl, ocbtTopoCommonWgsl, ocbtTopoPrepareSimplifyWgsl) },
+            { computeSource: compose(terrainU64Wgsl, terrainTopoCommonWgsl, terrainTopoPrepareSimplifyWgsl) },
             {
                 bindingsMapping: {
                     heapID: { group: 0, binding: 2 },
@@ -455,9 +455,9 @@ export class OcbtTopologyKernel {
         this.prepareSimplify.setStorageBuffer('simplification', this.simplification);
 
         this.simplify = new ComputeShader(
-            'ocbt_topo_simplify',
+            'terrain_topo_simplify',
             engine,
-            { computeSource: compose(ocbtU64Wgsl, ocbtPoolWgsl, ocbtTopoCommonWgsl, ocbtTopoSimplifyWgsl) },
+            { computeSource: compose(terrainU64Wgsl, terrainPoolWgsl, terrainTopoCommonWgsl, terrainTopoSimplifyWgsl) },
             {
                 bindingsMapping: {
                     pool_bitfield: { group: 0, binding: 0 },
@@ -477,9 +477,9 @@ export class OcbtTopologyKernel {
         this.simplify.setStorageBuffer('propagate', this.propagate);
 
         this.propagateSimplify = new ComputeShader(
-            'ocbt_topo_propagate_simplify',
+            'terrain_topo_propagate_simplify',
             engine,
-            { computeSource: compose(ocbtU64Wgsl, ocbtTopoCommonWgsl, ocbtTopoPropagateSimplifyWgsl) },
+            { computeSource: compose(terrainU64Wgsl, terrainTopoCommonWgsl, terrainTopoPropagateSimplifyWgsl) },
             {
                 bindingsMapping: {
                     heapID: { group: 0, binding: 2 },
@@ -498,43 +498,43 @@ export class OcbtTopologyKernel {
         // check D); metric = df64 camera-relative [relative,dir] (18/slot, for render). ---
         if (classifyMode === 'metric') {
             // Terrain-aware decode: the df64 eval bakes the SAME noise the render uses and
-            // displaces each corner radially by cbtFbmHeight(dir). So `positions` holds the
+            // displaces each corner radially by terrainFbmHeight(dir). So `positions` holds the
             // real terrain surface (not the smooth sphere) and the whole classify — screenPx,
-            // frustum, horizon — is terrain-aware. cbt_noise.wgsl needs the baked CBT_* fbm
-            // constants + the cbtPerm storage buffer declared BEFORE it.
+            // frustum, horizon — is terrain-aware. terrain_noise.wgsl needs the baked TERRAIN_* fbm
+            // constants + the terrainPerm storage buffer declared BEFORE it.
             const n = noise;
             const f = (x: number) => (Number.isInteger(x) ? `${x}.0` : `${x}`);
             const noiseHeader = n
                 ? [
-                      `const CBT_OCTAVES : i32 = ${Math.max(0, Math.floor(n.octaves))};`,
-                      `const CBT_BASE_FREQ : f32 = ${f(n.baseFrequency)};`,
-                      `const CBT_BASE_AMP : f32 = ${f(n.baseAmplitude)};`,
-                      `const CBT_LACUNARITY : f32 = ${f(n.lacunarity)};`,
-                      `const CBT_PERSISTENCE : f32 = ${f(n.persistence)};`,
-                      `const CBT_GLOBAL_AMP : f32 = ${f(n.globalAmplitude)};`,
-                      `const CBT_DETAIL_OCTAVES : i32 = ${Math.max(0, Math.floor(n.detailOctaves ?? 0))};`,
-                      `const CBT_DETAIL_RANGE : f32 = ${f(n.detailRange ?? 60)};`,
+                      `const TERRAIN_OCTAVES : i32 = ${Math.max(0, Math.floor(n.octaves))};`,
+                      `const TERRAIN_BASE_FREQ : f32 = ${f(n.baseFrequency)};`,
+                      `const TERRAIN_BASE_AMP : f32 = ${f(n.baseAmplitude)};`,
+                      `const TERRAIN_LACUNARITY : f32 = ${f(n.lacunarity)};`,
+                      `const TERRAIN_PERSISTENCE : f32 = ${f(n.persistence)};`,
+                      `const TERRAIN_GLOBAL_AMP : f32 = ${f(n.globalAmplitude)};`,
+                      `const TERRAIN_DETAIL_OCTAVES : i32 = ${Math.max(0, Math.floor(n.detailOctaves ?? 0))};`,
+                      `const TERRAIN_DETAIL_RANGE : f32 = ${f(n.detailRange ?? 60)};`,
                       // Crater consts + craterParams() from the active CraterParams (same single
                       // source the render material bakes), so the df64 vertex height matches it.
                       craterHeaderWgsl(craters),
-                      '@group(0) @binding(21) var<storage, read> cbtPerm : array<u32>;'
+                      '@group(0) @binding(21) var<storage, read> terrainPerm : array<u32>;'
                   ].join('\n')
                 : [
                       // No noise configured -> zero relief (smooth sphere), still valid WGSL.
-                      'const CBT_OCTAVES : i32 = 0;',
-                      'const CBT_BASE_FREQ : f32 = 1.0;',
-                      'const CBT_BASE_AMP : f32 = 1.0;',
-                      'const CBT_LACUNARITY : f32 = 2.0;',
-                      'const CBT_PERSISTENCE : f32 = 0.5;',
-                      'const CBT_GLOBAL_AMP : f32 = 0.0;',
-                      'const CBT_DETAIL_OCTAVES : i32 = 0;',
-                      'const CBT_DETAIL_RANGE : f32 = 60.0;',
-                      // No craters either: empty class list -> CBT_CRATER_CLASSES = 0 (loops skip).
+                      'const TERRAIN_OCTAVES : i32 = 0;',
+                      'const TERRAIN_BASE_FREQ : f32 = 1.0;',
+                      'const TERRAIN_BASE_AMP : f32 = 1.0;',
+                      'const TERRAIN_LACUNARITY : f32 = 2.0;',
+                      'const TERRAIN_PERSISTENCE : f32 = 0.5;',
+                      'const TERRAIN_GLOBAL_AMP : f32 = 0.0;',
+                      'const TERRAIN_DETAIL_OCTAVES : i32 = 0;',
+                      'const TERRAIN_DETAIL_RANGE : f32 = 60.0;',
+                      // No craters either: empty class list -> TERRAIN_CRATER_CLASSES = 0 (loops skip).
                       craterHeaderWgsl({ ...DEFAULT_CRATERS, rayClasses: 0, classes: [] }),
-                      '@group(0) @binding(21) var<storage, read> cbtPerm : array<u32>;'
+                      '@group(0) @binding(21) var<storage, read> terrainPerm : array<u32>;'
                   ].join('\n');
 
-            this.evalPerm = mk(256 * 4, STORAGE | WRITE, 'ocbt_topo_evalperm');
+            this.evalPerm = mk(256 * 4, STORAGE | WRITE, 'terrain_topo_evalperm');
             const permU32 = new Uint32Array(256);
             if (n) {
                 const perm = buildPerm(n.seed);
@@ -543,17 +543,17 @@ export class OcbtTopologyKernel {
             this.evalPerm.update(permU32);
 
             this.evalLeb = new ComputeShader(
-                'ocbt_topo_eval_leb_f64',
+                'terrain_topo_eval_leb_f64',
                 engine,
                 {
                     computeSource: compose(
                         noiseHeader,
-                        cbtNoiseWgsl,
-                        ocbtU64Wgsl,
-                        ocbtF64Wgsl,
-                        cbtNoiseDf64Wgsl,
-                        ocbtTopoCommonWgsl,
-                        ocbtTopoEvalLebF64Wgsl
+                        terrainNoiseWgsl,
+                        terrainU64Wgsl,
+                        terrainF64Wgsl,
+                        terrainNoiseDf64Wgsl,
+                        terrainTopoCommonWgsl,
+                        terrainTopoEvalLebF64Wgsl
                     )
                 },
                 {
@@ -561,21 +561,21 @@ export class OcbtTopologyKernel {
                         heapID: { group: 0, binding: 2 },
                         ep: { group: 0, binding: 17 },
                         positions: { group: 0, binding: 19 },
-                        cbtPerm: { group: 0, binding: 21 }
+                        terrainPerm: { group: 0, binding: 21 }
                     }
                 }
             );
             this.evalLeb.onError = onErr('evalLeb(f64)');
             this.evalLeb.setStorageBuffer('heapID', this.heapID);
             this.evalLeb.setStorageBuffer('positions', this.positions);
-            this.evalLeb.setStorageBuffer('cbtPerm', this.evalPerm);
+            this.evalLeb.setStorageBuffer('terrainPerm', this.evalPerm);
             // Reuse the metric classify camera UBO (camRadius.xyz=camLocal, .w=radius).
             this.evalLeb.setUniformBuffer('ep', this.classifyParams!);
         } else {
             this.evalLeb = new ComputeShader(
-                'ocbt_topo_eval_leb',
+                'terrain_topo_eval_leb',
                 engine,
-                { computeSource: compose(ocbtU64Wgsl, ocbtEvalLebWgsl, ocbtTopoCommonWgsl, ocbtTopoEvalLebWgsl) },
+                { computeSource: compose(terrainU64Wgsl, terrainEvalLebWgsl, terrainTopoCommonWgsl, terrainTopoEvalLebWgsl) },
                 {
                     bindingsMapping: {
                         heapID: { group: 0, binding: 2 },
@@ -591,12 +591,12 @@ export class OcbtTopologyKernel {
         // --- draw compaction (metric only): live slots -> contiguous index list so the
         // render draws liveCount instances instead of CAPACITY. ---
         if (classifyMode === 'metric') {
-            this.bisectorIndices = mk(capacity * 4, STORAGE | READ | WRITE, 'ocbt_topo_indices');
-            this.drawCount = mk(4, STORAGE | WRITE, 'ocbt_topo_drawcount');
+            this.bisectorIndices = mk(capacity * 4, STORAGE | READ | WRITE, 'terrain_topo_indices');
+            this.drawCount = mk(4, STORAGE | WRITE, 'terrain_topo_drawcount');
             this.compact = new ComputeShader(
-                'ocbt_topo_compact',
+                'terrain_topo_compact',
                 engine,
-                { computeSource: compose(ocbtU64Wgsl, ocbtTopoCommonWgsl, ocbtTopoCompactWgsl) },
+                { computeSource: compose(terrainU64Wgsl, terrainTopoCommonWgsl, terrainTopoCompactWgsl) },
                 {
                     bindingsMapping: {
                         heapID: { group: 0, binding: 2 },
@@ -614,16 +614,16 @@ export class OcbtTopologyKernel {
         // --- indirect dispatch (optional): scale the 7 work-list passes' workgroup
         // count with their candidate counts instead of the full pool capacity. ---
         if (useIndirect) {
-            this.indirectArgs = mk(ARG_RECORDS * 16, STORAGE | INDIRECT | WRITE, 'ocbt_topo_indirect_args');
+            this.indirectArgs = mk(ARG_RECORDS * 16, STORAGE | INDIRECT | WRITE, 'terrain_topo_indirect_args');
             // Seed valid (1,1,1) records so any dispatchIndirect before the first
             // PrepareIndirect is harmless (consumer guards on the in-shader count).
             const seed = new Uint32Array(ARG_RECORDS * 4);
             for (let r = 0; r < ARG_RECORDS; r++) seed[r * 4] = 1;
             this.indirectArgs.update(seed);
             this.prepareIndirect = new ComputeShader(
-                'ocbt_topo_prepare_indirect',
+                'terrain_topo_prepare_indirect',
                 engine,
-                { computeSource: compose(ocbtTopoPrepareIndirectWgsl) },
+                { computeSource: compose(terrainTopoPrepareIndirectWgsl) },
                 {
                     bindingsMapping: {
                         classification: { group: 0, binding: 6 },
@@ -645,7 +645,7 @@ export class OcbtTopologyKernel {
         // One UBO per reduce level (0..depth). Reusing one UBO across same-submit
         // dispatches coalesces to the last value, so each level needs its own.
         for (let level = 0; level <= this.depth; level++) {
-            const ubo = new UniformBuffer(engine, undefined, undefined, `ocbt_topo_reduce_lvl_${level}`);
+            const ubo = new UniformBuffer(engine, undefined, undefined, `terrain_topo_reduce_lvl_${level}`);
             ubo.addUniform('data', 4);
             ubo.updateInt4('data', level, 0, 0, 0);
             ubo.update();
@@ -673,7 +673,7 @@ export class OcbtTopologyKernel {
         const end = performance.now() + timeoutMs;
         while (!shaders.every((s) => s.isReady())) {
             if (performance.now() > end) {
-                throw new Error('OcbtTopologyKernel compute shaders not ready (timeout)');
+                throw new Error('TerrainTopologyKernel compute shaders not ready (timeout)');
             }
             await new Promise((r) => setTimeout(r, 10));
         }
@@ -709,16 +709,16 @@ export class OcbtTopologyKernel {
      * seams. `levels[f]` is the target level for face f (0..7).
      */
     setFaceDepths(levels: ReadonlyArray<number>): void {
-        if (levels.length !== OCBT_FACE_COUNT) {
-            throw new Error(`OcbtTopologyKernel.setFaceDepths needs ${OCBT_FACE_COUNT} levels`);
+        if (levels.length !== TERRAIN_FACE_COUNT) {
+            throw new Error(`TerrainTopologyKernel.setFaceDepths needs ${TERRAIN_FACE_COUNT} levels`);
         }
         this.faceTargets.update(new Uint32Array(levels.map((l) => l >>> 0)));
     }
 
     /** Set the camera + thresholds for the metric classify (metric mode only). */
-    setCameraParams(p: OcbtCameraParams): void {
+    setCameraParams(p: TerrainCameraParams): void {
         if (!this.classifyParams) {
-            throw new Error('OcbtTopologyKernel.setCameraParams requires classifyMode "metric"');
+            throw new Error('TerrainTopologyKernel.setCameraParams requires classifyMode "metric"');
         }
         this.classifyParams.updateFloat4('camRadius', p.camLocal[0], p.camLocal[1], p.camLocal[2], p.radius);
         this.classifyParams.updateFloat4('thresh', p.focalPx, p.splitThresholdPx, p.mergeThresholdPx, p.cullMinDot);
@@ -736,7 +736,7 @@ export class OcbtTopologyKernel {
      */
     setFrustum(planes: Float32Array, guardScale: number, enabled: boolean, heightMargin = 0): void {
         if (!this.frustumParams) {
-            throw new Error('OcbtTopologyKernel.setFrustum requires classifyMode "metric"');
+            throw new Error('TerrainTopologyKernel.setFrustum requires classifyMode "metric"');
         }
         // ctrl = (enabled, guardScale, heightMargin, _). heightMargin (= max radial vertex
         // displacement) widens the cull so tall relief near the camera is not wrongly culled.
@@ -900,7 +900,7 @@ export class OcbtTopologyKernel {
     }
 
     /** Read the live topology back to the CPU for the cross-check (forced flush). */
-    async readState(): Promise<OcbtGpuState> {
+    async readState(): Promise<TerrainGpuState> {
         const heapBytes = (await this.heapID.read(0, undefined, undefined, true)) as Uint8Array;
         const nbBytes = (await this.liveNeighbors.read(0, undefined, undefined, true)) as Uint8Array;
         const treeBytes = (await this.poolTree.read(0, 16, undefined, true)) as Uint8Array;
@@ -919,7 +919,7 @@ export class OcbtTopologyKernel {
     }
 
     /** Sentinel value for "no neighbor" in the readback neighbors array. */
-    static readonly INVALID = OCBT_INVALID;
+    static readonly INVALID = TERRAIN_INVALID;
 
     dispose(): void {
         for (const ubo of this.levelParams) ubo.dispose();

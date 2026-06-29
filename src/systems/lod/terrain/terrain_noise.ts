@@ -1,5 +1,5 @@
 /**
- * Compact 3D simplex noise + FBM for CBT terrain displacement.
+ * Compact 3D simplex noise + FBM for TERRAIN terrain displacement.
  * Based on Stefan Gustavson's simplex noise (public domain).
  */
 
@@ -141,10 +141,10 @@ export type NoiseParams = {
 };
 
 /**
- * Canonical terrain noise — the SINGLE source of truth shared by CBT and OCBT:
- *  - the CBT/OCBT GPU shaders bake these via the material header,
+ * Canonical terrain noise — the SINGLE source of truth shared by TERRAIN and TERRAIN:
+ *  - the TERRAIN/TERRAIN GPU shaders bake these via the material header,
  *  - the analytic ground collision (fbmNoise) reproduces the same surface.
- * octaves is capped at 12 (the CBT shader's CBT_MAX_OCTAVES); beyond ~12 the
+ * octaves is capped at 12 (the TERRAIN shader's TERRAIN_MAX_OCTAVES); beyond ~12 the
  * contribution is sub-millimetre at this persistence, so it is imperceptible.
  */
 export const DEFAULT_NOISE: NoiseParams = {
@@ -154,7 +154,7 @@ export const DEFAULT_NOISE: NoiseParams = {
     baseAmplitude: 32,
     lacunarity: 2.07,
     persistence: 0.5,
-    // Reduced from 180: craters (cbt_noise.wgsl craterField, depths up to ~18 km) are now the
+    // Reduced from 180: craters (terrain_noise.wgsl craterField, depths up to ~18 km) are now the
     // DOMINANT relief; the fbm is the finer inter-crater roughness on top.
     globalAmplitude: 5,
     detailOctaves: 16,
@@ -209,21 +209,21 @@ export type CraterClass = readonly [number, number, number, number];
 
 /** Crater field params — shared by the GPU bake (craterHeaderWgsl) and the CPU collision below. */
 export type CraterParams = {
-    /** Global crater depth multiplier (CBT_CRATER_SCALE). */
+    /** Global crater depth multiplier (TERRAIN_CRATER_SCALE). */
     scale: number;
-    /** Nyquist fade-distance factor (CBT_CRATER_RANGE): a class fades out past range*cell km. */
+    /** Nyquist fade-distance factor (TERRAIN_CRATER_RANGE): a class fades out past range*cell km. */
     range: number;
-    /** NORMAL-only: skip classes much BIGGER than the camera distance (CBT_CRATER_NEAR). */
+    /** NORMAL-only: skip classes much BIGGER than the camera distance (TERRAIN_CRATER_NEAR). */
     near: number;
-    /** Irregular-rim amplitude — rim radius varies +/- this fraction by direction (CBT_RIM_IRR). */
+    /** Irregular-rim amplitude — rim radius varies +/- this fraction by direction (TERRAIN_RIM_IRR). */
     rimIrregularity: number;
-    /** Irregular-rim lobe count — low = polygonal/lumpy, high = circular (CBT_RIM_FREQ). */
+    /** Irregular-rim lobe count — low = polygonal/lumpy, high = circular (TERRAIN_RIM_FREQ). */
     rimFrequency: number;
-    /** Fraction of craters that are fresh and emit bright ejecta rays (CBT_CRATER_FRESH). */
+    /** Fraction of craters that are fresh and emit bright ejecta rays (TERRAIN_CRATER_FRESH). */
     freshFraction: number;
-    /** How many of the biggest classes emit ejecta rays (CBT_RAY_CLASSES). */
+    /** How many of the biggest classes emit ejecta rays (TERRAIN_RAY_CLASSES). */
     rayClasses: number;
-    /** Crater classes, largest first. classes.length = CBT_CRATER_CLASSES. */
+    /** Crater classes, largest first. classes.length = TERRAIN_CRATER_CLASSES. */
     classes: ReadonlyArray<CraterClass>;
 };
 
@@ -256,11 +256,11 @@ function wf(x: number): string {
 }
 
 /**
- * Generate the WGSL crater-constant header (the CBT_CRATER_* consts + the craterParams() switch)
- * from a {@link CraterParams}. Injected BEFORE cbt_noise.wgsl by BOTH the render material
+ * Generate the WGSL crater-constant header (the TERRAIN_CRATER_* consts + the craterParams() switch)
+ * from a {@link CraterParams}. Injected BEFORE terrain_noise.wgsl by BOTH the render material
  * (bakedHeader) and the topology kernel (noiseHeader), so the hardcoded block is gone from the
  * .wgsl and the GPU stays in lockstep with the CPU collision field above. classes.length drives
- * CBT_CRATER_CLASSES; the switch mirrors the original 6-case craterParams exactly.
+ * TERRAIN_CRATER_CLASSES; the switch mirrors the original 6-case craterParams exactly.
  */
 export function craterHeaderWgsl(c: CraterParams): string {
     const cls = c.classes;
@@ -279,14 +279,14 @@ export function craterHeaderWgsl(c: CraterParams): string {
                   })
                   .join('\n');
     return [
-        `const CBT_CRATER_CLASSES : i32 = ${n};`,
-        `const CBT_CRATER_SCALE : f32 = ${wf(c.scale)};`,
-        `const CBT_CRATER_RANGE : f32 = ${wf(c.range)};`,
-        `const CBT_CRATER_NEAR : f32 = ${wf(c.near)};`,
-        `const CBT_RIM_IRR : f32 = ${wf(c.rimIrregularity)};`,
-        `const CBT_RIM_FREQ : f32 = ${wf(c.rimFrequency)};`,
-        `const CBT_CRATER_FRESH : f32 = ${wf(c.freshFraction)};`,
-        `const CBT_RAY_CLASSES : i32 = ${Math.max(0, Math.floor(c.rayClasses))};`,
+        `const TERRAIN_CRATER_CLASSES : i32 = ${n};`,
+        `const TERRAIN_CRATER_SCALE : f32 = ${wf(c.scale)};`,
+        `const TERRAIN_CRATER_RANGE : f32 = ${wf(c.range)};`,
+        `const TERRAIN_CRATER_NEAR : f32 = ${wf(c.near)};`,
+        `const TERRAIN_RIM_IRR : f32 = ${wf(c.rimIrregularity)};`,
+        `const TERRAIN_RIM_FREQ : f32 = ${wf(c.rimFrequency)};`,
+        `const TERRAIN_CRATER_FRESH : f32 = ${wf(c.freshFraction)};`,
+        `const TERRAIN_RAY_CLASSES : i32 = ${Math.max(0, Math.floor(c.rayClasses))};`,
         `fn craterParams(k: i32) -> vec4<f32> {`,
         `    switch k {`,
         cases,
@@ -410,14 +410,14 @@ function smoothstep01(e0: number, e1: number, x: number): number {
 }
 
 /**
- * Ground height as the OCBT shader ACTUALLY renders it near the camera: the macro
+ * Ground height as the TERRAIN shader ACTUALLY renders it near the camera: the macro
  * fbm PLUS the continued-detail octaves, each band-limited by camera distance with
- * the SAME per-octave fade as cbtFbm_d_at (cbt_noise.wgsl). Use this for collision /
+ * the SAME per-octave fade as terrainFbm_d_at (terrain_noise.wgsl). Use this for collision /
  * altitude so the camera sits on the VISIBLE surface (macro + relief), not the
  * macro-only field — otherwise it floats over detail troughs / clips detail bumps.
  *
  * fbmNoise stays the macro-only canonical field (golden + Rust parity + far LOD).
- * Octave caps mirror the shader (CBT_MAX_OCTAVES = CBT_MAX_DETAIL = 12) so the CPU
+ * Octave caps mirror the shader (TERRAIN_MAX_OCTAVES = TERRAIN_MAX_DETAIL = 12) so the CPU
  * floor equals the GPU vertex height. camDistKm/radiusKm are in the shader's units
  * (sim units = km here): camDistKm is the camera's distance to that ground point.
  */
@@ -435,7 +435,7 @@ export function fbmGroundHeight(
     let freq = params.baseFrequency;
     let amp = params.baseAmplitude;
 
-    // Macro octaves (shader caps at CBT_MAX_OCTAVES = 12), band-limited by distance.
+    // Macro octaves (shader caps at TERRAIN_MAX_OCTAVES = 12), band-limited by distance.
     const macroN = Math.min(params.octaves, 12);
     for (let i = 0; i < macroN; i++) {
         const onKm = range * (radiusKm / freq);
@@ -447,7 +447,7 @@ export function fbmGroundHeight(
     }
     if (maxMacro <= 1e-12) return 0;
 
-    // Continued-detail octaves (shader caps at CBT_MAX_DETAIL = 12).
+    // Continued-detail octaves (shader caps at TERRAIN_MAX_DETAIL = 12).
     const detailN = Math.min(params.detailOctaves ?? 0, 12);
     for (let j = 0; j < detailN; j++) {
         const onKm = range * (radiusKm / freq);
@@ -459,7 +459,7 @@ export function fbmGroundHeight(
 
     // Craters are the dominant relief: added (in km) on top of the reduced fbm. Big classes never
     // fade; small classes band-limit by camDistKm (matching the GPU). MUST match the GPU df64 eval
-    // (cbtFbm_d_at_df64) so the camera collides with the rendered crater floors/rims.
+    // (terrainFbm_d_at_df64) so the camera collides with the rendered crater floors/rims.
     return (
         (sum / maxMacro) * params.globalAmplitude +
         craterField(x, y, z, perm, radiusKm, camDistKm, craters)

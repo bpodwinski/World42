@@ -1,16 +1,16 @@
 /**
- * u64 emulation for the OCBT path — the CPU mirror of `ocbt_u64.wgsl`.
+ * u64 emulation for the TERRAIN path — the CPU mirror of `terrain_u64.wgsl`.
  *
- * WGSL has no 64-bit integer type, yet OCBT heap IDs need ~63 bits at terrain
+ * WGSL has no 64-bit integer type, yet TERRAIN heap IDs need ~63 bits at terrain
  * depth ~60 (the root face is at depth 3, each subdivision adds one bit). We
  * therefore carry a u64 as a `vec2<u32>` = `[lo, hi]` (low 32 bits, high 32 bits)
  * and implement exactly the operations the LEB decode and bisector topology use:
  * `firstLeadingBit` (-> tree depth), bit extraction, shifts, bitwise and/or/not,
- * and unsigned comparison. See `references/large_cbt/shaders/shader_lib/leb.hlsl`
+ * and unsigned comparison. See `references/large_terrain/shaders/shader_lib/leb.hlsl`
  * (`leb_depth`, `leb__GetBitValue`, the tabulated decode masks) for the native
  * `uint64_t` originals these mirror.
  *
- * This TS module is the golden oracle: `ocbt_u64.test.ts` checks it against
+ * This TS module is the golden oracle: `terrain_u64.test.ts` checks it against
  * BigInt, and the GPU<->mirror cross-check (later phases) reads back heap IDs and
  * compares against values produced here. Each lane is kept in the unsigned 32-bit
  * range via `>>> 0` so the two representations stay bit-identical.

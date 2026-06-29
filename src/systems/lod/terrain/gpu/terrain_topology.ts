@@ -1,10 +1,10 @@
 /**
- * OCBT topology CPU mirror — the sequential oracle for the bisector pool: octahedron
+ * TERRAIN topology CPU mirror — the sequential oracle for the bisector pool: octahedron
  * seed, forced-diamond conforming split, conservative diamond merge, explicit
- * neighbor maintenance. This ports the PROVEN topology of `cbt_state.ts` (which
- * already passes World42's 0-T-junction conformity tests) into the OCBT
+ * neighbor maintenance. This ports the PROVEN topology of `terrain_state.ts` (which
+ * already passes World42's 0-T-junction conformity tests) into the TERRAIN
  * representation, adding a per-slot **heapID** so the triangulation is decoded
- * vert-free via `ocbt_eval_leb` (and stored as u64 on the GPU for depth ~60).
+ * vert-free via `terrain_eval_leb` (and stored as u64 on the GPU for depth ~60).
  *
  * Why this is the oracle and not the GPU code: the GPU runs the reference's CONCURRENT
  * batch engine (4 split patterns + atomic reservation, `update_utilities.hlsl`).
@@ -14,18 +14,18 @@
  * INVARIANTS (live heapID set, neighbor symmetry, 0 T-junction), not pool indices,
  * which differ by allocation order.
  *
- * Neighbor convention (from cbt_state.ts): neighbors = [BASE, LEFT, RIGHT] where BASE
+ * Neighbor convention (from terrain_state.ts): neighbors = [BASE, LEFT, RIGHT] where BASE
  * is the hypotenuse / split-edge twin (the reference's "twin") and LEFT/RIGHT are the
  * two leg neighbors (the reference's Next/Prev). Geometry is the REFERENCE convention:
- * every node's corners are the closed-form decode `ocbtCorners(heapID)` (planar matrix,
+ * every node's corners are the closed-form decode `terrainCorners(heapID)` (planar matrix,
  * projected once to the unit sphere) — no recursive slerp, no separate legacy decoder.
  */
-import { ocbtCorners } from './ocbt_eval_leb';
+import { terrainCorners } from './terrain_eval_leb';
 
 // Root neighbours [base, left, right] across edges (L-R),(apex-L),(apex-R), in the
-// REFERENCE convention (mirror of ocbt_engine_buffers ROOT_NEIGHBORS_W42). Top faces
+// REFERENCE convention (mirror of terrain_engine_buffers ROOT_NEIGHBORS_W42). Top faces
 // 0..3 have left/right swapped vs the legacy seed — consistent with GPU_FACE_CORNERS,
-// whose top faces are also l/r-swapped — so the stored geometry (ocbtCorners) and the
+// whose top faces are also l/r-swapped — so the stored geometry (terrainCorners) and the
 // leg-neighbour pointers agree. Each node's geometry is decoded from its heap id.
 const ROOT_NEIGHBORS: ReadonlyArray<readonly [number, number, number]> = [
     [4, 1, 3],
@@ -56,7 +56,7 @@ export interface BisectorView {
     r: [number, number, number];
 }
 
-export class OcbtTopology {
+export class TerrainTopology {
     private cap = 0;
     private verts!: Float64Array; // cap*9 — apex(0-2) left(3-5) right(6-8), unit sphere
     private heapID!: Float64Array; // cap — LEB heap id (exact int < 2^53)
@@ -81,7 +81,7 @@ export class OcbtTopology {
             this.parent[slot] = -1;
             this.child0[slot] = -1;
             this.child1[slot] = -1;
-            this.writeFromHeap(slot, 8 + i); // geometry = ocbtCorners(8+i)
+            this.writeFromHeap(slot, 8 + i); // geometry = terrainCorners(8+i)
             this.setBit(this.leafBits, slot);
             this._leafCount++;
         }
@@ -279,11 +279,11 @@ export class OcbtTopology {
 
     /**
      * Write a slot's geometry from the closed-form decode of its heap id (reference
-     * convention). `ocbtCorners` returns (v0,v1,v2) = (right, apex, left); store as the
+     * convention). `terrainCorners` returns (v0,v1,v2) = (right, apex, left); store as the
      * node's (apex, left, right) = (v1, v2, v0).
      */
     private writeFromHeap(slot: number, heapID: number): void {
-        const c = ocbtCorners(heapID);
+        const c = terrainCorners(heapID);
         this.writeVerts(slot, c[1], c[2], c[0]);
     }
 
@@ -311,7 +311,7 @@ export class OcbtTopology {
     /**
      * Conforming split via Rivara's Longest-Edge Propagation Path (LEPP). Watertight +
      * symmetric for ANY refinement (single-region, multi-region, arbitrary, across the
-     * 12 octahedron seams) — the general fix over cbt_state.ts's base-only forcing,
+     * 12 octahedron seams) — the general fix over terrain_state.ts's base-only forcing,
      * which only worked for single coherent regions (it forced the base ONE level with
      * no level check, stranding T-junctions where ≥2-level differences met).
      *
@@ -373,7 +373,7 @@ export class OcbtTopology {
             return;
         }
         // Tolerance compare: planar corners shared across distinct triangles agree to
-        // ~f64 ULP, not bit-exact (each comes from an independent ocbtCorners decode).
+        // ~f64 ULP, not bit-exact (each comes from an independent terrainCorners decode).
         const bL = tb * 9 + 3;
         const tbLeftIsTL =
             Math.abs(this.verts[bL] - tLx) < 1e-9 &&
@@ -399,7 +399,7 @@ export class OcbtTopology {
      * the child labeling is the PURE INTEGER rule: t0 keeps the parent's {apex,left}
      * (bit0 -> heap 2h), t1 keeps {apex,right} (bit1 -> heap 2h+1) — no geometry match
      * needed (the "flip per level" was an artefact of the legacy decoder). Geometry is
-     * the closed-form ocbtCorners(childHeap), planar and projected once, NOT a slerp
+     * the closed-form terrainCorners(childHeap), planar and projected once, NOT a slerp
      * midpoint. t0 inherits the parent's LEFT leg as its base, t1 the RIGHT leg.
      */
     private subdivide(t: number): [number, number] {
@@ -413,7 +413,7 @@ export class OcbtTopology {
         const t0 = this.allocSlot();
         const t1 = this.allocSlot();
 
-        // t0 = (apex=VC, left=parentApex, right=parentLeft) = ocbtCorners(2h).
+        // t0 = (apex=VC, left=parentApex, right=parentLeft) = terrainCorners(2h).
         this.heapID[t0] = 2 * h;
         this.level[t0] = lvl;
         this.parent[t0] = t;
@@ -422,7 +422,7 @@ export class OcbtTopology {
         this.writeFromHeap(t0, 2 * h);
         this.setBit(this.leafBits, t0);
 
-        // t1 = (apex=VC, left=parentRight, right=parentApex) = ocbtCorners(2h+1).
+        // t1 = (apex=VC, left=parentRight, right=parentApex) = terrainCorners(2h+1).
         this.heapID[t1] = 2 * h + 1;
         this.level[t1] = lvl;
         this.parent[t1] = t;

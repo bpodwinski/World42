@@ -1,5 +1,5 @@
-// OCBT EvaluateLEB pass — df64 / CAMERA-RELATIVE variant (one thread per pool slot).
-// The Phase 3 precision path: the f32 unit-dir decode (ocbt_topo_eval_leb) cracks past
+// TERRAIN EvaluateLEB pass — df64 / CAMERA-RELATIVE variant (one thread per pool slot).
+// The Phase 3 precision path: the f32 unit-dir decode (terrain_topo_eval_leb) cracks past
 // depth ~24 because (a) the ~depth-many normalize steps accumulate f32 error and (b) the
 // per-vertex planet-local position (~radius) is f32-quantized (~0.25 m ULP at planet
 // scale) so adjacent fine vertices snap together. This pass fixes BOTH:
@@ -18,7 +18,7 @@
 // per-pixel normal from it; classify uses it for the edge metric + horizon cull). The
 // render VS does renderPos = mat3(world) * relative — no big-number multiply.
 //
-// Composed after: engineWgslPreamble + ocbt_u64.wgsl + ocbt_f64.wgsl + common.
+// Composed after: engineWgslPreamble + terrain_u64.wgsl + terrain_f64.wgsl + common.
 // Reuses the metric classify camera UBO (binding 17): camRadius.xyz = camLocal, .w = radius.
 
 struct EvalParams {
@@ -57,7 +57,7 @@ fn dv_normalize(a : DVec3) -> DVec3 {
 }
 
 // Consistently-wound octahedron face corners (apex, left, right) as df64 — mirror of
-// GPU_FACE_CORNERS / ocbt_face_corners. Returns three DVec3 via out params.
+// GPU_FACE_CORNERS / terrain_face_corners. Returns three DVec3 via out params.
 fn dv_face_corners(face : u32, a : ptr<function, DVec3>, l : ptr<function, DVec3>, r : ptr<function, DVec3>) {
     switch (face) {
         case 0u: { *a = dv_from_f32(0.0, 1.0, 0.0); *l = dv_from_f32(0.0, 0.0, 1.0); *r = dv_from_f32(1.0, 0.0, 0.0); }
@@ -78,23 +78,23 @@ fn narrow(a : DVec3) -> vec3<f32> {
 // Per-corner df64 -> f32 noise cutoff. df64 keeps the noise DOMAIN (p*freq) cell-precise to ~cm
 // near the viewer (f32 dir quantization bands the relief at ~1-30 m wavelength past depth ~24);
 // but that banding only shows VERY close, so beyond ep.limits.z (DF64_NEAR_KM, km) the f32 twin
-// cbtFbmHeightAt is bit-enough and far cheaper. WATERTIGHT: the predicate is the per-CORNER camera
+// terrainFbmHeightAt is bit-enough and far cheaper. WATERTIGHT: the predicate is the per-CORNER camera
 // distance, not the leaf level — a shared corner has a bit-identical df64 `v` (exact rational decode)
-// => identical distKm => the SAME branch on both adjacent leaves => no crack. cbtFbmHeightAt is the
-// exact f32 twin of cbtFbmHeightAt_df64 (same per-octave distance fade, same craters), so the only
+// => identical distKm => the SAME branch on both adjacent leaves => no crack. terrainFbmHeightAt is the
+// exact f32 twin of terrainFbmHeightAt_df64 (same per-octave distance fade, same craters), so the only
 // difference is domain precision, invisible past the threshold.
 fn cornerHeight(v : DVec3, d : vec3<f32>, distKm : f32, radius : f32) -> f32 {
     if (distKm < ep.limits.z) {
-        return cbtFbmHeightAt_df64(v.x, v.y, v.z, distKm, radius);
+        return terrainFbmHeightAt_df64(v.x, v.y, v.z, distKm, radius);
     }
-    return cbtFbmHeightAt(d, distKm, radius);
+    return terrainFbmHeightAt(d, distKm, radius);
 }
 
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid : vec3<u32>,
         @builtin(num_workgroups) nwg : vec3<u32>) {
     let id = linear_id(gid, nwg.x);
-    if (id >= OCBT_CAPACITY) { return; }
+    if (id >= TERRAIN_CAPACITY) { return; }
 
     let heap = heapID[id];
     if (heap_is_zero(heap)) { return; }
@@ -145,7 +145,7 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>,
     let d2 = narrow(v2);
 
     // Terrain-aware decode: displace each corner radially by the SAME fbm height the render
-    // bakes (cbtFbmHeight + CBT_* constants + cbtPerm are composed in by the kernel). So the
+    // bakes (terrainFbmHeight + TERRAIN_* constants + terrainPerm are composed in by the kernel). So the
     // positions buffer holds the real terrain surface, making screenPx / frustum / horizon
     // terrain-aware. The big radius cancellation is done in df64; the small height add is f32
     // (post-narrow), exactly as the render vertex shader did it.

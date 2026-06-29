@@ -11,7 +11,7 @@
  *   - GPU       : nvidia-smi (util / mem-util / mem-used / power / graphics clock)
  *   - CPU app   : summed CPU-seconds of the Playwright Chromium processes (Get-Process)
  *   - CPU rndr  : renderer main-thread busy time via CDP Performance.getMetrics (TaskDuration)
- *   - structure : getStats().cbt (leafCount) + drawCalls, sampled once (cheap)
+ *   - structure : getStats().terrain (leafCount) + drawCalls, sampled once (cheap)
  *
  * Usage (from the repo root):
  *   node scripts/perf_probe.mjs --scenario ground-drift --knob rebakeEvery=1,3,6
@@ -21,7 +21,7 @@
  *   node scripts/perf_probe.mjs --scenario ground-still  --freeze --knob perfMask=0,4,8,16
  *   node scripts/perf_probe.mjs --scenario orbit --planet 1 --window 6
  *
- * --freeze pins OCBT topology (after the initial convergence) so a perfMask sweep runs at a CONSTANT
+ * --freeze pins TERRAIN topology (after the initial convergence) so a perfMask sweep runs at a CONSTANT
  * leaf count — the clean way to attribute per-block FRAGMENT cost. The leaf min–max spread is reported
  * so you can confirm the freeze held (spread ~0). Use it with --scenario ground-still.
  *
@@ -58,7 +58,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const CORES = os.cpus().length;
 
 // scenario -> { altKm: number | 'r*<f>', drift: units/frame }. Drift uses nudgeCameraDoublePos
-// (no LOD reset) so the OCBT drift gate / re-bake throttle engages like real piloting.
+// (no LOD reset) so the TERRAIN drift gate / re-bake throttle engages like real piloting.
 const SCENARIOS = {
     'ground-still': { altKm: 0.06, drift: 0 },
     'ground-drift': { altKm: 0.06, drift: 0.025 },
@@ -72,10 +72,10 @@ const KNOBS = ['perfMask', 'rebakeEvery', 'df64NearKm', 'hwScale', 'adaptiveReba
 const applyKnob = (page, name, v) =>
     page.evaluate(({ name, v }) => {
         switch (name) {
-            case 'perfMask': window.__ocbtPerfMask = v | 0; break;
-            case 'adaptiveRebake': window.__ocbtAdaptiveRebake = !!v; break;
-            case 'rebakeEvery': window.__ocbtRebakeEvery = v; break;
-            case 'df64NearKm': window.__ocbtDf64NearKm = v; break;
+            case 'perfMask': window.__terrainPerfMask = v | 0; break;
+            case 'adaptiveRebake': window.__terrainAdaptiveRebake = !!v; break;
+            case 'rebakeEvery': window.__terrainRebakeEvery = v; break;
+            case 'df64NearKm': window.__terrainDf64NearKm = v; break;
             case 'hwScale': window.__world42Perf.setHardwareScaling(v); break;
         }
     }, { name, v });
@@ -156,7 +156,7 @@ await sleep(3000);
 // constant leaf count (clean fragment attribution). The leaf min–max spread reported per row confirms
 // the freeze held. Released at the end so the dev session isn't left frozen.
 if (args.freeze) {
-    await page.evaluate(() => { window.__ocbtFreezeTopology = true; });
+    await page.evaluate(() => { window.__terrainFreezeTopology = true; });
     console.log('  (topology FROZEN — leaf set pinned; spread should read ~0 below)');
 }
 
@@ -179,14 +179,14 @@ for (const v of values) {
     const ticks = Math.max(8, Math.round((args.window * 1000) / 250));
     for (let i = 0; i < ticks; i++) {
         const g = gpuSample(); if (g) gu.push(g);
-        const lf = await page.evaluate(() => window.__world42Perf.getStats().cbt?.leafCount ?? 0);
+        const lf = await page.evaluate(() => window.__world42Perf.getStats().terrain?.leafCount ?? 0);
         if (lf) lv.push(lf);
         await sleep(250);
     }
     const wallSec = (Date.now() - tStart) / 1000;
     const cpuEnd = cpuAppSeconds();
     const rndrEnd = await rendererTaskSec();
-    const snap = await page.evaluate(() => { const s = window.__world42Perf.getStats(); return { fps: s.fps, leaves: s.cbt?.leafCount ?? 0, draws: s.drawCalls ?? 0 }; });
+    const snap = await page.evaluate(() => { const s = window.__world42Perf.getStats(); return { fps: s.fps, leaves: s.terrain?.leafCount ?? 0, draws: s.drawCalls ?? 0 }; });
     await stopDrift();
     await sleep(800);
 
@@ -206,7 +206,7 @@ for (const v of values) {
     );
 }
 
-if (args.freeze) await page.evaluate(() => { window.__ocbtFreezeTopology = false; });
+if (args.freeze) await page.evaluate(() => { window.__terrainFreezeTopology = false; });
 console.log('\nNotes: GPU% from nvidia-smi (whole-GPU). CPUapp% = Playwright-Chromium CPU / (wall*cores).');
 console.log('CPUrndr% = renderer main-thread busy (CDP TaskDuration). fps is vsync-capped at 60 — read GPU%/CPU% for headroom.');
 console.log('leaves±spread: med ± (max−min) over the window; a spread >~1% means topology drifted (use --freeze for a clean fragment sweep).');
