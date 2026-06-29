@@ -126,7 +126,11 @@ function bakedHeader(opts: OcbtRenderOptions): string {
         // pixel can resolve (fine foreground micro-relief), blend toward the smooth landform normal
         // so the diffuse ndl stops aliasing into grain. Variance-based (dpdx of the normal) so it
         // targets sub-pixel detail without over-flattening the far field. Higher = smoother sooner.
-        `const CBT_NORMAL_AA : f32 = 12.0;`
+        `const CBT_NORMAL_AA : f32 = 12.0;`,
+        // Mean-preserving normal-AA correction strength (uPerfMask bit5). The variance-smoothed normal
+        // over-brightens at grazing because the BRDF is concave there (Jensen: E[f(N)] < f(E[N])); this
+        // darkens the diffuse by the sub-pixel normal variance × grazing concavity to restore the mean.
+        `const CBT_MEAN_AA_K : f32 = 0.18;`,
     ].flat().join('\n');
 }
 
@@ -398,6 +402,14 @@ function fragmentSource(opts: OcbtRenderOptions): string {
         '    // Opposition surge: a gentle hotspot when the Sun is near the camera back (low phase).',
         '    let cosPhase = clamp(dot(V, L), -1.0, 1.0);',
         '    refl = refl * (1.0 + CBT_OPP_AMP * smoothstep(CBT_OPP_COS, 1.0, cosPhase));',
+        '    // Mean-preserving normal-AA (uPerfMask bit5): the variance-smoothed normal over-brightens',
+        '    // the diffuse at grazing because the BRDF is concave there (Jensen). Darken by the sub-pixel',
+        '    // normal variance (nVar) scaled by grazing concavity (1/(NdL+NdV)) so E[shading] is restored',
+        '    // without re-introducing grain (the normal stays smoothed). Tune K via CBT_MEAN_AA_K.',
+        '    if ((uniforms.uPerfMask & 32) != 0) {',
+        '        let conc = nVar / (NdL + NdV + 0.05);',
+        '        refl = refl * (1.0 - clamp(CBT_MEAN_AA_K * conc, 0.0, 0.85));',
+        '    }',
         '    // Cook-Torrance specular (D·F·G). H = half-vector. Slope-driven roughness: flat terrain',
         '    // is smoother (lower roughness) than steep slopes. NdL gate zeroes spec in shadow.',
         '    var spec = 0.0;',

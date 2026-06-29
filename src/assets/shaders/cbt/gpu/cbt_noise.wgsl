@@ -283,8 +283,8 @@ fn cbtFbmHeight(dir: vec3<f32>) -> f32 {
 // faded OUT of the gradient (not the height). At grazing the footprint along the view is huge, so the
 // fine octaves vanish from the normal there — exactly where the grain was. footprintKm <= 0 disables
 // it (height / collision callers pass 0, so geometry is never affected).
-const CBT_NORMAL_FP_LO: f32 = 8.0; // wl < 2*footprint -> octave fully dropped from the normal
-const CBT_NORMAL_FP_HI: f32 = 10.0; // wl > 4*footprint -> octave fully kept
+const CBT_NORMAL_FP_LO: f32 = 2.0; // wl < 2*footprint -> octave fully dropped from the normal
+const CBT_NORMAL_FP_HI: f32 = 4.0; // wl > 4*footprint -> octave fully kept
 
 fn cbtFbm_d_at(p: vec3<f32>, camDistKm: f32, radiusKm: f32, craterSkipBig: bool, footprintKm: f32) -> vec4<f32> {
     var sum: f32 = 0.0;
@@ -369,9 +369,9 @@ fn cbtNoiseNormal(dir: vec3<f32>, radius: f32) -> vec3<f32> {
 const CBT_CRATER_FRESH: f32 = 0.13; // fraction of craters that are fresh (few, like real Mercury)
 const CBT_RAY_CLASSES: i32 = 2;     // only the 2 biggest classes emit rays (prominent systems + perf)
 const CBT_RAY_N: i32 = 16;          // potential ray directions around a crater
-const CBT_RAY_REACH: f32 = 5.0;     // ray length in crater radii (rn)
-const CBT_HALO_H: f32 = 0.22;       // bright ejecta-halo strength
-const CBT_RAY_H: f32 = 0.30;        // bright ray strength (kept low: on the dark Mercury albedo
+const CBT_RAY_REACH: f32 = 4.0;     // ray length in crater radii (rn)
+const CBT_HALO_H: f32 = 0.16;       // bright ejecta-halo strength
+const CBT_RAY_H: f32 = 0.24;        // bright ray strength (kept low: on the dark Mercury albedo
                                      // a high value reads as hard white streaks)
 
 // Irregular radial spokes: periodic value-noise of the azimuth (N cells around the circle, wraps

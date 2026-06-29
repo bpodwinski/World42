@@ -1,4 +1,4 @@
-import { Matrix, Vector3, type Scene, type TransformNode } from '@babylonjs/core';
+import { Matrix, type Observer, Vector3, type Scene, type TransformNode } from '@babylonjs/core';
 import type { OriginCamera } from '../core/camera/camera_manager';
 import { ScaleManager } from '../core/scale/scale_manager';
 
@@ -73,6 +73,21 @@ export type BenchRunOptions = {
     uncapped?: boolean;
 };
 
+export type BenchGrazingOptions = {
+    /** Target planet key suffix (e.g. "Moon"); default = nearest planet to the camera. */
+    planet?: string;
+    /** Camera altitude above the surface (km, default 3) — nadir view of a raking-lit terrain patch. */
+    altKm?: number;
+    /** Sun elevation above the local horizon (deg, default 5 = grazing light → long shadows + bright
+     *  sun-facing slopes → maximal per-pixel normal→luminance sensitivity = worst-case grain). */
+    sunElevDeg?: number;
+    /** View tilt away from straight-down toward the sun (deg, default 0 = pure nadir). The terrain fills
+     *  the frame either way; a small tilt brings the long shadows more side-on. */
+    pitchDeg?: number;
+    /** Frozen planet spin phase (rad, default 0) so the terrain under the view is identical every run. */
+    spinPhase?: number;
+};
+
 const smoothstep = (e0: number, e1: number, x: number): number => {
     const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
     return t * t * (3 - 2 * t);
@@ -87,9 +102,107 @@ export function installBenchFlight(
     resetLod: () => void = () => {}
 ): void {
     let running = false;
+    let poseHold: Observer<Scene> | null = null;
 
     const api = {
         isRunning: () => running,
+
+        /** Pose a DETERMINISTIC grazing-sun ground view and HOLD it (re-imposed each frame) so a grain
+         *  probe can screenshot it at different resolutions / perf-masks. Construction: a surface point
+         *  whose local horizon puts the sun at `sunElevDeg` (raking light), camera at `altKm`, looking
+         *  along the surface toward the sub-solar direction — the worst case for per-pixel normal grain.
+         *  Spin is frozen to `spinPhase`. Call releasePose() to stop. */
+        poseGrazing: (opts: BenchGrazingOptions = {}): object => {
+            if (poseHold) {
+                scene.onBeforeRenderObservable.remove(poseHold);
+                poseHold = null;
+            }
+            // Target planet: by key suffix, else nearest to the camera now.
+            let target = planets[0];
+            if (opts.planet) {
+                const m = planets.find((p) =>
+                    p.key.toLowerCase().endsWith(opts.planet!.toLowerCase())
+                );
+                if (m) target = m;
+            } else {
+                let best = Infinity;
+                for (const p of planets) {
+                    const d = Vector3.DistanceSquared(camera.doublepos, p.center);
+                    if (d < best) {
+                        best = d;
+                        target = p;
+                    }
+                }
+            }
+            const C = target.center.clone();
+            const R = target.radiusSim;
+            const node = target.node;
+            const benchYaw = opts.spinPhase ?? 0;
+            node.rotation.y = benchYaw;
+            node.computeWorldMatrix(true);
+
+            // Nearest star → world-space sun direction (planet center → star).
+            let sunDir = new Vector3(1, 0, 0);
+            let bestStar = Infinity;
+            for (const s of starPositions) {
+                const d = Vector3.DistanceSquared(s, C);
+                if (d < bestStar) {
+                    bestStar = d;
+                    sunDir = s.subtract(C).normalize();
+                }
+            }
+
+            // Surface point P whose local horizon puts the sun at `sunElevDeg`: a normal nP with
+            // dot(nP, sun) = sin(elev). r is any axis ⊥ sun; nP tilts from r toward sun by the elevation.
+            const altKm = Math.max(0, opts.altKm ?? 3);
+            const elev = ((opts.sunElevDeg ?? 5) * Math.PI) / 180;
+            const ref =
+                Math.abs(sunDir.y) < 0.9 ? new Vector3(0, 1, 0) : new Vector3(1, 0, 0);
+            const r = Vector3.Cross(sunDir, ref).normalize();
+            const nP = sunDir
+                .scale(Math.sin(elev))
+                .add(r.scale(Math.cos(elev)))
+                .normalize();
+            const camW = C.add(nP.scale(R + altKm));
+            // Sun-azimuth tangent (screen-up direction). View is NADIR (straight down at the raking-lit
+            // terrain so it fills the frame), optionally tilted toward the sun by pitchDeg.
+            const lookTangent = sunDir
+                .subtract(nP.scale(Vector3.Dot(sunDir, nP)))
+                .normalize();
+            const tilt = ((opts.pitchDeg ?? 0) * Math.PI) / 180;
+            const lookDir = nP
+                .scale(-Math.cos(tilt))
+                .add(lookTangent.scale(Math.sin(tilt)))
+                .normalize();
+            const renderTarget = new Vector3();
+
+            const apply = (): void => {
+                node.rotation.y = benchYaw;
+                camera.doublepos.copyFrom(camW);
+                camera.position.set(0, 0, 0);
+                // Nadir view: screen-up = sun azimuth (so shadows fall "downward" in frame).
+                camera.upVector.copyFrom(lookTangent);
+                renderTarget.copyFrom(lookDir); // render-space target (camera at render origin)
+                camera.setTarget(renderTarget);
+            };
+            apply();
+            poseHold = scene.onBeforeRenderObservable.add(apply, undefined, true);
+            return {
+                planet: target.key,
+                altKm,
+                sunElevDeg: Math.asin(Vector3.Dot(nP, sunDir)) * (180 / Math.PI),
+                radiusSim: R,
+                camDistToCenter: Vector3.Distance(camW, C)
+            };
+        },
+
+        /** Stop holding the grazing pose (the camera/spin resume normal control). */
+        releasePose: (): void => {
+            if (poseHold) {
+                scene.onBeforeRenderObservable.remove(poseHold);
+                poseHold = null;
+            }
+        },
 
         /** Replay the deterministic north-pole → low-orbit flight (star-locked); resolves with the log. */
         run: (opts: BenchRunOptions = {}): Promise<{ meta: object; frames: BenchFrame[] }> => {

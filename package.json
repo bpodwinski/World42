@@ -12,6 +12,7 @@
     "perf:capture": "node ./scripts/cbt_perf_capture.mjs",
     "perf:matrix": "node ./scripts/cbt_perf_matrix.mjs",
     "bench:flight": "node ./scripts/bench_flight.mjs",
+    "grain": "node ./scripts/grain_probe.mjs",
     "coverage": "vitest run --coverage",
     "pw": "node ./scripts/playwright_cli.mjs",
     "pw:help": "node ./scripts/playwright_cli.mjs --help",

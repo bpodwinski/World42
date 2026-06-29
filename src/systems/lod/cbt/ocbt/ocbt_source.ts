@@ -344,7 +344,7 @@ export class OcbtSource implements CbtGeometrySource {
             1,
             Math.floor(
                 (globalThis as unknown as { __ocbtRebakeEvery?: number }).__ocbtRebakeEvery ??
-                    OcbtSource.REBAKE_EVERY_DEFAULT
+                OcbtSource.REBAKE_EVERY_DEFAULT
             )
         );
         const forcedRebake = !this.anchorValid || this.convergeFrames > 0;
@@ -499,8 +499,8 @@ export class OcbtSource implements CbtGeometrySource {
                         this.poolSaturationWarned = true;
                         console.warn(
                             `[OCBT] ${this.key}: live leaves ${count} > ` +
-                                `${Math.round(OcbtSource.POOL_SATURATION_FRAC * 100)}% of pool ` +
-                                `${this.kernel.capacity} — raise OCBT_CAPACITY (limb may under-tessellate).`
+                            `${Math.round(OcbtSource.POOL_SATURATION_FRAC * 100)}% of pool ` +
+                            `${this.kernel.capacity} — raise OCBT_CAPACITY (limb may under-tessellate).`
                         );
                     }
                     // Bound the draw to the live count (= compaction count = pool_tree[1]),

@@ -156,9 +156,9 @@ export const DEFAULT_NOISE: NoiseParams = {
     persistence: 0.5,
     // Reduced from 180: craters (cbt_noise.wgsl craterField, depths up to ~18 km) are now the
     // DOMINANT relief; the fbm is the finer inter-crater roughness on top.
-    globalAmplitude: 25,
-    detailOctaves: 16,
-    detailRange: 75,
+    globalAmplitude: 5,
+    detailOctaves: 8,
+    detailRange: 80,
 };
 
 let cachedPerm: Uint8Array | null = null;
@@ -202,11 +202,11 @@ export function fbmNoise(
 // Real geometric craters = the DOMINANT relief of an airless body. This is the collision/altitude
 // twin of the GPU crater field; it MUST match bit-for-bit at crater scale (hash via perm only).
 // Height only (no gradient — collision needs height; the GPU computes the shading normal).
-const CRATER_CLASSES = 6;
+const CRATER_CLASSES = 4;
 const CRATER_SCALE = 1.0; // keep in sync with CBT_CRATER_SCALE in cbt_noise.wgsl
-const CRATER_RANGE = 60.0; // keep in sync with CBT_CRATER_RANGE in cbt_noise.wgsl
-const RIM_IRR = 0.28; // keep in sync with CBT_RIM_IRR in cbt_noise.wgsl
-const RIM_FREQ = 3.5; // keep in sync with CBT_RIM_FREQ in cbt_noise.wgsl
+const CRATER_RANGE = 120.0; // keep in sync with CBT_CRATER_RANGE in cbt_noise.wgsl
+const RIM_IRR = 0.15; // keep in sync with CBT_RIM_IRR in cbt_noise.wgsl
+const RIM_FREQ = 2.0; // keep in sync with CBT_RIM_FREQ in cbt_noise.wgsl
 
 // [cellSizeKm, crater radius (frac of cell), depthKm, density]. Mirror of craterParams (WGSL).
 const CRATER_PARAMS: ReadonlyArray<readonly [number, number, number, number]> = [
