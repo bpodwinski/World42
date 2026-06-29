@@ -25,7 +25,13 @@ import {
     type StorageBuffer as StorageBufferType,
     type WebGPUEngine
 } from '@babylonjs/core';
-import { buildPerm, type NoiseParams } from '../cbt_noise';
+import {
+    buildPerm,
+    craterHeaderWgsl,
+    DEFAULT_CRATERS,
+    type CraterParams,
+    type NoiseParams
+} from '../cbt_noise';
 import { DEFAULT_LIGHTING, type ResolvedLighting } from '../../../../game_world/stellar_system/planet_lighting';
 import cbtNoiseWgsl from '../../../../assets/shaders/cbt/gpu/cbt_noise.wgsl';
 import ocbtF64Wgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_f64.wgsl';
@@ -39,6 +45,8 @@ function f(x: number): string {
 export type OcbtRenderOptions = {
     radius: number;
     noise: NoiseParams;
+    /** Crater field — baked into the WGSL header AND used by CPU collision. Default DEFAULT_CRATERS. */
+    craters?: CraterParams;
     albedo?: Vector3;
     ambient?: Vector3;
     lightColor?: Vector3;
@@ -67,6 +75,9 @@ function bakedHeader(opts: OcbtRenderOptions): string {
         `const CBT_GLOBAL_AMP : f32 = ${f(n.globalAmplitude)};`,
         `const CBT_DETAIL_OCTAVES : i32 = ${Math.max(0, Math.floor(n.detailOctaves ?? 0))};`,
         `const CBT_DETAIL_RANGE : f32 = ${f(n.detailRange ?? 60)};`,
+        // Crater constants + craterParams() — generated from the active CraterParams (single source
+        // shared with the CPU collision field). Replaces the block formerly hardcoded in cbt_noise.wgsl.
+        craterHeaderWgsl(opts.craters ?? DEFAULT_CRATERS),
         `const CBT_ALBEDO : vec3<f32> = vec3<f32>(${f(albedo.x)}, ${f(albedo.y)}, ${f(albedo.z)});`,
         `const CBT_LIGHTCOLOR : vec3<f32> = vec3<f32>(${f(lightColor.x)}, ${f(lightColor.y)}, ${f(lightColor.z)});`,
         // Near-ground detail band (world-anchored df64 micro-relief). ON/OFF in km = the

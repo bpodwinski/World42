@@ -33,6 +33,7 @@
     "@rsbuild/core": "^2.1.0",
     "@rspack/cli": "^2.1.0",
     "@rspack/core": "^2.1.0",
+    "@tweakpane/core": "^2.0.5",
     "@types/node": "^26.0.1",
     "@vitest/coverage-v8": "^4.1.9",
     "@webgpu/types": "^0.1.71",
@@ -52,6 +53,7 @@
     "@babylonjs/loaders": "^9.14.0",
     "@babylonjs/materials": "^9.14.0",
     "cors": "^2.8.5",
-    "dotenv": "^17.4.2"
+    "dotenv": "^17.4.2",
+    "tweakpane": "^4.0.5"
   }
 }

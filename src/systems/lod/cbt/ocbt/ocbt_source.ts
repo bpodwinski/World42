@@ -16,7 +16,7 @@
  */
 import { Matrix, Vector3, type Mesh, type Scene, type TransformNode, type WebGPUEngine } from '@babylonjs/core';
 import type { CbtFrameParams, CbtGeometryListener, CbtGeometrySource } from '../cbt_geometry_source';
-import type { NoiseParams } from '../cbt_noise';
+import { DEFAULT_CRATERS, type CraterParams, type NoiseParams } from '../cbt_noise';
 import type { ResolvedLighting } from '../../../../game_world/stellar_system/planet_lighting';
 import { OcbtTopologyKernel } from './ocbt_topology_kernel';
 import { buildOcbtRenderMaterial, createOcbtTemplateMesh, type OcbtRenderMaterial } from './ocbt_render_material';
@@ -26,6 +26,8 @@ export type OcbtSourceOptions = {
     renderParent: TransformNode;
     radiusSim: number;
     noise: NoiseParams;
+    /** Crater field — baked into both WGSL programs (eval + render) and used by CPU collision. */
+    craters?: CraterParams;
     starColor: Vector3;
     starIntensity: number;
     starPosWorldDouble: Vector3 | null;
@@ -165,7 +167,8 @@ export class OcbtSource implements CbtGeometrySource {
         // useIndirect: the 7 work-list passes dispatch over their candidate counts
         // (not the full pool) via PrepareIndirect + dispatchIndirect. noise: the df64 eval
         // bakes it so the decoded positions are TERRAIN-displaced (terrain-aware topology).
-        this.kernel = new OcbtTopologyKernel(engine, opts.capacity, 'metric', true, opts.noise);
+        const craters = opts.craters ?? DEFAULT_CRATERS;
+        this.kernel = new OcbtTopologyKernel(engine, opts.capacity, 'metric', true, opts.noise, craters);
 
         this.render = buildOcbtRenderMaterial(
             scene,
@@ -173,6 +176,7 @@ export class OcbtSource implements CbtGeometrySource {
             {
                 radius: opts.radiusSim,
                 noise: opts.noise,
+                craters,
                 lightColor: opts.starColor,
                 albedo: opts.lighting
                     ? new Vector3(opts.lighting.albedo[0], opts.lighting.albedo[1], opts.lighting.albedo[2])

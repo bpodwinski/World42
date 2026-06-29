@@ -17,7 +17,14 @@ import {
     type CbtGeometrySource,
     type CbtSourceStats,
 } from './cbt_geometry_source';
-import { DEFAULT_NOISE, fbmNoise, fbmGroundHeight, type NoiseParams } from './cbt_noise';
+import {
+    DEFAULT_CRATERS,
+    DEFAULT_NOISE,
+    fbmNoise,
+    fbmGroundHeight,
+    type CraterParams,
+    type NoiseParams
+} from './cbt_noise';
 import { OcbtSource } from './ocbt/ocbt_source';
 import type { WebGPUEngine } from '@babylonjs/core';
 import type { ResolvedLighting } from '../../../game_world/stellar_system/planet_lighting';
@@ -35,6 +42,8 @@ export type CbtPlanetOptions = {
     starIntensity: number;
     /** Noise field shared by GPU shader and CPU collision. Default DEFAULT_NOISE. */
     noise?: NoiseParams;
+    /** Crater field shared by GPU shader (eval + render) and CPU collision. Default DEFAULT_CRATERS. */
+    craters?: CraterParams;
     /** Per-planet resolved lighting params (from planet_lighting.json). */
     lighting?: ResolvedLighting;
 };
@@ -103,6 +112,7 @@ export class CbtPlanet {
     private readonly renderParent: TransformNode;
     private readonly starColor: Vector3;
     private readonly noise: NoiseParams;
+    private readonly craters: CraterParams;
 
     constructor(
         private scene: Scene,
@@ -116,6 +126,7 @@ export class CbtPlanet {
         this.starPosWorldDouble = opts.starPosWorldDouble;
         this.starColor = opts.starColor;
         this.noise = opts.noise ?? DEFAULT_NOISE;
+        this.craters = opts.craters ?? DEFAULT_CRATERS;
         this.sourceOpts = opts;
         // Source is NOT created here — deferred to the first update() call.
     }
@@ -159,6 +170,7 @@ export class CbtPlanet {
                 renderParent: this.renderParent,
                 radiusSim: opts.radiusSim,
                 noise: this.noise,
+                craters: this.craters,
                 starColor: this.starColor,
                 starIntensity: opts.starIntensity,
                 starPosWorldDouble: this.starPosWorldDouble,
@@ -238,7 +250,7 @@ export class CbtPlanet {
             this.radiusSim +
             fbmGroundHeight(
                 this.tmpCollDir.x, this.tmpCollDir.y, this.tmpCollDir.z,
-                this.noise, camDistKm, this.radiusSim
+                this.noise, camDistKm, this.radiusSim, this.craters
             );
         const minDist = groundR + clearanceSim;
         if (dist >= minDist) return false;
@@ -281,7 +293,7 @@ export class CbtPlanet {
             this.radiusSim +
             fbmGroundHeight(
                 this.tmpCollDir.x, this.tmpCollDir.y, this.tmpCollDir.z,
-                this.noise, camDistKm, this.radiusSim
+                this.noise, camDistKm, this.radiusSim, this.craters
             );
         return { distSim: dist, groundRSim: groundR };
     }

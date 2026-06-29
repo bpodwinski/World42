@@ -40,7 +40,13 @@ import ocbtTopoSimplifyWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_
 import ocbtTopoPropagateSimplifyWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_topo_propagate_simplify.compute.wgsl';
 import ocbtPoolReduceWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_pool_reduce.compute.wgsl';
 import cbtNoiseWgsl from '../../../../assets/shaders/cbt/gpu/cbt_noise.wgsl';
-import { buildPerm, type NoiseParams } from '../cbt_noise';
+import {
+    buildPerm,
+    craterHeaderWgsl,
+    DEFAULT_CRATERS,
+    type CraterParams,
+    type NoiseParams
+} from '../cbt_noise';
 import ocbtEvalLebWgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_eval_leb.wgsl';
 import ocbtF64Wgsl from '../../../../assets/shaders/cbt/ocbt/ocbt_f64.wgsl';
 import cbtNoiseDf64Wgsl from '../../../../assets/shaders/cbt/ocbt/cbt_noise_df64.wgsl';
@@ -189,7 +195,8 @@ export class OcbtTopologyKernel {
         capacity: number,
         classifyMode: OcbtClassifyMode = 'predicate',
         useIndirect = false,
-        noise: NoiseParams | null = null
+        noise: NoiseParams | null = null,
+        craters: CraterParams = DEFAULT_CRATERS
     ) {
         this.engine = engine;
         this.capacity = capacity;
@@ -507,6 +514,9 @@ export class OcbtTopologyKernel {
                       `const CBT_GLOBAL_AMP : f32 = ${f(n.globalAmplitude)};`,
                       `const CBT_DETAIL_OCTAVES : i32 = ${Math.max(0, Math.floor(n.detailOctaves ?? 0))};`,
                       `const CBT_DETAIL_RANGE : f32 = ${f(n.detailRange ?? 60)};`,
+                      // Crater consts + craterParams() from the active CraterParams (same single
+                      // source the render material bakes), so the df64 vertex height matches it.
+                      craterHeaderWgsl(craters),
                       '@group(0) @binding(21) var<storage, read> cbtPerm : array<u32>;'
                   ].join('\n')
                 : [
@@ -519,6 +529,8 @@ export class OcbtTopologyKernel {
                       'const CBT_GLOBAL_AMP : f32 = 0.0;',
                       'const CBT_DETAIL_OCTAVES : i32 = 0;',
                       'const CBT_DETAIL_RANGE : f32 = 60.0;',
+                      // No craters either: empty class list -> CBT_CRATER_CLASSES = 0 (loops skip).
+                      craterHeaderWgsl({ ...DEFAULT_CRATERS, rayClasses: 0, classes: [] }),
                       '@group(0) @binding(21) var<storage, read> cbtPerm : array<u32>;'
                   ].join('\n');
 

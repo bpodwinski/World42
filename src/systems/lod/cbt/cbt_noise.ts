@@ -198,25 +198,102 @@ export function fbmNoise(
         : 0;
 }
 
-// --- CRATER FIELD (CPU mirror of craterField in cbt_noise.wgsl) ---------------------------
-// Real geometric craters = the DOMINANT relief of an airless body. This is the collision/altitude
-// twin of the GPU crater field; it MUST match bit-for-bit at crater scale (hash via perm only).
-// Height only (no gradient — collision needs height; the GPU computes the shading normal).
-const CRATER_CLASSES = 4;
-const CRATER_SCALE = 1.0; // keep in sync with CBT_CRATER_SCALE in cbt_noise.wgsl
-const CRATER_RANGE = 120.0; // keep in sync with CBT_CRATER_RANGE in cbt_noise.wgsl
-const RIM_IRR = 0.15; // keep in sync with CBT_RIM_IRR in cbt_noise.wgsl
-const RIM_FREQ = 2.0; // keep in sync with CBT_RIM_FREQ in cbt_noise.wgsl
+// --- CRATER FIELD — SINGLE SOURCE OF TRUTH (GPU bake + CPU collision) ----------------------
+// Real geometric craters = the DOMINANT relief of an airless body. These params drive BOTH the
+// GPU shader (baked into the WGSL header via craterHeaderWgsl) AND this CPU collision/altitude
+// twin, so the camera collides with the rendered crater floors/rims — no more GPU/CPU drift.
+// Height only on the CPU side (collision needs height; the GPU computes the shading gradient too).
 
-// [cellSizeKm, crater radius (frac of cell), depthKm, density]. Mirror of craterParams (WGSL).
-const CRATER_PARAMS: ReadonlyArray<readonly [number, number, number, number]> = [
-    [750, 0.2, 18.0, 0.5],
-    [220, 0.2, 7.0, 0.6],
-    [70, 0.2, 2.5, 0.7],
-    [20, 0.2, 0.9, 0.8],
-    [6, 0.2, 0.32, 0.82],
-    [2, 0.2, 0.12, 0.85],
-];
+/** One crater class: [cellSizeKm, craterRadius (fraction of cell), depthKm, density]. */
+export type CraterClass = readonly [number, number, number, number];
+
+/** Crater field params — shared by the GPU bake (craterHeaderWgsl) and the CPU collision below. */
+export type CraterParams = {
+    /** Global crater depth multiplier (CBT_CRATER_SCALE). */
+    scale: number;
+    /** Nyquist fade-distance factor (CBT_CRATER_RANGE): a class fades out past range*cell km. */
+    range: number;
+    /** NORMAL-only: skip classes much BIGGER than the camera distance (CBT_CRATER_NEAR). */
+    near: number;
+    /** Irregular-rim amplitude — rim radius varies +/- this fraction by direction (CBT_RIM_IRR). */
+    rimIrregularity: number;
+    /** Irregular-rim lobe count — low = polygonal/lumpy, high = circular (CBT_RIM_FREQ). */
+    rimFrequency: number;
+    /** Fraction of craters that are fresh and emit bright ejecta rays (CBT_CRATER_FRESH). */
+    freshFraction: number;
+    /** How many of the biggest classes emit ejecta rays (CBT_RAY_CLASSES). */
+    rayClasses: number;
+    /** Crater classes, largest first. classes.length = CBT_CRATER_CLASSES. */
+    classes: ReadonlyArray<CraterClass>;
+};
+
+/**
+ * Canonical crater field — the airless-body default (Moon/Mercury). SINGLE source for the GPU
+ * header bake AND the CPU collision mirror. Per-profile variants live in planet_profiles.ts.
+ */
+export const DEFAULT_CRATERS: CraterParams = {
+    scale: 1.0,
+    range: 60.0,
+    near: 0.1,
+    rimIrregularity: 0.28,
+    rimFrequency: 3.5,
+    freshFraction: 0.13,
+    rayClasses: 2,
+    classes: [
+        [750, 0.2, 18.0, 0.5],
+        [220, 0.2, 7.0, 0.6],
+        [70, 0.2, 2.5, 0.7],
+        [20, 0.2, 0.9, 0.8],
+        [6, 0.2, 0.32, 0.82],
+        [2, 0.2, 0.12, 0.85]
+    ]
+};
+
+/** Format a number as a WGSL f32 literal (always carries a decimal point). */
+function wf(x: number): string {
+    const s = String(x);
+    return s.includes('.') || s.includes('e') || s.includes('E') ? s : s + '.0';
+}
+
+/**
+ * Generate the WGSL crater-constant header (the CBT_CRATER_* consts + the craterParams() switch)
+ * from a {@link CraterParams}. Injected BEFORE cbt_noise.wgsl by BOTH the render material
+ * (bakedHeader) and the topology kernel (noiseHeader), so the hardcoded block is gone from the
+ * .wgsl and the GPU stays in lockstep with the CPU collision field above. classes.length drives
+ * CBT_CRATER_CLASSES; the switch mirrors the original 6-case craterParams exactly.
+ */
+export function craterHeaderWgsl(c: CraterParams): string {
+    const cls = c.classes;
+    const n = cls.length;
+    // A WGSL switch must have a default; with 0 classes the craterField loop never runs but
+    // craterParams() is still declared, so emit a default-only switch returning zeros.
+    const cases =
+        n === 0
+            ? '        default: { return vec4<f32>(0.0, 0.0, 0.0, 0.0); }'
+            : cls
+                  .map((cl, i) => {
+                      const v = `vec4<f32>(${wf(cl[0])}, ${wf(cl[1])}, ${wf(cl[2])}, ${wf(cl[3])})`;
+                      return i === n - 1
+                          ? `        default: { return ${v}; }`
+                          : `        case ${i}: { return ${v}; }`;
+                  })
+                  .join('\n');
+    return [
+        `const CBT_CRATER_CLASSES : i32 = ${n};`,
+        `const CBT_CRATER_SCALE : f32 = ${wf(c.scale)};`,
+        `const CBT_CRATER_RANGE : f32 = ${wf(c.range)};`,
+        `const CBT_CRATER_NEAR : f32 = ${wf(c.near)};`,
+        `const CBT_RIM_IRR : f32 = ${wf(c.rimIrregularity)};`,
+        `const CBT_RIM_FREQ : f32 = ${wf(c.rimFrequency)};`,
+        `const CBT_CRATER_FRESH : f32 = ${wf(c.freshFraction)};`,
+        `const CBT_RAY_CLASSES : i32 = ${Math.max(0, Math.floor(c.rayClasses))};`,
+        `fn craterParams(k: i32) -> vec4<f32> {`,
+        `    switch k {`,
+        cases,
+        `    }`,
+        `}`
+    ].join('\n');
+}
 
 /** Radial crater profile h(rn) (height only) — mirror of craterProfile (WGSL). `morph` adds the
  *  complex-crater central peak for big classes. `maturity` (0 = fresh, 1 = old/eroded) fills the
@@ -265,15 +342,16 @@ function craterField(
     z: number,
     perm: Uint8Array,
     radiusKm: number,
-    camDistKm: number
+    camDistKm: number,
+    craters: CraterParams
 ): number {
     const pa = (i: number) => perm[i & 255];
     let H = 0;
-    for (let k = 0; k < CRATER_CLASSES; k++) {
-        const [cell, r0, depth, density] = CRATER_PARAMS[k];
+    for (let k = 0; k < craters.classes.length; k++) {
+        const [cell, r0, depth, density] = craters.classes[k];
         // Band-limit small classes by camera distance (mirror of the WGSL fade) so the collision
         // surface matches the rendered geometry at every altitude.
-        const onKm = CRATER_RANGE * cell;
+        const onKm = craters.range * cell;
         const fade = 1 - smoothstep01(onKm, onKm * 2, camDistKm);
         if (fade <= 0) continue;
         const fk = radiusKm / cell;
@@ -284,7 +362,10 @@ function craterField(
             Piy = Math.floor(Py),
             Piz = Math.floor(Pz);
         // Irregular-rim warp: ONE simplex per class (mirror of WGSL), shared by the class's craters.
-        const irr = 1 + RIM_IRR * simplex3(perm, Px * RIM_FREQ, Py * RIM_FREQ, Pz * RIM_FREQ);
+        const irr =
+            1 +
+            craters.rimIrregularity *
+                simplex3(perm, Px * craters.rimFrequency, Py * craters.rimFrequency, Pz * craters.rimFrequency);
         let h = 0;
         for (let dz = -1; dz <= 1; dz++) {
             for (let dy = -1; dy <= 1; dy++) {
@@ -303,7 +384,7 @@ function craterField(
                     const q3 = pa(ix + pa(iy + pa(iz + 1)));
                     const maturity = q3 / 256;
                     const r0e = r0 * (0.8 + 0.4 * (q2 / 256));
-                    const depe = depth * CRATER_SCALE * (0.6 + 0.8 * (q1 / 256));
+                    const depe = depth * craters.scale * (0.6 + 0.8 * (q1 / 256));
                     const qx = Px - (cix + 0.15 + 0.7 * (q0 / 256));
                     const qy = Py - (ciy + 0.15 + 0.7 * (q1 / 256));
                     const qz = Pz - (ciz + 0.15 + 0.7 * (q2 / 256));
@@ -344,7 +425,8 @@ export function fbmGroundHeight(
     x: number, y: number, z: number,
     params: NoiseParams,
     camDistKm: number,
-    radiusKm: number
+    radiusKm: number,
+    craters: CraterParams = DEFAULT_CRATERS
 ): number {
     const perm = getPerm(params.seed);
     const range = params.detailRange ?? 60;
@@ -378,5 +460,8 @@ export function fbmGroundHeight(
     // Craters are the dominant relief: added (in km) on top of the reduced fbm. Big classes never
     // fade; small classes band-limit by camDistKm (matching the GPU). MUST match the GPU df64 eval
     // (cbtFbm_d_at_df64) so the camera collides with the rendered crater floors/rims.
-    return (sum / maxMacro) * params.globalAmplitude + craterField(x, y, z, perm, radiusKm, camDistKm);
+    return (
+        (sum / maxMacro) * params.globalAmplitude +
+        craterField(x, y, z, perm, radiusKm, camDistKm, craters)
+    );
 }

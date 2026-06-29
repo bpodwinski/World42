@@ -102,30 +102,12 @@ fn cbtSimplex3_d(p: vec3<f32>) -> vec4<f32> {
 // cbtNoiseNormalAt's tangent projection). Crater frequencies are low (cell >= ~20 km) so the cell
 // coords are EXACT in f32 — the df64 path reuses this verbatim on the narrowed dir. Same math is
 // mirrored in cbt_noise.ts (CPU, collision). Hash uses cbtPermAt ONLY (bit-identical f64/f32).
-const CBT_CRATER_CLASSES: i32 = 6;
-const CBT_CRATER_SCALE: f32 = 1.0; // global crater depth multiplier (per-planet tuning hook)
-const CBT_CRATER_RANGE: f32 = 60.0; // class fades only when far enough to be sub-pixel (onKm =
-                                     // RANGE*cell, fade onKm..2*onKm). ~detailRange so big craters
-                                     // stay visible from orbit; only truly tiny ones drop (AA).
-const CBT_CRATER_NEAR: f32 = 0.10; // NORMAL-only: skip classes much BIGGER than camDist (locally flat
-                                    // wall -> negligible per-pixel shading). HEIGHT keeps all classes.
-const CBT_RIM_IRR: f32 = 0.28;     // irregular-rim amplitude (rim radius varies +-28% by direction)
-const CBT_RIM_FREQ: f32 = 3.5;     // irregular-rim lobes (low -> polygonal/lumpy, not circular)
-
-// Per size-class params: x = cell size (km, -> freq = radiusKm/cell), y = crater radius (frac of
-// cell), z = depth (km), w = density (fraction of cells that spawn a crater). Big rare -> small
-// frequent. Classes 4-5 are SMALL (~2.4 km / ~0.8 km craters) for ground-scale detail; cells stay
-// >= 2 km so f32 cell coords remain exact (no df64 needed).
-fn craterParams(k: i32) -> vec4<f32> {
-    switch k {
-        case 0: { return vec4<f32>(750.0, 0.20, 18.0, 0.5); }
-        case 1: { return vec4<f32>(220.0, 0.20, 7.0, 0.6); }
-        case 2: { return vec4<f32>(70.0, 0.20, 2.5, 0.7); }
-        case 3: { return vec4<f32>(20.0, 0.20, 0.9, 0.8); }
-        case 4: { return vec4<f32>(6.0, 0.20, 0.32, 0.82); }
-        default: { return vec4<f32>(2.0, 0.20, 0.12, 0.85); }
-    }
-}
+// NOTE: the crater constants (CBT_CRATER_CLASSES / _SCALE / _RANGE / _NEAR, CBT_RIM_IRR / _FREQ,
+// CBT_CRATER_FRESH, CBT_RAY_CLASSES) and the craterParams() switch are INJECTED before this file by
+// craterHeaderWgsl() (cbt_noise.ts) from the active CraterParams — the SINGLE source of truth shared
+// with the CPU collision field. Do not redeclare them here. Per size-class params returned by
+// craterParams(k): x = cell size (km, -> freq = radiusKm/cell), y = crater radius (frac of cell),
+// z = depth (km), w = density (fraction of cells that spawn a crater). Big rare -> small frequent.
 
 // Radial crater profile h(rn) (rn = dist/radius) + derivative h'(rn). C1, compact support (0 and
 // 0-slope at rn>=2): flat-floored bowl (depression) + raised rim + fading ejecta, all (1-x^2)^2.
@@ -366,8 +348,7 @@ fn cbtNoiseNormal(dir: vec3<f32>, radius: f32) -> vec3<f32> {
 // rim + radial bright RAYS. Returns an additive brightness (0 = none) the fragment adds to albedo.
 // Reuses the crater Worley but ONLY for fresh craters (a per-cell age hash) of the bigger classes
 // (the prominent ray systems). Cheap-skips non-existent / non-fresh cells before any sqrt.
-const CBT_CRATER_FRESH: f32 = 0.13; // fraction of craters that are fresh (few, like real Mercury)
-const CBT_RAY_CLASSES: i32 = 2;     // only the 2 biggest classes emit rays (prominent systems + perf)
+// CBT_CRATER_FRESH and CBT_RAY_CLASSES are injected by craterHeaderWgsl() (see note above).
 const CBT_RAY_N: i32 = 16;          // potential ray directions around a crater
 const CBT_RAY_REACH: f32 = 4.0;     // ray length in crater radii (rn)
 const CBT_HALO_H: f32 = 0.16;       // bright ejecta-halo strength

@@ -147,12 +147,7 @@
           "position_km": [149600000, 0, 0],
           "diameter_km": 3474,
           "rotation_period_days": 27.32,
-          "lighting": {
-            "albedo":  [0.07, 0.07, 0.07],
-            "ambient": [0.003, 0.003, 0.003],
-            "terrain": { "highlandTint": [1.08, 1.06, 1.02], "plainsAmp": 0.06 },
-            "brdf":    { "lunarLs": 0.9, "oppAmp": 0.28, "aoStrength": 0.5 }
-          }
+          "profile": "selena"
         },
         "Earth": {
           "type": "planet",

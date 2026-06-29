@@ -12,13 +12,15 @@ import { FloatingEntity, OriginCamera } from "../../core/camera/camera_manager";
 import { ScaleManager } from "../../core/scale/scale_manager";
 import { TextureManager } from "../../core/io/texture_manager";
 import { CbtPlanet } from "../../systems/lod/cbt/cbt_scheduler";
-import type { NoiseParams } from "../../systems/lod/cbt/cbt_noise";
+import type { CraterParams, NoiseParams } from "../../systems/lod/cbt/cbt_noise";
 import {
     normalizeCatalogJSON as normalizeCatalogJSONFromSource,
     normalizeSystemJSON,
 } from "./stellar_catalog_normalizer";
 import lightingJsonRaw from "./planet_lighting.json";
-import { resolveLighting, type PlanetLightingJSON, type PlanetLightingParams, type ResolvedAtmosphere } from "./planet_lighting";
+import { resolveLighting, type PlanetLightingJSON, type PlanetLightingParams, type ResolvedAtmosphere, type ResolvedLighting } from "./planet_lighting";
+import { resolveProfile } from "./planet_profiles";
+import { effectiveProfile } from "./terrain_profile_store";
 
 const LIGHTING_JSON = lightingJsonRaw as unknown as PlanetLightingJSON;
 
@@ -35,7 +37,9 @@ export type BodyJSON = {
     diameter_km: number;
     rotation_period_days: number | null;
     star?: StarJSON;
-    /** Per-planet lighting overrides — merged with planet_lighting.json `_defaults`. */
+    /** Terrain archetype id (planet_profiles.ts). When set, drives noise + craters + lighting. */
+    profile?: string;
+    /** Per-planet lighting overrides — merged over the profile (or planet_lighting.json `_defaults`). */
     lighting?: PlanetLightingParams;
 };
 
@@ -94,7 +98,9 @@ export type LoadedBody = {
         intensity: number;   // scalaire
     };
 
-    /** Lighting overrides from data.json, forwarded to resolveLighting(). */
+    /** Terrain archetype id (planet_profiles.ts), forwarded to resolveProfile(). */
+    profile?: string;
+    /** Lighting overrides from data.json, forwarded to resolveLighting()/resolveProfile(). */
     lighting?: PlanetLightingParams;
 };
 
@@ -227,6 +233,7 @@ export async function loadStellarSystemFromCatalog(
             radiusSim: diameterSim * 0.5,
             rotationPeriodDays: data.rotation_period_days,
             starLight,
+            profile: data.profile,
             lighting: data.lighting,
         });
     }
@@ -282,13 +289,30 @@ export function createCBTForSystem(
 
         const ent = body.entity!;
         const planetKey = `${loaded.systemId}:${name}`;
-        const lighting = resolveLighting(LIGHTING_JSON, body.lighting);
+        // A body with a `profile` gets its terrain (noise + craters + lighting) from that archetype,
+        // with persisted menu overrides applied (effectiveProfile) and any per-body lighting merged
+        // on top. A body WITHOUT a profile keeps the legacy behavior: global noise + its lighting
+        // block (craters fall back to DEFAULT_CRATERS), so existing catalog bodies are unchanged.
+        let bodyNoise: NoiseParams | undefined = noise;
+        let bodyCraters: CraterParams | undefined;
+        let lighting: ResolvedLighting;
+        if (body.profile) {
+            const resolved = resolveProfile(LIGHTING_JSON, effectiveProfile(body.profile), {
+                lightingOverride: body.lighting,
+            });
+            bodyNoise = resolved.noise;
+            bodyCraters = resolved.craters;
+            lighting = resolved.lighting;
+        } else {
+            lighting = resolveLighting(LIGHTING_JSON, body.lighting);
+        }
         const runtime = new CbtPlanet(scene, camera, {
             key: planetKey,
             entity: ent,
             renderParent: body.node,
             radiusSim: body.radiusSim,
-            noise,
+            noise: bodyNoise,
+            craters: bodyCraters,
             starPosWorldDouble,
             starColor,
             starIntensity,
