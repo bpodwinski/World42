@@ -10,6 +10,7 @@ import { teleportToEntity } from '../core/camera/teleport_entity';
 import { GuiManager } from '../core/gui/gui_manager';
 import { DisposableRegistry } from '../core/lifecycle/disposable_registry';
 import { attachFrameGraph } from '../core/render/frame_graph';
+import type { Fsr1Options } from '../core/render/fsr1_postprocess';
 import { installBenchFlight, type BenchPlanet } from './bench_flight';
 import type { StarGlowSource, StarOccluder } from '../core/render/star_raymarch_postprocess';
 import {
@@ -50,7 +51,10 @@ export function setupRuntime({
     occluders,
     atmospheres,
     disposables,
-}: RuntimeSetupOptions): void {
+}: RuntimeSetupOptions): {
+    fsr1RenderScale: number;
+    setFsr1RenderScale: (scale: number) => void;
+} {
     disposables.addDomListener(window, 'keydown', (event) => {
         if (event.key.toLowerCase() !== 't') return;
 
@@ -113,6 +117,25 @@ export function setupRuntime({
     const perfMemory = (): PerfMemory | undefined =>
         (performance as unknown as { memory?: PerfMemory }).memory;
 
+    // FSR1 spatial upscaling config (single source of truth — also passed to attachFrameGraph below).
+    // The scene + all intermediate passes render at `renderScale` of the backbuffer; EASU+RCAS upscale
+    // to full res. Set to undefined to disable and restore the native-resolution pipeline.
+    // renderScale is live-tunable from the options menu (rebuilds the graph) and persisted here.
+    const FSR1_LS_KEY = 'world42.fsr1RenderScale';
+    const clampScale = (s: number) => Math.max(0.5, Math.min(1, s));
+    const loadSavedScale = (): number | null => {
+        try {
+            const v = Number(localStorage.getItem(FSR1_LS_KEY));
+            return Number.isFinite(v) && v >= 0.5 && v <= 1 ? v : null;
+        } catch {
+            return null;
+        }
+    };
+    const fsr1: Fsr1Options | undefined = {
+        renderScale: loadSavedScale() ?? 0.9,
+        sharpness: 0.5,
+    };
+
     const sampleStats = () => {
         const terrain = lod.getTerrainStats();
         const frameMs = sceneInstr.frameTimeCounter.lastSecAverage;
@@ -132,6 +155,17 @@ export function setupRuntime({
             fps: engine.getFps(),
             frameMs,
             gpuMs,
+            // Scene render resolution: the engine backbuffer (px) and the hardware-scaling
+            // level (1 = native; <1 supersamples, >1 downscales). This is the actual pixel
+            // count the terrain/post passes shade, independent of CSS/display size.
+            renderW: engine.getRenderWidth(),
+            renderH: engine.getRenderHeight(),
+            hwScale: engine.getHardwareScalingLevel(),
+            // FSR1 internal render resolution: the scene is shaded at `renderScale` of the
+            // backbuffer, then EASU+RCAS upscale to full res. 0 when FSR1 is disabled.
+            fsr1Scale: fsr1 ? fsr1.renderScale : 0,
+            fsr1W: fsr1 ? Math.round(engine.getRenderWidth() * fsr1.renderScale) : 0,
+            fsr1H: fsr1 ? Math.round(engine.getRenderHeight() * fsr1.renderScale) : 0,
             drawCalls: sceneInstr.drawCallsCounter.current,
             activeIndices: scene.getActiveIndices(),
             // RAM: live JS heap in MB (-1 where the browser does not expose performance.memory).
@@ -148,6 +182,10 @@ export function setupRuntime({
         const f = (n: number, d = 1) => n.toFixed(d);
         return [
             `FPS ${Math.round(s.fps)}  frame ${f(s.frameMs)}ms`,
+            `res ${s.renderW}x${s.renderH}${s.hwScale !== 1 ? `  hwScale ${f(s.hwScale, 2)}` : ''}`,
+            s.fsr1Scale
+                ? `fsr1 ${s.fsr1W}x${s.fsr1H} (${Math.round(s.fsr1Scale * 100)}%) → upscaled`
+                : '',
             `gpu ${f(s.gpuMs)}ms (canvas)  draws ${s.drawCalls}`,
             s.osGpu
                 ? `GPU ${f(s.osGpu.util, 0)}%  vram ${(s.osGpu.vramUsed / 1024).toFixed(1)}/${(s.osGpu.vramTotal / 1024).toFixed(0)}G  ${f(s.osGpu.clock, 0)}MHz ${f(s.osGpu.power, 0)}W`
@@ -159,7 +197,9 @@ export function setupRuntime({
             // TERRAIN compute GPU time (the graph's compute task), split by bucket. 0 when the re-bake
             // gate is disengaged (still camera) or the timestamp-query feature is unavailable.
             `terrain topo ${f(s.terrain.terrainTopoMs, 2)} eval ${f(s.terrain.terrainEvalMs, 2)} compact ${f(s.terrain.terrainCompactMs, 2)}ms`,
-        ].join('\n');
+        ]
+            .filter(Boolean)
+            .join('\n');
     };
 
     disposables.addDomListener(window, 'keydown', (event) => {
@@ -370,20 +410,30 @@ export function setupRuntime({
     // Render pipeline as a Frame Graph (replaces the imperative camera post-process stack:
     // DefaultRenderingPipeline + TAA pipeline + star post-process). The graph governs only the
     // render passes; TERRAIN compute / LOD / floating-origin keep running in their scene observables.
-    const fg = attachFrameGraph(scene, camera, {
-        stars,
-        occluders,
-        atmospheres,
-        gui: gui.advancedTexture,
-        // TERRAIN compute runs as a graph task (before the scene-render task). Until the graph is built
-        // it is driven by the scheduler's startup observer; onGraphReady hands ownership to the task.
-        runCompute: lod.runTerrainCompute,
-        onGraphReady: () => lod.setComputeOwnedByGraph(true),
-        // FSR1 spatial upscaling: render at 67% resolution, upscale via EASU + RCAS.
-        // Remove or set to undefined to disable and restore the native-resolution pipeline.
-        fsr1: { renderScale: 0.9, sharpness: 0.5 },
-    });
+    const buildGraph = () =>
+        attachFrameGraph(scene, camera, {
+            stars,
+            occluders,
+            atmospheres,
+            gui: gui.advancedTexture,
+            // TERRAIN compute runs as a graph task (before the scene-render task). Until the graph is
+            // built it is driven by the scheduler tick; onGraphReady hands ownership to the task.
+            runCompute: lod.runTerrainCompute,
+            onGraphReady: () => lod.setComputeOwnedByGraph(true),
+            // FSR1 spatial upscaling (config hoisted above so the perf HUD can report the internal res).
+            fsr1,
+        });
+    let fg = buildGraph();
     disposables.add(() => fg.dispose());
+
+    // The graph sizes its render targets at build time, so changing the FSR1 render scale requires a
+    // full rebuild. Gapless: hand the heavy compute back to the scheduler tick (which drives it whenever
+    // the graph does not) while the new graph builds async, then onGraphReady reclaims ownership.
+    const rebuildGraph = () => {
+        lod.setComputeOwnedByGraph(false);
+        fg.dispose();
+        fg = buildGraph();
+    };
 
     // Under a Frame Graph, scene.render() fires onBeforeRenderObservable but NOT
     // onBeforeActiveMeshesEvaluationObservable — yet OriginCamera's floating-origin re-centering is
@@ -399,4 +449,22 @@ export function setupRuntime({
     const renderLoop = () => scene.render();
     engine.runRenderLoop(renderLoop);
     disposables.add(() => engine.stopRenderLoop(renderLoop));
+
+    return {
+        /** Current FSR1 internal render scale (fraction of the backbuffer the scene is shaded at). */
+        fsr1RenderScale: fsr1 ? fsr1.renderScale : 1,
+        /** Set the FSR1 render scale (0.5..1) and rebuild the graph; persists across reloads. */
+        setFsr1RenderScale: (scale: number) => {
+            if (!fsr1) return;
+            const v = clampScale(scale);
+            if (v === fsr1.renderScale) return;
+            fsr1.renderScale = v;
+            try {
+                localStorage.setItem(FSR1_LS_KEY, String(v));
+            } catch {
+                // localStorage unavailable (private mode / SSR) — runtime change still applies.
+            }
+            rebuildGraph();
+        },
+    };
 }

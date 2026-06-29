@@ -1,0 +1,111 @@
+# Contributing
+
+## Setup
+
+```bash
+git clone https://github.com/bpodwinski/World42.git
+cd World42
+npm install
+cp .env.example .env   # then fill in ASSETS_URL and SCALE_FACTOR
+```
+
+Build the Terrain WASM (required before the app loads terrain):
+
+```bash
+cd terrain
+wasm-pack build --dev --target web --out-dir pkg
+cd ..
+```
+
+Start the dev server:
+
+```bash
+npm run serve   # → http://localhost:19000
+```
+
+## Code Conventions
+
+### Language Rule
+
+All source code, comments, identifiers, commit messages, and PR descriptions must be in **American English**. No French anywhere in the codebase.
+
+### Formatting (Prettier)
+
+```json
+{
+  "semi": true,
+  "trailingComma": "none",
+  "singleQuote": true,
+  "printWidth": 80
+}
+```
+
+### Indentation (EditorConfig)
+
+- TypeScript / JavaScript: **4 spaces**
+- Other files: 2 spaces
+- Line endings: LF, charset UTF-8
+
+### TypeScript
+
+- `strict: true` — no exceptions
+- Target `ESNext`, `moduleResolution: Node`
+- `noImplicitReturns: true`
+- No unjustified `any`
+
+### Architecture Rules
+
+- Dependencies flow **downward only**: `core ← systems ← game_objects ← game_world`
+- `ScaleManager` is the **only** place where km/sim conversion constants are defined
+- One computation = one coordinate space (see [Coordinate Spaces](/coordinate-spaces))
+- The main thread must **not** generate geometry — delegate to Web Workers
+
+### Comments
+
+Write comments only when the **why** is non-obvious: a hidden constraint, a subtle invariant, a workaround for a specific bug. Do not describe what the code does — well-named identifiers already do that.
+
+## Tests
+
+```bash
+npm test              # Vitest watch mode
+npm run coverage      # Coverage report → /coverage/index.html
+```
+
+- **Framework:** Vitest (Node environment, no DOM)
+- **Coverage:** `src/**/*.{ts,tsx}` — text + HTML report
+- Reference test: `src/core/scale/scale_manager.test.ts`
+
+## Validation
+
+Before opening a PR, run the Playwright smoke test against the local dev server:
+
+```bash
+npm run serve &
+npm run pw:validate
+```
+
+The smoke test (`scripts/playwright_world42_smoke.mjs`) opens the app in a headed Chromium, waits for the WebGPU canvas to initialize, and verifies the frame renders without errors.
+
+## Dev System Rule
+
+Any new terrain, lighting, or shader change must be **prototyped on the `Moon` pilot planet** in the `Dev` system before being tested on Sol or Alpha Centauri. Set `"default": true` on `"Dev"` in `data.json` (already the case on the `CBT` branch).
+
+Reset `"default"` to `"Sol"` before merging any branch to `main`.
+
+## Commit Messages
+
+```
+feat: add screen-space error blending for OCBT bisectors
+fix: prevent crack at LOD boundary when camera crosses hemisphere
+refactor: extract ChunkNode from ChunkTree
+```
+
+Use conventional commits (`feat`, `fix`, `refactor`, `docs`, `test`, `chore`). Keep the subject under 72 characters. Reference an issue or PR in the body if applicable.
+
+## Performance Benchmarks
+
+```bash
+npm run bench:flight   # Deterministic ground→orbit flight benchmark
+```
+
+The flight benchmark uses `__world42Bench` globals injected by the app and reports GPU/CPU frame times per phase. Run before and after optimization work to produce a diff.

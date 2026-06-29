@@ -1,0 +1,74 @@
+# LOD System (OCBT)
+
+World42 uses an **OCBT (Optimized Concurrent Binary Tree)** GPU terrain engine — a pool-based CBT implementation that runs entirely on the GPU compute pipeline.
+
+> **Note:** The older CDLOD quadtree approach has been replaced by OCBT. All terrain LOD work targets the OCBT path.
+
+## Overview
+
+OCBT is based on the *Concurrent Binary Trees* technique (Benyoub & Dupuy, HPG 2024). The key idea: a flat array of bits encodes a binary subdivision tree for a mesh patch. The GPU reads this tree each frame and emits only the triangles that pass the current screen-space error threshold.
+
+## How It Works
+
+### CBT Pool Allocator
+
+A fixed-size GPU buffer (`large_cbt`) holds multiple CBT instances — one per visible terrain patch. The pool allocator assigns patches to slots without stalling the CPU.
+
+### Bisector Representation
+
+Each leaf node of the CBT is a *bisector* — a right triangle that can be split into two smaller right triangles by bisecting its hypotenuse. The CBT tree encodes which bisectors are active.
+
+### Split/Merge Topology
+
+Every frame the GPU runs a compute pass that:
+1. Evaluates the **screen-space error (SSE)** for each bisector
+2. Marks bisectors for split (SSE > threshold) or merge (SSE < threshold − hysteresis)
+3. Updates the CBT bit array in-place
+
+No CPU readback is required.
+
+### Screen-Space Error Metric
+
+```
+ssePx = geometricError * projectionK / distance
+```
+
+Where:
+- `geometricError` — maximum height deviation introduced by this bisector's level
+- `projectionK` — derived from the vertical field of view and screen height
+- `distance` — camera distance to the bisector's bounding sphere center
+
+Split threshold: **5.0 px**  
+Merge threshold: **4.0 px** (1 px hysteresis to prevent churn)
+
+## Terrain Scheduler
+
+`src/systems/lod/lod_scheduler.ts` drives the OCBT update loop from `onBeforeRenderObservable`:
+
+- **Frame budget:** `budgetMs = 30` ms — the scheduler skips planets that have already consumed their budget this frame
+- **Round-robin:** multiple planets share the scheduler; each gets a fair time slice
+- **Parameters:**
+
+| Constant | Default | Effect |
+|----------|---------|--------|
+| `maxConcurrent` | 8 | Max in-flight GPU topology dispatches |
+| `maxStartsPerFrame` | 2 | New dispatches allowed per frame |
+| `rescoreMs` | 100 | Interval between priority queue rescores |
+| `budgetMs` | 30 | Per-frame wall-clock cap |
+
+## Dev System
+
+The `Dev` system (`data.json`) with the Moon pilot planet is the **reference target** for all LOD iterations. Its small size (ø 3,474 km) means all LOD levels load quickly. Validate LOD changes here before testing on Earth-sized bodies.
+
+Use the `L` key in-game to toggle the LOD visualization overlay.
+
+## Source Files
+
+| File | Role |
+|------|------|
+| `src/systems/lod/lod_scheduler.ts` | Main LOD tick, budget, round-robin |
+| `src/systems/lod/lod_priority_queue.ts` | Min-heap by camera distance |
+| `src/systems/lod/chunks/chunk_tree.ts` | CDLOD node: split/merge/culling/worker request |
+| `src/systems/lod/chunks/chunk_metrics.ts` | SSE computation, bounding sphere distance |
+| `src/systems/lod/chunks/chunk_forge.ts` | Builds BabylonJS mesh from worker data |
+| `src/systems/lod/cbt/` | OCBT GPU pool: topology compute, bisector management |

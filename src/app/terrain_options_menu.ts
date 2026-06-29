@@ -37,6 +37,16 @@ export type TerrainOptionsMenuOptions = {
     liveApply?: (profileId: string, path: string, value: number) => void;
     /** Apply `baked` params. Default reloads the page; pass lod.rebuildProfile to hot-rebuild. */
     onApply?: (profileId: string) => void;
+    /**
+     * Global render-pipeline settings (NOT part of the per-profile terrain schema). When supplied, a
+     * "Render" folder exposes the FSR1 internal render scale; changes apply live (graph rebuild).
+     */
+    renderSettings?: {
+        /** Current FSR1 render scale (0.5..1); the menu keeps this in sync as the user drags. */
+        fsr1RenderScale: number;
+        /** Apply a new FSR1 render scale live. */
+        onFsr1RenderScaleChange: (scale: number) => void;
+    };
 };
 
 export class TerrainOptionsMenu {
@@ -102,6 +112,9 @@ export class TerrainOptionsMenu {
 
         // Per-class crater editor (count + cell/radius/depth/density per class).
         this.addCraterClassesFolder(getFolder('Crater classes'));
+
+        // Global render-pipeline settings (independent of the selected terrain profile).
+        if (this.opts.renderSettings) this.addRenderFolder();
 
         // Actions.
         const actions = this.pane.addFolder({ title: 'Actions', expanded: true });
@@ -215,6 +228,28 @@ export class TerrainOptionsMenu {
                     this.dirty = true;
                 });
             }
+        });
+    }
+
+    /** Global render settings folder: FSR1 internal render scale (applies live via a graph rebuild). */
+    private addRenderFolder(): void {
+        const rs = this.opts.renderSettings;
+        if (!rs) return;
+        const folder = this.pane.addFolder({ title: 'Render', expanded: false });
+        const proxy = { fsr1: rs.fsr1RenderScale };
+        const binding = folder.addBinding(proxy, 'fsr1', {
+            label: 'FSR1 render scale',
+            min: 0.5,
+            max: 1,
+            step: 0.05
+        });
+        (binding.element as HTMLElement).title =
+            'Fraction of the backbuffer the scene is shaded at, then upscaled (EASU+RCAS). ' +
+            'Lower = faster, softer. 1 = native. Applies live (rebuilds the frame graph).  [live]';
+        binding.on('change', (ev) => {
+            const v = Number(ev.value);
+            rs.fsr1RenderScale = v; // keep in sync so a profile-switch rebuild restores the value
+            rs.onFsr1RenderScaleChange(v);
         });
     }
 

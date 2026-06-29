@@ -1,0 +1,16 @@
+/* World42 docs — brand color palette */
+:root {
+  --rp-c-brand:        #7c3aed;
+  --rp-c-brand-light:  #a855f7;
+  --rp-c-brand-lighter:#c084fc;
+  --rp-c-brand-dark:   #6d28d9;
+  --rp-c-brand-darker: #5b21b6;
+  --rp-c-brand-tint:   rgba(124, 58, 237, 0.1);
+  --rp-radius:         10px;
+}
+
+html.dark {
+  --rp-c-bg:      #060a14;
+  --rp-c-bg-soft: #0c1221;
+  --rp-c-bg-mute: #0f172a;
+}

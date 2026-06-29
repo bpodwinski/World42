@@ -31,7 +31,7 @@ export async function createFloatingCameraScene(
         disposables
     );
 
-    setupRuntime({
+    const { fsr1RenderScale, setFsr1RenderScale } = setupRuntime({
         scene,
         engine,
         camera,
@@ -51,7 +51,11 @@ export async function createFloatingCameraScene(
     // lod.rebuildProfile. Defaults to the dev Moon's profile (selena).
     const terrainMenu = new TerrainOptionsMenu({
         initialProfileId: 'selena',
-        onApply: (profileId) => lod.rebuildProfile(profileId)
+        onApply: (profileId) => lod.rebuildProfile(profileId),
+        renderSettings: {
+            fsr1RenderScale,
+            onFsr1RenderScaleChange: setFsr1RenderScale
+        }
     });
     disposables.add(() => terrainMenu.dispose());
 

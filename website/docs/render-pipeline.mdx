@@ -1,0 +1,65 @@
+# Render Pipeline
+
+World42 uses a **BabylonJS 9 Frame Graph** to sequence all rendering and post-processing passes. WebGPU is the primary backend; WebGL2 is the automatic fallback.
+
+## Engine Initialization
+
+`src/core/render/engine_manager.ts` detects WebGPU support at startup:
+
+```typescript
+// Prefers WebGPU, falls back to WebGL2 automatically
+const engine = await EngineManager.create(canvas);
+```
+
+BabylonJS 9 uses `WebGPUEngine` when `navigator.gpu` is available and `Engine` (WebGL2) otherwise.
+
+## Frame Graph
+
+The render pipeline is a `FrameGraph` attached to `scene.frameGraph`. Passes execute in order each frame:
+
+| Order | Pass | Description |
+|-------|------|-------------|
+| 1 | OCBT Compute | GPU topology update for all active terrain patches |
+| 2 | Scene Render | BabylonJS forward pass — terrain, entities, stars |
+| 3 | Shadow Pass | `ShadowGenerator` 4096 px, PCF 3×3, dynamic range |
+| 4 | Atmosphere | Single-scattering Rayleigh + Mie (analytic sphere occlusion) |
+| 5 | Bloom | BabylonJS built-in bloom |
+| 6 | FXAA | Fast approximate anti-aliasing |
+| 7 | Sharpen | Custom post-process (1-tap unsharp mask) |
+| 8 | ACES Tone Map | Academy Color Encoding System |
+
+> **Note:** MSAA was dropped in favor of FXAA to avoid depth-resolve validation errors in the WebGPU path.
+
+## Stars
+
+Stars are rendered via SDF ray-marching in a custom post-process shader (`src/assets/shaders/`):
+- 100 ray-march steps per pixel for the star disk
+- Sun glare as a separate overlay (`src/utils/sun_glare.ts`)
+
+## Atmosphere
+
+`src/game_objects/planets/rocky_planet/atmospheric-scattering-postprocess.ts` implements single-scattering Rayleigh + Mie scattering as a Frame Graph task:
+
+- Planet and atmosphere radii read from the planet profile
+- No depth buffer sampling (WebGPU Frame Graph depth is not sampleable in the current setup) — occlusion is computed analytically against a sphere
+- Light direction passed as a render-space uniform each frame
+
+## Shadow Pipeline
+
+- **Generator:** `ShadowGenerator` 4096 × 4096 px
+- **Filter:** PCF 3×3 (soft shadows)
+- **Bias:** dynamically adjusted based on camera altitude to reduce self-shadowing at ground level
+- **Stable snapping:** shadow camera is snapped to texel boundaries to eliminate shadow crawl
+
+## Terrain Shaders
+
+| Shader | Path |
+|--------|------|
+| Vertex | `src/assets/shaders/terrain/terrainVertexShader.glsl` |
+| Fragment | `src/assets/shaders/terrain/terrainFragmentShader.glsl` |
+
+The vertex shader handles patch-space → world-space transforms and LOD blending. The fragment shader computes diffuse + detail texturing, PCF shadow lookup, and per-pixel shading normals.
+
+## Post-Processing Manager
+
+`src/core/render/postprocess_manager.ts` registers all post-process tasks with the Frame Graph in the correct order. Adding a new pass means registering a new task here — the Frame Graph handles dependency ordering and GPU resource lifetimes.

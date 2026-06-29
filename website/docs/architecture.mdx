@@ -1,0 +1,73 @@
+# Architecture
+
+World42 follows a strict layered architecture where dependencies flow **downward only**. No layer may import from a layer above it.
+
+## Layer Diagram
+
+```
+src/
+├── core/               # Reusable engine subsystems — no game dependencies
+│   ├── camera/         # OriginCamera (floating-origin), FloatingEntity
+│   ├── control/        # MouseSteerControlManager (6DOF ship controls)
+│   ├── gui/            # GuiManager, crosshair, speed HUD
+│   ├── io/             # TextureManager (KTX2), AssetLoader
+│   ├── render/         # EngineManager, PostProcessManager, star ray-marching
+│   └── scale/          # ScaleManager — ONLY conversion point km ↔ sim
+│
+├── systems/            # Reusable systems (depend on core)
+│   └── lod/
+│       ├── chunks/     # ChunkTree, chunk_metrics, chunk_forge, culling
+│       ├── workers/    # WorkerPool, mesh-kernel/1 protocol, MinHeap
+│       ├── lod_scheduler.ts
+│       └── lod_priority_queue.ts
+│
+├── game_objects/       # Domain entities (depend on core + systems)
+│   └── planets/rocky_planet/
+│       ├── terrain.ts
+│       ├── terrains_shader.ts
+│       └── atmospheric-scattering-postprocess.ts
+│
+└── game_world/         # Game logic — top layer
+    └── stellar_system/
+        ├── data.json
+        └── stellar_catalog_loader.ts
+
+terrain/                # Rust crate compiled to WASM
+└── src/lib.rs          # build_chunk() — main WASM export
+```
+
+## Dependency Rules
+
+- `core` ← `systems` ← `game_objects` ← `game_world`
+- Imports must never skip a layer or go upward
+- `ScaleManager` is the **only** file where km/sim conversion constants live
+- The main thread must **not** generate geometry — all mesh work is delegated to Web Workers
+
+## Bootstrap Sequence
+
+1. `src/index.ts` — initializes WebGPU engine (WebGL2 fallback) and calls `CreateScene()`
+2. `src/app.ts` (`FloatingCameraScene.CreateScene()`) — wires up all systems in order:
+   - `EngineManager` (WebGPU/WebGL2 detection)
+   - `OriginCamera` + `MouseSteerControlManager`
+   - `LodScheduler` (frame budget, round-robin per planet)
+   - `StellarCatalogLoader` → reads `data.json` → creates `FloatingEntity` per body + `RockyPlanet` CDLOD
+   - `PostProcessManager` (atmosphere, bloom, FXAA, ACES, shadows)
+   - `GuiManager` (speed HUD, crosshair)
+
+## Critical Files
+
+| File | Role |
+|------|------|
+| `src/index.ts` | Bootstrap — engine init |
+| `src/app.ts` | `CreateScene()` — orchestrates all systems |
+| `src/core/camera/camera_manager.ts` | `OriginCamera` — doublepos, toRenderSpace |
+| `src/core/scale/scale_manager.ts` | Single point of km ↔ sim conversion |
+| `src/systems/lod/chunks/chunk_tree.ts` | CDLOD node: split/merge/culling/worker request |
+| `src/systems/lod/chunks/chunk_metrics.ts` | SSE computation and bounding sphere distance |
+| `src/systems/lod/chunks/chunk_forge.ts` | Builds BabylonJS mesh from worker data |
+| `src/systems/lod/lod_scheduler.ts` | LOD tick with frame budget and round-robin |
+| `src/systems/lod/workers/worker_pool.ts` | Web Worker pool (hardwareConcurrency - 1) |
+| `src/systems/lod/workers/terrain_mesh_worker.ts` | Worker entry point — `mesh-kernel/1` protocol |
+| `src/game_objects/planets/rocky_planet/terrains_shader.ts` | `TerrainShader` + `TerrainShadowContext` |
+| `src/game_world/stellar_system/stellar_catalog_loader.ts` | Loads `data.json`, creates scene entities |
+| `terrain/src/lib.rs` | `build_chunk()` WASM — positions/normals/uvs/indices |

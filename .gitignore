@@ -35,3 +35,10 @@ public/gpu_stats.json
 
 # perf bench flight run artifacts
 scripts/.bench/
+
+# Rspress docs build output and dependencies
+website/node_modules/
+website/doc_build/
+
+# GitHub Pages staging directory (local dry-run)
+_site/
