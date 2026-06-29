@@ -95,7 +95,7 @@ export class CbtPlanet {
     // × 14 shaders). Creation is deferred until the camera is actually close enough
     // to need terrain detail for this planet.
     private source: CbtGeometrySource | null = null;
-    private readonly sourceOpts: CbtPlanetOptions;
+    private sourceOpts: CbtPlanetOptions;
 
     private debugLod = false;
     private pendingWireframe = false;
@@ -111,8 +111,8 @@ export class CbtPlanet {
 
     private readonly renderParent: TransformNode;
     private readonly starColor: Vector3;
-    private readonly noise: NoiseParams;
-    private readonly craters: CraterParams;
+    private noise: NoiseParams;
+    private craters: CraterParams;
 
     constructor(
         private scene: Scene,
@@ -271,6 +271,36 @@ export class CbtPlanet {
 
     resetNow(): void {
         this.source?.reset();
+    }
+
+    /**
+     * Hot-rebuild this planet's terrain with new baked params (noise / craters / lighting) WITHOUT a
+     * page reload. Those constants are compiled into both WGSL programs (the df64 eval kernel and the
+     * render material), so the OCBT source is disposed and recreated; the topology re-converges over
+     * the next frames. The new mesh joins scene.meshes — the live frame-graph object list — so it is
+     * picked up automatically. If the source was not created yet (inactive/far planet) the params are
+     * just stored and take effect when it is first created.
+     */
+    rebuildTerrain(params: {
+        noise?: NoiseParams;
+        craters?: CraterParams;
+        lighting?: ResolvedLighting;
+    }): void {
+        if (params.noise) this.noise = params.noise;
+        if (params.craters) this.craters = params.craters;
+        this.sourceOpts = {
+            ...this.sourceOpts,
+            noise: this.noise,
+            craters: this.craters,
+            lighting: params.lighting ?? this.sourceOpts.lighting
+        };
+        if (this.source) {
+            const old = this.source;
+            this.source = null;
+            old.dispose();
+            // Recreate immediately so there is no empty-mesh frame; refresh + reapply debug flags.
+            this.getOrCreateSource();
+        }
     }
 
     /**

@@ -14,7 +14,7 @@ import {
     type TerrainProfile
 } from './planet_profiles';
 import lightingJsonRaw from './planet_lighting.json';
-import type { PlanetLightingJSON } from './planet_lighting';
+import type { PlanetLightingJSON, PlanetLightingParams } from './planet_lighting';
 import { setPath } from './terrain_param_schema';
 
 const LIGHTING_JSON = lightingJsonRaw as unknown as PlanetLightingJSON;
@@ -85,6 +85,9 @@ export function effectiveProfile(profileId: string): TerrainProfile {
  * the working object the options menu binds its sliders to (lighting is resolved, so all BRDF/ground
  * fields are present even when the profile only overrides a few).
  */
-export function resolveEffectiveProfile(profileId: string): ResolvedProfile {
-    return resolveProfile(LIGHTING_JSON, effectiveProfile(profileId));
+export function resolveEffectiveProfile(
+    profileId: string,
+    lightingOverride?: PlanetLightingParams
+): ResolvedProfile {
+    return resolveProfile(LIGHTING_JSON, effectiveProfile(profileId), { lightingOverride });
 }

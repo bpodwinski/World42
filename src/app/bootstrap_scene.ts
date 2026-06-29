@@ -11,7 +11,6 @@ import {
 import { OriginCamera } from '../core/camera/camera_manager';
 import { MouseSteerControlManager } from '../core/control/mouse_steer_control_manager';
 import { GuiManager } from '../core/gui/gui_manager';
-import { TerrainOptionsMenu } from '../core/gui/terrain_options_menu';
 import { DisposableRegistry } from '../core/lifecycle/disposable_registry';
 import { ScaleManager } from '../core/scale/scale_manager';
 import { DEFAULT_NOISE, fbmNoise } from '../systems/lod/cbt/cbt_noise';
@@ -100,11 +99,6 @@ export async function bootstrapScene(
     const gui = new GuiManager(scene);
     gui.setMouseCrosshairVisible(true);
     disposables.add(() => gui.dispose());
-
-    // In-game terrain options menu (press O). Auto-generated from the param schema; edits persist
-    // to localStorage per profile and re-bake on Apply (reload). Defaults to the dev Moon's profile.
-    const terrainMenu = new TerrainOptionsMenu({ initialProfileId: 'selena' });
-    disposables.add(() => terrainMenu.dispose());
 
     // Spawn just above the surface at the planet's NORTH POLE (planet-local +Y =
     // the octahedron's +Y vertex; the pivot only spins about Y, so local +Y maps to

@@ -94,6 +94,10 @@ export function normalizeSystemJSON(raw: unknown): SystemJSON {
                     color_rgb: colorRGB,
                 }
                 : undefined,
+            // Terrain archetype id (planet_profiles.ts). MUST be passed through or the body never
+            // gets its profile (noise + craters + lighting) and the options menu's hot-rebuild can't
+            // match it — same drop-bug class as `lighting` below.
+            profile: typeof body.profile === 'string' ? body.profile : undefined,
             // Pass per-planet lighting overrides through verbatim (resolveLighting fills any gaps from
             // defaults). Previously dropped here, which silently discarded ALL data.json `lighting`
             // blocks (albedo/brdf/atmosphere) — bodies fell back to global defaults.

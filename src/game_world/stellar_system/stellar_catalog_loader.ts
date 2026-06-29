@@ -119,6 +119,10 @@ export type PlanetCBT = {
     starPosWorldDouble: Vector3 | null;
     /** Resolved single-scattering atmosphere, or null for airless bodies. */
     atmosphere: ResolvedAtmosphere | null;
+    /** Terrain profile id this planet uses (for the options menu's hot-rebuild), if any. */
+    profile?: string;
+    /** Per-body lighting override (merged over the profile on rebuild), if any. */
+    lightingOverride?: PlanetLightingParams;
 };
 
 export type CBTOptions = {
@@ -329,6 +333,8 @@ export function createCBTForSystem(
             radiusSim: body.radiusSim,
             starPosWorldDouble,
             atmosphere: lighting.atmosphere,
+            profile: body.profile,
+            lightingOverride: body.lighting,
         });
     }
 

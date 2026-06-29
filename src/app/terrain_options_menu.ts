@@ -3,11 +3,14 @@
  * parameter becomes a labeled slider under its group folder, with the schema description as a tooltip.
  * Edits are persisted per profile to localStorage (terrain_profile_store) and survive reloads.
  *
+ * Lives in the `app` layer (top): it depends on game_world config (profiles/schema/store) + tweakpane,
+ * so it must NOT sit under core/ (dependencies flow downward).
+ *
  * Apply model:
- *  - `uniform` params apply LIVE if a `liveApply` callback is supplied (no reload).
- *  - `baked` params are compiled into the WGSL header, so they take effect on "Apply" — which by
- *    default reloads the page (the loader re-reads the persisted overrides at startup). Pass `onApply`
- *    to hot-rebuild instead.
+ *  - `uniform` params apply LIVE if a `liveApply` callback is supplied (no rebuild).
+ *  - `baked` params are compiled into the WGSL header; "Apply" calls `onApply`, which HOT-REBUILDS the
+ *    affected planets in place (lod.rebuildProfile) — no page reload. If `onApply` is omitted it falls
+ *    back to a page reload (the loader re-bakes from localStorage at startup).
  *
  * Toggle with the O key (configurable). American English only.
  */
@@ -17,22 +20,22 @@ import {
     PLANET_PROFILES,
     PROFILE_IDS,
     DEFAULT_PROFILE_ID
-} from '../../game_world/stellar_system/planet_profiles';
-import { TERRAIN_PARAM_SCHEMA } from '../../game_world/stellar_system/terrain_param_schema';
+} from '../game_world/stellar_system/planet_profiles';
+import { TERRAIN_PARAM_SCHEMA } from '../game_world/stellar_system/terrain_param_schema';
 import {
     clearProfileOverrides,
     resolveEffectiveProfile,
     setOverride
-} from '../../game_world/stellar_system/terrain_profile_store';
+} from '../game_world/stellar_system/terrain_profile_store';
 
 export type TerrainOptionsMenuOptions = {
     /** Profile selected when the menu opens (default DEFAULT_PROFILE_ID). */
     initialProfileId?: string;
     /** Key that toggles the menu (default 'o'). */
     toggleKey?: string;
-    /** Apply `uniform` params live (no reload). Receives (profileId, path, value). */
+    /** Apply `uniform` params live (no rebuild). Receives (profileId, path, value). */
     liveApply?: (profileId: string, path: string, value: number) => void;
-    /** Apply `baked` params. Default reloads the page so the loader re-bakes from localStorage. */
+    /** Apply `baked` params. Default reloads the page; pass lod.rebuildProfile to hot-rebuild. */
     onApply?: (profileId: string) => void;
 };
 
@@ -103,7 +106,7 @@ export class TerrainOptionsMenu {
 
         // Actions.
         const actions = this.pane.addFolder({ title: 'Actions', expanded: true });
-        actions.addButton({ title: 'Apply (reload)' }).on('click', () => this.apply());
+        actions.addButton({ title: 'Apply changes' }).on('click', () => this.apply());
         actions.addButton({ title: 'Reset profile to defaults' }).on('click', () => this.resetProfile());
     }
 
@@ -119,11 +122,13 @@ export class TerrainOptionsMenu {
     private apply(): void {
         if (this.opts.onApply) this.opts.onApply(this.profileId);
         else if (typeof location !== 'undefined') location.reload();
+        this.dirty = false;
     }
 
     private resetProfile(): void {
         clearProfileOverrides(this.profileId);
-        this.apply();
+        this.rebuild(); // refresh the sliders back to the profile defaults
+        this.apply(); // hot-rebuild (or reload) so the planet reflects the reset
     }
 
     /** Resolve a dotted path on the working object into its parent object + leaf key. */

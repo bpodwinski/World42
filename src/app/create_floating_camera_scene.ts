@@ -1,5 +1,6 @@
 import type { Scene, WebGPUEngine } from '@babylonjs/core';
 import { DisposableRegistry } from '../core/lifecycle/disposable_registry';
+import { TerrainOptionsMenu } from './terrain_options_menu';
 import { bootstrapScene } from './bootstrap_scene';
 import { setupLodAndShadows } from './setup_lod_and_shadows';
 import { setupRuntime } from './setup_runtime';
@@ -44,6 +45,15 @@ export async function createFloatingCameraScene(
         atmospheres,
         disposables,
     });
+
+    // In-game terrain options menu (press O). Auto-generated from the param schema; edits persist to
+    // localStorage per profile. "Apply" HOT-REBUILDS the affected planets in place (no reload) via
+    // lod.rebuildProfile. Defaults to the dev Moon's profile (selena).
+    const terrainMenu = new TerrainOptionsMenu({
+        initialProfileId: 'selena',
+        onApply: (profileId) => lod.rebuildProfile(profileId)
+    });
+    disposables.add(() => terrainMenu.dispose());
 
     return scene;
 }

@@ -22,6 +22,7 @@ import {
     noiseForQuality,
     type CbtQualityLevel,
 } from '../systems/lod/cbt/cbt_quality';
+import { resolveEffectiveProfile } from '../game_world/stellar_system/terrain_profile_store';
 
 /**
  * CBT quality preset. Change this to tune mesh density, max depth and terrain
@@ -48,6 +49,8 @@ export type LodController = {
     runOcbtCompute: () => void;
     /** Hand the OCBT compute loop to the Frame Graph (called once the graph is built). */
     setComputeOwnedByGraph: (owned: boolean) => void;
+    /** Hot-rebuild every planet using `profileId` from its (now overridden) profile — no reload. */
+    rebuildProfile: (profileId: string) => void;
 };
 
 export type LodSetupResult = {
@@ -108,6 +111,14 @@ export function setupLodAndShadows(
         runOcbtCompute: () => cbtScheduler.runCompute(),
         setComputeOwnedByGraph: (owned: boolean) =>
             cbtScheduler.setGraphOwnsCompute(owned),
+        rebuildProfile: (profileId: string) => {
+            for (const planet of mergedCBT.values()) {
+                if (planet.profile !== profileId) continue;
+                planet.runtime.rebuildTerrain(
+                    resolveEffectiveProfile(profileId, planet.lightingOverride)
+                );
+            }
+        },
     };
 
     const mergedShadowPlanets = new Map<string, PlanetShadowSource>();
