@@ -22,10 +22,10 @@
 // Reuses the metric classify camera UBO (binding 17): camRadius.xyz = camLocal, .w = radius.
 
 struct EvalParams {
-    camRadius   : vec4<f32>,  // xyz = camLocal hi, w = planet radius
+    camRadius   : vec4<f32>,
     thresh      : vec4<f32>,
-    limits      : vec4<f32>,  // x = maxLevel, y = minLevel, z = DF64_NEAR_KM (df64->f32 cutoff, km)
-    camRadiusLo : vec4<f32>   // xyz = camLocal df64 lo part (x - fround(x)); w unused
+    limits      : vec4<f32>,
+    camRadiusLo : vec4<f32>
 };
 
 // A vec3 in df64: each component carried as (hi, lo).
