@@ -54,15 +54,23 @@ import terrainTopoEvalLebWgsl from '../../../../assets/shaders/terrain/engine/te
 import terrainTopoEvalLebF64Wgsl from '../../../../assets/shaders/terrain/engine/terrain_topo_eval_leb_f64.compute.wgsl';
 import terrainTopoCompactWgsl from '../../../../assets/shaders/terrain/engine/terrain_topo_compact.compute.wgsl';
 import terrainTopoPrepareIndirectWgsl from '../../../../assets/shaders/terrain/engine/terrain_topo_prepare_indirect.compute.wgsl';
+import terrainTopoMarkStableWgsl from '../../../../assets/shaders/terrain/engine/terrain_topo_mark_stable.compute.wgsl';
+import terrainTopoMarkStableAllocWgsl from '../../../../assets/shaders/terrain/engine/terrain_topo_mark_stable_alloc.compute.wgsl';
+import terrainTopoInvalidateSplitsWgsl from '../../../../assets/shaders/terrain/engine/terrain_topo_invalidate_splits.compute.wgsl';
 import {
     engineLayout,
     engineWgslPreamble,
+    slotStateWgslPreamble,
     buildEngineSeed,
     HEAP_ID_WORDS,
     NEIGHBORS_WORDS,
     BISECTOR_DATA_WORDS,
     POSITIONS_WORDS,
-    TERRAIN_INVALID
+    TERRAIN_INVALID,
+    slotStateWords,
+    freedTilesWords,
+    bakeWorklistWords,
+    ATLAS_TILE_COUNT
 } from './terrain_engine_buffers';
 import { log2PowerOfTwo } from './terrain_pool';
 
@@ -158,6 +166,16 @@ export class TerrainTopologyKernel {
     private readonly indirectArgs: StorageBuffer | null = null;
     private readonly prepareIndirect: ComputeShader | null = null;
     private readonly useIndirect: boolean;
+
+    // Tile cache (metric mode only).
+    private readonly slotStateBuf: StorageBuffer | null = null;
+    private readonly freedTilesBuf: StorageBuffer | null = null;
+    private readonly bakeWorklistBuf: StorageBuffer | null = null;
+
+    private readonly markStablePass: ComputeShader | null = null;
+    private readonly markStableAllocPass: ComputeShader | null = null;
+    private readonly invalidateSplitsPass: ComputeShader | null = null;
+    private readonly markStableZero = new Uint32Array(1);
 
     // Passes.
     private readonly reduce: ComputeShader;
@@ -400,12 +418,12 @@ export class TerrainTopologyKernel {
             {
                 bindingsMapping: {
                     pool_bitfield: { group: 0, binding: 0 },
-                    heapID: { group: 0, binding: 2 },
-                    neighbors: { group: 0, binding: 3 },
-                    neighborsOut: { group: 0, binding: 4 },
-                    bisectorData: { group: 0, binding: 5 },
-                    allocate: { group: 0, binding: 8 },
-                    propagate: { group: 0, binding: 9 }
+                    heapID:        { group: 0, binding: 2 },
+                    neighbors:     { group: 0, binding: 3 },
+                    neighborsOut:  { group: 0, binding: 4 },
+                    bisectorData:  { group: 0, binding: 5 },
+                    allocate:      { group: 0, binding: 8 },
+                    propagate:     { group: 0, binding: 9 }
                 }
             }
         );
@@ -457,15 +475,25 @@ export class TerrainTopologyKernel {
         this.simplify = new ComputeShader(
             'terrain_topo_simplify',
             engine,
-            { computeSource: compose(terrainU64Wgsl, terrainPoolWgsl, terrainTopoCommonWgsl, terrainTopoSimplifyWgsl) },
+            {
+                computeSource: compose(
+                    slotStateWgslPreamble(),
+                    terrainU64Wgsl,
+                    terrainPoolWgsl,
+                    terrainTopoCommonWgsl,
+                    terrainTopoSimplifyWgsl
+                )
+            },
             {
                 bindingsMapping: {
-                    pool_bitfield: { group: 0, binding: 0 },
-                    heapID: { group: 0, binding: 2 },
-                    neighbors: { group: 0, binding: 3 },
-                    bisectorData: { group: 0, binding: 5 },
+                    pool_bitfield:  { group: 0, binding: 0 },
+                    heapID:         { group: 0, binding: 2 },
+                    neighbors:      { group: 0, binding: 3 },
+                    bisectorData:   { group: 0, binding: 5 },
                     simplification: { group: 0, binding: 7 },
-                    propagate: { group: 0, binding: 9 }
+                    propagate:      { group: 0, binding: 9 },
+                    slotState:      { group: 0, binding: 22 },
+                    freedTiles:     { group: 0, binding: 25 }
                 }
             }
         );
@@ -611,6 +639,95 @@ export class TerrainTopologyKernel {
             this.compact.setStorageBuffer('drawCount', this.drawCount);
         }
 
+        // --- tile cache: mark_stable (metric only) ---
+        if (classifyMode === 'metric') {
+            const slotPreamble = slotStateWgslPreamble();
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const self = this as any;
+            self.slotStateBuf    = mk(slotStateWords(capacity) * 4, STORAGE | WRITE, 'terrain_tile_slotstate');
+            self.freedTilesBuf   = mk(freedTilesWords(capacity) * 4, STORAGE | READ | WRITE, 'terrain_tile_freed');
+            self.bakeWorklistBuf = mk(bakeWorklistWords() * 4, STORAGE | WRITE, 'terrain_tile_worklist');
+
+            // Pass 1: reclaim tiles from dead slots; track stability for live ones.
+            self.markStablePass  = new ComputeShader(
+                'terrain_topo_mark_stable',
+                engine,
+                { computeSource: compose(slotPreamble, terrainU64Wgsl, terrainTopoCommonWgsl, terrainTopoMarkStableWgsl) },
+                {
+                    bindingsMapping: {
+                        heapID:       { group: 0, binding: 2 },
+                        slotState:    { group: 0, binding: 22 },
+                        freedTiles:   { group: 0, binding: 25 },
+                        bakeWorklist: { group: 0, binding: 26 }
+                    }
+                }
+            );
+            self.markStablePass.onError = onErr('markStable');
+            self.markStablePass.setStorageBuffer('heapID',       this.heapID);
+            self.markStablePass.setStorageBuffer('slotState',    self.slotStateBuf);
+            self.markStablePass.setStorageBuffer('freedTiles',   self.freedTilesBuf);
+            self.markStablePass.setStorageBuffer('bakeWorklist', self.bakeWorklistBuf);
+
+            // Pass 2: pop a free tile and assign it to every alive slot that has none.
+            // Dispatch after Pass 1 — the Babylon.js dispatch boundary is an implicit barrier.
+            self.markStableAllocPass = new ComputeShader(
+                'terrain_topo_mark_stable_alloc',
+                engine,
+                { computeSource: compose(slotPreamble, terrainU64Wgsl, terrainTopoCommonWgsl, terrainTopoMarkStableAllocWgsl) },
+                {
+                    bindingsMapping: {
+                        slotState:  { group: 0, binding: 22 },
+                        freedTiles: { group: 0, binding: 25 }
+                    }
+                }
+            );
+            self.markStableAllocPass.onError = onErr('markStableAlloc');
+            self.markStableAllocPass.setStorageBuffer('slotState',  self.slotStateBuf);
+            self.markStableAllocPass.setStorageBuffer('freedTiles', self.freedTilesBuf);
+
+            // Wire tile-invalidation bindings for simplify (child→parent merges).
+            this.simplify.setStorageBuffer('slotState',  self.slotStateBuf);
+            this.simplify.setStorageBuffer('freedTiles', self.freedTilesBuf);
+
+            // Pass: invalidate tiles for slots about to be bisected (parent→child).
+            // Runs between Allocate and Bisect in runFrame(). Kept as a separate pass
+            // (rather than adding bindings inside Bisect) to stay within the 8-buffer
+            // per-stage limit of base WebGPU.
+            self.invalidateSplitsPass = new ComputeShader(
+                'terrain_topo_invalidate_splits',
+                engine,
+                {
+                    computeSource: compose(
+                        slotPreamble,
+                        terrainU64Wgsl,
+                        terrainTopoCommonWgsl,
+                        terrainTopoInvalidateSplitsWgsl
+                    )
+                },
+                {
+                    bindingsMapping: {
+                        allocate:   { group: 0, binding: 8 },
+                        slotState:  { group: 0, binding: 22 },
+                        freedTiles: { group: 0, binding: 25 }
+                    }
+                }
+            );
+            self.invalidateSplitsPass.onError = onErr('invalidateSplits');
+            self.invalidateSplitsPass.setStorageBuffer('allocate',   this.allocateBuf);
+            self.invalidateSplitsPass.setStorageBuffer('slotState',  self.slotStateBuf);
+            self.invalidateSplitsPass.setStorageBuffer('freedTiles', self.freedTilesBuf);
+        }
+
+        if (classifyMode !== 'metric') {
+            // Simplify WGSL always declares bindings 22+25 for tile invalidation.
+            // Bind minimal stubs so the bind group validates in the non-metric (dead)
+            // code path. OOB clamping ensures safe no-ops.
+            const stubSS = mk(16, STORAGE | WRITE, 'terrain_tile_ss_stub');
+            const stubFT = mk(16, STORAGE | READ | WRITE, 'terrain_tile_ft_stub');
+            this.simplify.setStorageBuffer('slotState',  stubSS);
+            this.simplify.setStorageBuffer('freedTiles', stubFT);
+        }
+
         // --- indirect dispatch (optional): scale the 7 work-list passes' workgroup
         // count with their candidate counts instead of the full pool capacity. ---
         if (useIndirect) {
@@ -668,7 +785,9 @@ export class TerrainTopologyKernel {
             this.propagateSimplify,
             this.evalLeb,
             ...(this.compact ? [this.compact] : []),
-            ...(this.prepareIndirect ? [this.prepareIndirect] : [])
+            ...(this.prepareIndirect ? [this.prepareIndirect] : []),
+            ...(this.markStablePass ? [this.markStablePass] : []),
+            ...(this.markStableAllocPass ? [this.markStableAllocPass] : [])
         ];
         const end = performance.now() + timeoutMs;
         while (!shaders.every((s) => s.isReady())) {
@@ -701,6 +820,29 @@ export class TerrainTopologyKernel {
         // Self-prime: the pool sum-tree must reflect the seeded 8-slot bitfield before
         // frame 0's Reset (free-slot budget) and Allocate (decode_bit_complement) run.
         this.runReduce();
+        // Initialize the GPU tile free-list so Pass 2 can start assigning tiles immediately.
+        this.initTilePool();
+    }
+
+    /**
+     * Initialize the GPU tile free-list (freedTiles) as a full LIFO stack.
+     * Tile index 0 is reserved as the sentinel "no tile assigned" so WGSL shaders
+     * can use `tileIdx != 0` to distinguish assigned vs unassigned without a separate
+     * bit. This allows the dead-slot reclaim path to push back tiles that were
+     * assigned but not yet baked (HAS_TILE not yet set). Valid tiles: 1..16383.
+     * freedTiles[0]              = ATLAS_TILE_COUNT - 1 (number of free tiles).
+     * freedTiles[1..ATLAS_TILE_COUNT-1] = tile indices 1..ATLAS_TILE_COUNT-1.
+     * Called once from uploadSeed(); must NOT be called again (the pool is persistent).
+     */
+    private initTilePool(): void {
+        if (!this.freedTilesBuf) return;
+        const words = freedTilesWords(this.capacity);
+        const data = new Uint32Array(words);
+        data[0] = ATLAS_TILE_COUNT - 1;
+        for (let i = 1; i < ATLAS_TILE_COUNT; i++) {
+            data[i] = i;
+        }
+        this.freedTilesBuf.update(data);
     }
 
     /**
@@ -785,6 +927,10 @@ export class TerrainTopologyKernel {
             this.prepareIndirect.dispatch(1, 1, 1); // allocate+bisect recs <- allocate[0]
             this.allocate.dispatchIndirect(this.indirectArgs, ARG.ALLOCATE);
             this.copy.dispatch(nbWords[0], nbWords[1], 1); // whole-buffer ping-pong: O(capacity)
+            if (this.invalidateSplitsPass) {
+                // Reclaim parent-baked tiles before Bisect reuses the slot as a child.
+                this.invalidateSplitsPass.dispatchIndirect(this.indirectArgs, ARG.BISECT);
+            }
             this.bisect.dispatchIndirect(this.indirectArgs, ARG.BISECT);
             this.prepareIndirect.dispatch(1, 1, 1); // propagate rec <- propagate[0]
             this.propagateBisect.dispatchIndirect(this.indirectArgs, ARG.PROPAGATE_BISECT);
@@ -792,6 +938,9 @@ export class TerrainTopologyKernel {
             this.split.dispatch(full[0], full[1], 1);
             this.allocate.dispatch(full[0], full[1], 1);
             this.copy.dispatch(nbWords[0], nbWords[1], 1);
+            if (this.invalidateSplitsPass) {
+                this.invalidateSplitsPass.dispatch(full[0], full[1], 1);
+            }
             this.bisect.dispatch(full[0], full[1], 1);
             this.propagateBisect.dispatch(full[0], full[1], 1);
         }
@@ -850,6 +999,51 @@ export class TerrainTopologyKernel {
         return this.bisectorIndices;
     }
 
+    /** Per-slot tile-cache state (packed u32). Fragment shader samples this for the atlas fast-path. */
+    get slotStateBuffer(): StorageBuffer {
+        if (!this.slotStateBuf) throw new Error('slotStateBuffer requires classifyMode "metric"');
+        return this.slotStateBuf;
+    }
+
+    /** Freed-tile readback buffer (CPU reads [0]=count, [1..]=tile_pool_idx after mark_stable). */
+    get freedTilesBuffer(): StorageBuffer {
+        if (!this.freedTilesBuf) throw new Error('freedTilesBuffer requires classifyMode "metric"');
+        return this.freedTilesBuf;
+    }
+
+    /** Bake worklist (GPU-only: mark_stable writes, bake_tile reads). */
+    get bakeWorklistBuffer(): StorageBuffer {
+        if (!this.bakeWorklistBuf) throw new Error('bakeWorklistBuffer requires classifyMode "metric"');
+        return this.bakeWorklistBuf;
+    }
+
+    /** Simplex permutation table (256 u32, metric mode only) — needed by the bake tile shader. */
+    get permBuffer(): StorageBuffer {
+        if (!this.evalPerm) throw new Error('permBuffer requires classifyMode "metric"');
+        return this.evalPerm;
+    }
+
+    /**
+     * Two-pass tile-cache update (metric mode only). Must run AFTER runFrame()/runMergeFrame().
+     *
+     * Pass 1 (mark_stable): reclaims tiles from dead slots (push onto freedTiles free-list)
+     *   and increments stableFrames for live ones; adds bake candidates to bakeWorklist.
+     * Pass 2 (mark_stable_alloc): for every alive slot without a tile, pops one from the
+     *   GPU free-list and assigns it. The Babylon.js dispatch boundary is an implicit barrier.
+     *
+     * freedTiles is a PERSISTENT free-list — do NOT zero it between frames.
+     * Only bakeWorklist[0] (the cursor) is reset each call.
+     */
+    runMarkStable(): void {
+        if (!this.markStablePass || !this.bakeWorklistBuf) return;
+        this.bakeWorklistBuf.update(this.markStableZero);
+        const full = grid2D(Math.ceil(this.capacity / WORKGROUP_SIZE));
+        this.markStablePass.dispatch(full[0], full[1], 1);
+        if (this.markStableAllocPass) {
+            this.markStableAllocPass.dispatch(full[0], full[1], 1);
+        }
+    }
+
     /** Compact the live slots into the contiguous index list (metric mode only). */
     runCompact(): void {
         if (!this.compact || !this.drawCount) return;
@@ -871,7 +1065,7 @@ export class TerrainTopologyKernel {
      * `topoMs` = split/merge topology + pool reduce, `evalMs` = EvaluateLEB (df64 noise — the dominant
      * cost), `compactMs` = draw compaction.
      */
-    getGpuTimings(): { topoMs: number; evalMs: number; compactMs: number } {
+    getGpuTimings(): { topoMs: number; evalMs: number; compactMs: number; markStableMs: number; allocMs: number } {
         // lastSecAverage is NaN when a pass took no GPU samples in the last second (still camera →
         // the re-bake gate skipped all dispatches): guard it so the HUD reads 0.00, not NaN.
         const ms = (cs: ComputeShader | null): number => {
@@ -883,7 +1077,13 @@ export class TerrainTopologyKernel {
             ms(this.copy) + ms(this.bisect) + ms(this.propagateBisect) +
             ms(this.prepareSimplify) + ms(this.simplify) + ms(this.propagateSimplify) +
             ms(this.reduce) + ms(this.prepareIndirect);
-        return { topoMs, evalMs: ms(this.evalLeb), compactMs: ms(this.compact) };
+        return {
+            topoMs,
+            evalMs: ms(this.evalLeb),
+            compactMs: ms(this.compact),
+            markStableMs: ms(this.markStablePass),
+            allocMs: ms(this.markStableAllocPass)
+        };
     }
 
     /** Read the positions buffer back (capacity * 9 f32: c0.xyz,c1.xyz,c2.xyz per slot). */
@@ -930,6 +1130,10 @@ export class TerrainTopologyKernel {
         this.bisectorIndices?.dispose();
         this.drawCount?.dispose();
         this.indirectArgs?.dispose();
+        this.slotStateBuf?.dispose();
+        this.freedTilesBuf?.dispose();
+        this.bakeWorklistBuf?.dispose();
+
         this.poolBitfield.dispose();
         this.poolTree.dispose();
         this.heapID.dispose();

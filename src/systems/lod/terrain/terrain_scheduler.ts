@@ -27,6 +27,7 @@ import {
 } from './terrain_noise';
 import { DEFAULT_LOD, type TerrainLodParams } from './terrain_lod';
 import { TerrainSource } from './gpu/terrain_source';
+import { ATLAS_TILE_COUNT } from './gpu/terrain_tile_manager';
 import type { WebGPUEngine } from '@babylonjs/core';
 import type { ResolvedLighting } from '../../../game_world/stellar_system/planet_lighting';
 
@@ -85,6 +86,14 @@ export type TerrainAggregateStats = {
     terrainEvalMs: number;
     /** TERRAIN draw-compaction GPU time (ms), summed across planets. */
     terrainCompactMs: number;
+    /** Tile-cache mark_stable pass GPU time (ms), summed across planets. */
+    terrainMarkStableMs: number;
+    /** Tile-cache bake_tile pass GPU time (ms), summed across planets. */
+    terrainBakeMs: number;
+    /** Tile-cache mark_stable_alloc pass GPU time (ms), summed across planets. */
+    terrainAllocMs: number;
+    /** Atlas tiles currently allocated across planets (0..16384). */
+    terrainTilesUsed: number;
 };
 
 export class TerrainPlanet {
@@ -335,8 +344,8 @@ export class TerrainPlanet {
     }
 
     /** TERRAIN compute GPU timings (ms) for the perf HUD; zeros until the source is created. */
-    getGpuTimings(): { topoMs: number; evalMs: number; compactMs: number } {
-        return this.source?.getGpuTimings?.() ?? { topoMs: 0, evalMs: 0, compactMs: 0 };
+    getGpuTimings(): { topoMs: number; evalMs: number; compactMs: number; markStableMs: number; allocMs: number; bakeMs: number } {
+        return this.source?.getGpuTimings?.() ?? { topoMs: 0, evalMs: 0, compactMs: 0, markStableMs: 0, allocMs: 0, bakeMs: 0 };
     }
 
     /** Whether the planet mesh is currently drawn (set by the scheduler frustum cull). */
@@ -460,6 +469,10 @@ export class TerrainScheduler {
             terrainTopoMs: 0,
             terrainEvalMs: 0,
             terrainCompactMs: 0,
+            terrainMarkStableMs: 0,
+            terrainBakeMs: 0,
+            terrainAllocMs: 0,
+            terrainTilesUsed: 0,
         };
         for (const planet of this.planets) {
             const s = planet.getStats();
@@ -473,7 +486,13 @@ export class TerrainScheduler {
             agg.terrainTopoMs += t.topoMs;
             agg.terrainEvalMs += t.evalMs;
             agg.terrainCompactMs += t.compactMs;
+            agg.terrainMarkStableMs += t.markStableMs;
+            agg.terrainBakeMs += t.bakeMs;
+            agg.terrainAllocMs += t.allocMs;
         }
+        // tilesUsed ≈ min(live leaves, atlas capacity). The GPU free-list manages exact
+        // assignment; a precise count would require an async readback.
+        agg.terrainTilesUsed = Math.min(agg.leafCount, ATLAS_TILE_COUNT);
         return agg;
     }
 

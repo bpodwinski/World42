@@ -181,10 +181,46 @@ The original `atomicAdd(&tileAllocCounter[0], 1u) % ATLAS_TILE_COUNT` caused mas
 
 **perfMask bits** (bit 8 = 256 = force slow path, bypasses atlas for validation).
 
-**Next steps for atlas coverage**:
-- Reduce tile size 64→32 px → 65 536 tiles → ~86% coverage (biggest win, requires rebake/shader changes)
-- Implement GPU free-list reclaim (freed tiles recycled to new slots > 16384)
-- Measure actual watt savings in real browser (`npm run gpu:hud`, setPerfMask(256) vs setPerfMask(0))
-- Write `terrain_tile_manager.test.ts` (alloc/reclaim/overflow/tileOrigin)
+**Profiling results (2026-06-30, Playwright headed, Dev/Moon, ground alt ~20m, topology frozen)**:
+- Stats API extended: `markStableMs` + `bakeMs` + `tilesUsed` (= min(leafCount, ATLAS_TILE_COUNT)) added to HUD and `getTerrainStats()` chain (kernel → source → scheduler → setup_runtime.ts)
+- `terrain_tile_manager.test.ts` written: **15/15 pass** (alloc/reclaim/overflow/tileOrigin, LIFO invariant, capacity-guard)
+- `markStableMs` = **0.42 ms/frame** (always-on overhead — irreducible)
+- `bakeMs` ≈ **0.01 ms/frame** after convergence (~22s) — worklist empties once all eligible tiles are baked
+- `tilesUsed` = **16 384 / 16 384** (100% atlas capacity, covering 6.1% of live slots)
+- Fragment savings (draw pass): **NOT measurable from Playwright** — canvas gpuMs unavailable (timestamp-query disabled in virtual display). Requires `npm run gpu:hud` in focused browser.
+- Visual A/B (mask=0 vs mask=256): **visually identical** (topology frozen, same camera, 2-frame interval confirms parity)
+
+**Coverage ceiling (direct slot-ID mapping)**: 16 384 out of ~268 k live slots = 6.1%. The 93.9% remainder always took the full noise path.
+
+**§GPU FREE-LIST COVERAGE FIX (2026-06-30) — implemented, tests green.**
+
+Replaced direct slot-ID mapping with a **GPU atomic LIFO free-list** to give ~100% atlas coverage for stable visible slots.
+
+**Design**: `freedTiles` buffer (binding 25, persistent) reused as the GPU free-list:
+- `freedTiles[0]` = count of free tiles (atomic u32, starts at ATLAS_TILE_COUNT)
+- `freedTiles[1..ATLAS_TILE_COUNT+1]` = tile indices (initialized once in `initTilePool()`)
+- Push (dead slot reclaim): `atomicAdd(&freedTiles[0], 1u)` → unique write position, no race.
+- Pop (new slot alloc): `atomicSub(&freedTiles[0], 1u)` → unique read position. Bounds check `oldCount == 0 || oldCount > ATLAS_TILE_COUNT` handles u32 underflow race and undoes the decrement.
+
+**Two-pass structure** (barrier between Babylon.js dispatch calls):
+- Pass 1 (`terrain_topo_mark_stable.compute.wgsl`): dead slots push tile; new slots set stableFrames=1 only; live-stable slots increment stableFrames + bakeWorklist.
+- Pass 2 (`terrain_topo_mark_stable_alloc.compute.wgsl`, NEW): all alive-no-tile slots pop from free-list and get assigned tile + DIRTY bit. Covers newly alive slots from frame 1 AND any that missed a tile in earlier frames (e.g., pool briefly exhausted).
+
+**Files changed**:
+- `terrain_topo_mark_stable.compute.wgsl` — removed direct ID mapping; new slots get stableFrames=1 only; dead-slot push has bounds guard (`if (writePos < ATLAS_TILE_COUNT)`); `freedTiles` no longer zeroed each frame.
+- `terrain_topo_mark_stable_alloc.compute.wgsl` (NEW) — pop + assign with underflow guard.
+- `terrain_topology_kernel.ts` — `markStableAllocPass` (new field + ComputeShader), `initTilePool()`, updated `runMarkStable()` (no longer zeros freedTilesBuf; dispatches both passes), `getGpuTimings()` now includes `allocMs`, `whenReady()` includes the new pass.
+- `terrain_source.ts` — removed `TerrainTileManager` import, `tileManager` field, `freedTilesReadbackMs` field, and the ~20-line async CPU readback block (GPU now manages tiles entirely). `getGpuTimings()` return type includes `allocMs`.
+- `terrain_geometry_source.ts` — interface `getGpuTimings?()` type includes `allocMs`.
+- `terrain_scheduler.ts` — `TerrainAggregateStats` includes `terrainAllocMs`; `TerrainPlanet.getGpuTimings()` fallback includes `allocMs: 0`; `getStats()` aggregates `terrainAllocMs`.
+- `setup_runtime.ts` — HUD line: `atlas tiles N/16384  mark Xms  alloc Xms  bake Xms`.
+
+**Coverage**: steady-state = min(live stable slots, 16 384) ≈ ~100% of visible ground-level triangles (live visible leaves typically < 16 384 while standing on a planet).
+
+**Tests**: 164/164 pass (22 files), 1 skipped. `terrain_tile_manager.test.ts` still green (CPU class kept for reference).
+
+**Next steps**:
+- Measure actual fragment savings with `npm run gpu:hud` + focused Chrome: `setPerfMask(256)` vs `setPerfMask(0)` at ground altitude, watch GPU watts + `gpuMs` canvas.
+- Verify no tile bleeding or seam artifacts in real browser (tile transitions near splits/merges).
 
 **§GRAZING-SUN GRAIN — diffuse normal AA (2026-06-26, follow-up to specular fix).** After the toward-Sun specular fix, user: "non c'est pas réglé, regarde soleil RASANT". A/B with perfMask(16): at grazing the grain PERSISTS with specular off -> it's the DIFFUSE term: at low sun (~1/sin(elev) contrast) the high-freq per-pixel relief normal makes ndl flip lit/dark -> grain. FIX: diffuse normal AA in ocbt_render_material.ts fragment — blend nLocal toward the smooth landform normal (nSlope) by `1/(1+CBT_NORMAL_AA*nVar)` where nVar = dot(dpdx(nLocal),..)+dot(dpdy(nLocal),..) (screen-space normal variance). CBT_NORMAL_AA=12. Targets sub-pixel FOREGROUND micro-relief; preserves macro relief (low variance). TRIED a FOOTPRINT-based variant (fade by length(dpdx(rel)) — pixel surface area) but it made the HORIZON WORSE: over-flattening the far field exposed GEOMETRIC silhouette sparkle (sub-pixel terrain edges vs black sky) -> REVERTED to variance-based. VERIFIED at realistic moderate grazing (sun ~5deg, alt 1.5km): clean craters/relief, no grain, 0 errors. HONEST LIMITATION: at EXTREME grazing (~1.4deg) residual grain remains and is largely GEOMETRIC (terrain silhouette sub-pixel) — a normal-AA cannot fix it; needs TAA or supersampling (MSAA 4x insufficient for shading/silhouette aliasing). Deferred as a separate task. BUILD NOTE: during this work the dev server was briefly blocked by the USER's in-progress per-planet-lighting refactor (planet_lighting.ts + stellar_catalog_loader.ts resolveLighting signature: called with a string planetKey vs PlanetLightingParams) -> rspack "Reload prevented"; user fixed it, build green. The user has been migrating the baked lighting consts (CBT_SPEC_AA/SPEC_MAX/ROUGH_*/F0/ground.*) into a per-planet ResolvedLighting struct (DEFAULT_LIGHTING) in planet_lighting.ts; CBT_NORMAL_AA still a plain const (could migrate later). Tunables: CBT_NORMAL_AA (higher=smoother), CBT_ROUGH_LO, CBT_SPEC_AA/MAX. Uncommitted: ocbt_render_material.ts.

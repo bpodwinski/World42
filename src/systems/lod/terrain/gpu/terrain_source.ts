@@ -14,12 +14,33 @@
  *
  * WebGPU only.
  */
-import { Matrix, Vector3, type Mesh, type Scene, type TransformNode, type WebGPUEngine } from '@babylonjs/core';
+import {
+    ComputeShader,
+    Constants,
+    Matrix,
+    RawTexture,
+    Texture,
+    UniformBuffer,
+    Vector3,
+    type Mesh,
+    type Scene,
+    type TransformNode,
+    type WebGPUEngine
+} from '@babylonjs/core';
 import type { TerrainFrameParams, TerrainGeometryListener, TerrainGeometrySource } from '../terrain_geometry_source';
 import { DEFAULT_CRATERS, type CraterParams, type NoiseParams } from '../terrain_noise';
 import type { ResolvedLighting } from '../../../../game_world/stellar_system/planet_lighting';
 import { TerrainTopologyKernel } from './terrain_topology_kernel';
-import { buildTerrainRenderMaterial, createTerrainTemplateMesh, type TerrainRenderMaterial } from './terrain_render_material';
+import {
+    bakedHeader,
+    buildTerrainRenderMaterial,
+    createTerrainTemplateMesh,
+    type TerrainRenderMaterial
+} from './terrain_render_material';
+import { engineWgslPreamble, slotStateWgslPreamble, MAX_BAKE_PER_FRAME, COARSE_ATLAS_SIZE } from './terrain_engine_buffers';
+import terrainNoiseWgsl from '../../../../assets/shaders/terrain/gpu/terrain_noise.wgsl';
+import terrainBakeTileWgsl from '../../../../assets/shaders/terrain/engine/terrain_bake_tile.compute.wgsl';
+import terrainReduceCoarseWgsl from '../../../../assets/shaders/terrain/engine/terrain_reduce_coarse.compute.wgsl';
 
 export type TerrainSourceOptions = {
     key: string;
@@ -65,6 +86,19 @@ export class TerrainSource implements TerrainGeometrySource {
      *  frustum no longer needs it: the df64 eval now decodes TERRAIN-displaced positions, so
      *  the frustum test is exact (no smooth-sphere vs displaced mismatch). */
     private readonly heightMargin: number;
+    /** Tile-cache normal atlas (8192×8192 rgba16float, storage + sampled). */
+    private readonly normalAtlas: RawTexture | null = null;
+    /** Tile-cache albedo atlas (8192×8192 rgba8unorm, storage + sampled). */
+    private readonly albedoAtlas: RawTexture | null = null;
+    /** Coarse-mip atlases (1024×1024, 8×8 per tile) — ×8 downsample of mip0 for distance. */
+    private readonly coarseNormalAtlas: RawTexture | null = null;
+    private readonly coarseAlbedoAtlas: RawTexture | null = null;
+    /** Bake-tile compute shader (metric mode only). */
+    private readonly bakePass: ComputeShader | null = null;
+    /** Coarse-mip reduce compute shader (metric mode only). */
+    private readonly reducePass: ComputeShader | null = null;
+    /** Params UBO for the bake shader: .x = camDistKm, .y = radiusKm. */
+    private readonly bakeParamsUbo: UniformBuffer | null = null;
     private frame = 0;
     /** Frozen camera position (PLANET-LOCAL) the live POSITIONS buffer was last baked against.
      *  The render carries the per-frame residual (anchor - live) in uCamDelta, so the topology +
@@ -170,6 +204,113 @@ export class TerrainSource implements TerrainGeometrySource {
         const craters = opts.craters ?? DEFAULT_CRATERS;
         this.kernel = new TerrainTopologyKernel(engine, opts.capacity, 'metric', true, opts.noise, craters);
 
+        // Tile-cache atlas textures (metric mode). Normal atlas: rgba16float (XY in RG, Z
+        // reconstructed in fragment). Albedo atlas: rgba8unorm (RGB albedo + A ray brightness).
+        // Both need TEXTURE_CREATIONFLAG_STORAGE so the bake compute can write to them.
+        const atlasSize = 8192;
+        const self = this as unknown as {
+            normalAtlas: RawTexture; albedoAtlas: RawTexture;
+            coarseNormalAtlas: RawTexture; coarseAlbedoAtlas: RawTexture;
+            bakePass: ComputeShader; reducePass: ComputeShader; bakeParamsUbo: UniformBuffer;
+        };
+        self.normalAtlas = new RawTexture(
+            null, atlasSize, atlasSize, Constants.TEXTUREFORMAT_RGBA,
+            engine, false, false, Texture.NEAREST_NEAREST_MIPNEAREST,
+            Constants.TEXTURETYPE_HALF_FLOAT, Constants.TEXTURE_CREATIONFLAG_STORAGE
+        );
+        self.albedoAtlas = new RawTexture(
+            null, atlasSize, atlasSize, Constants.TEXTUREFORMAT_RGBA,
+            engine, false, false, Texture.NEAREST_NEAREST_MIPNEAREST,
+            Constants.TEXTURETYPE_UNSIGNED_BYTE, Constants.TEXTURE_CREATIONFLAG_STORAGE
+        );
+        // Coarse mip atlas: an 8×8 downsample of every 64×64 tile (factor 8). The reduce pass
+        // writes it after the bake; the fragment blends it with mip0 by screen footprint so the
+        // cache stays grain-free at distance. Same nearest sampling + storage flag as mip0.
+        self.coarseNormalAtlas = new RawTexture(
+            null, COARSE_ATLAS_SIZE, COARSE_ATLAS_SIZE, Constants.TEXTUREFORMAT_RGBA,
+            engine, false, false, Texture.NEAREST_NEAREST_MIPNEAREST,
+            Constants.TEXTURETYPE_HALF_FLOAT, Constants.TEXTURE_CREATIONFLAG_STORAGE
+        );
+        self.coarseAlbedoAtlas = new RawTexture(
+            null, COARSE_ATLAS_SIZE, COARSE_ATLAS_SIZE, Constants.TEXTUREFORMAT_RGBA,
+            engine, false, false, Texture.NEAREST_NEAREST_MIPNEAREST,
+            Constants.TEXTURETYPE_UNSIGNED_BYTE, Constants.TEXTURE_CREATIONFLAG_STORAGE
+        );
+
+        // Bake-tile UBO: vec4 { camDistKm, radiusKm, 0, 0 }. Updated each frame before dispatch.
+        self.bakeParamsUbo = new UniformBuffer(engine, undefined, true, 'terrain_bake_params');
+        self.bakeParamsUbo.addUniform('distParams', 4);
+        self.bakeParamsUbo.updateFloat4('distParams', 0, opts.radiusSim, 0, 0);
+        self.bakeParamsUbo.update();
+
+        // Bake-tile compute shader: evaluates terrain noise once per stable slot and writes
+        // normal+albedo to the atlas tiles. Composed from the same preambles as eval_leb.
+        const bakeWgsl = [
+            engineWgslPreamble(opts.capacity),
+            slotStateWgslPreamble(),
+            bakedHeader({
+                radius: opts.radiusSim,
+                noise: opts.noise,
+                craters,
+                lighting: opts.lighting
+            }),
+            terrainNoiseWgsl,
+            terrainBakeTileWgsl
+        ].join('\n');
+        self.bakePass = new ComputeShader(
+            `terrain_bake_tile_${opts.key}`,
+            engine,
+            { computeSource: bakeWgsl },
+            {
+                bindingsMapping: {
+                    bakeParams:   { group: 0, binding: 17 },
+                    positions:    { group: 0, binding: 19 },
+                    terrainPerm:  { group: 0, binding: 21 },
+                    slotState:    { group: 0, binding: 22 },
+                    normalAtlas:  { group: 0, binding: 23 },
+                    albedoAtlas:  { group: 0, binding: 24 },
+                    bakeWorklist: { group: 0, binding: 26 }
+                }
+            }
+        );
+        self.bakePass.setUniformBuffer('bakeParams',   self.bakeParamsUbo);
+        self.bakePass.setStorageBuffer('positions',    this.kernel.positionsBuffer);
+        self.bakePass.setStorageBuffer('terrainPerm',  this.kernel.permBuffer);
+        self.bakePass.setStorageBuffer('slotState',    this.kernel.slotStateBuffer);
+        self.bakePass.setStorageTexture('normalAtlas', self.normalAtlas);
+        self.bakePass.setStorageTexture('albedoAtlas', self.albedoAtlas);
+        self.bakePass.setStorageBuffer('bakeWorklist', this.kernel.bakeWorklistBuffer);
+
+        // Reduce pass: downsample each re-baked 64×64 tile to its 8×8 coarse-mip texel.
+        // Reads the mip0 atlases (sampled) the bake just wrote and writes the coarse atlases
+        // (storage). Same worklist as the bake, so coarse stays in sync with mip0 per tile.
+        const reduceWgsl = [
+            engineWgslPreamble(opts.capacity),
+            slotStateWgslPreamble(),
+            terrainReduceCoarseWgsl
+        ].join('\n');
+        self.reducePass = new ComputeShader(
+            `terrain_reduce_coarse_${opts.key}`,
+            engine,
+            { computeSource: reduceWgsl },
+            {
+                bindingsMapping: {
+                    slotState:    { group: 0, binding: 22 },
+                    srcNormal:    { group: 0, binding: 23 },
+                    srcAlbedo:    { group: 0, binding: 24 },
+                    bakeWorklist: { group: 0, binding: 26 },
+                    coarseNormal: { group: 0, binding: 27 },
+                    coarseAlbedo: { group: 0, binding: 28 }
+                }
+            }
+        );
+        self.reducePass.setStorageBuffer('slotState',    this.kernel.slotStateBuffer);
+        self.reducePass.setTexture('srcNormal',          self.normalAtlas, false);
+        self.reducePass.setTexture('srcAlbedo',          self.albedoAtlas, false);
+        self.reducePass.setStorageBuffer('bakeWorklist', this.kernel.bakeWorklistBuffer);
+        self.reducePass.setStorageTexture('coarseNormal', self.coarseNormalAtlas);
+        self.reducePass.setStorageTexture('coarseAlbedo', self.coarseAlbedoAtlas);
+
         this.render = buildTerrainRenderMaterial(
             scene,
             opts.key,
@@ -192,7 +333,12 @@ export class TerrainSource implements TerrainGeometrySource {
             },
             this.kernel.heapBuffer,
             this.kernel.positionsBuffer,
-            this.kernel.indicesBuffer
+            this.kernel.indicesBuffer,
+            this.kernel.slotStateBuffer,
+            this.normalAtlas,
+            this.albedoAtlas,
+            this.coarseNormalAtlas,
+            this.coarseAlbedoAtlas
         );
 
         this.mesh = createTerrainTemplateMesh(scene, opts.key);
@@ -471,6 +617,22 @@ export class TerrainSource implements TerrainGeometrySource {
             if (this.convergeFrames > 0) this.convergeFrames--;
         }
 
+        // Tile-cache passes run every frame (not just on rebake) so slots accumulate stability
+        // while the camera is still and tiles bake progressively. runMarkStable resets its own
+        // counters at the start, so running it on a no-topology frame is safe and cheap.
+        this.kernel.runMarkStable();
+        // Bake-tile pass: evaluates noise once per stable slot in the worklist and writes
+        // normal+albedo to the atlas. Dispatch is always (8, 8, MAX_BAKE_PER_FRAME) —
+        // threads where wgid.z >= bakeWorklist[0] exit immediately (free when worklist empty).
+        if (this.bakePass && this.bakeParamsUbo) {
+            this.bakeParamsUbo.updateFloat4('distParams', altKm, this.radius, 0, 0);
+            this.bakeParamsUbo.update();
+            this.bakePass.dispatch(8, 8, MAX_BAKE_PER_FRAME);
+            // Coarse-mip reduce: downsample the just-baked tiles (same worklist) to the 8×8
+            // coarse atlas. One workgroup (8×8 threads) per re-baked tile; empty worklist
+            // slots exit immediately (free). Runs after the bake so it reads fresh mip0.
+            if (this.reducePass) this.reducePass.dispatch(1, 1, MAX_BAKE_PER_FRAME);
+        }
         // lightDirection convention: planetCenter - starPos (star→planet), shader negates to get L toward star.
         if (this.starPos) {
             this.tmpDir.copyFrom(frame.planetCenterWorldDouble).subtractInPlace(this.starPos);
@@ -551,9 +713,12 @@ export class TerrainSource implements TerrainGeometrySource {
         this.mesh.setEnabled(on);
     }
 
-    /** TERRAIN compute GPU timings (ms, last-second average) for the perf HUD. Delegates to the kernel. */
-    getGpuTimings(): { topoMs: number; evalMs: number; compactMs: number } {
-        return this.kernel.getGpuTimings();
+    /** TERRAIN compute GPU timings (ms, last-second average) for the perf HUD. */
+    getGpuTimings(): { topoMs: number; evalMs: number; compactMs: number; markStableMs: number; allocMs: number; bakeMs: number } {
+        const kernelT = this.kernel.getGpuTimings();
+        const ns = this.bakePass?.gpuTimeInFrame?.counter.lastSecAverage ?? 0;
+        const bakeMs = Number.isFinite(ns) ? ns / 1e6 : 0;
+        return { ...kernelT, bakeMs };
     }
 
     setWireframe(on: boolean): void {
@@ -571,5 +736,10 @@ export class TerrainSource implements TerrainGeometrySource {
         this.mesh.dispose();
         this.render.dispose();
         this.kernel.dispose();
+        this.normalAtlas?.dispose();
+        this.albedoAtlas?.dispose();
+        this.coarseNormalAtlas?.dispose();
+        this.coarseAlbedoAtlas?.dispose();
+        this.bakeParamsUbo?.dispose();
     }
 }

@@ -197,6 +197,7 @@ export function setupRuntime({
             // TERRAIN compute GPU time (the graph's compute task), split by bucket. 0 when the re-bake
             // gate is disengaged (still camera) or the timestamp-query feature is unavailable.
             `terrain topo ${f(s.terrain.terrainTopoMs, 2)} eval ${f(s.terrain.terrainEvalMs, 2)} compact ${f(s.terrain.terrainCompactMs, 2)}ms`,
+            `atlas tiles ${s.terrain.terrainTilesUsed}/16384  mark ${f(s.terrain.terrainMarkStableMs, 2)}ms  alloc ${f(s.terrain.terrainAllocMs, 2)}ms  bake ${f(s.terrain.terrainBakeMs, 2)}ms`,
         ]
             .filter(Boolean)
             .join('\n');

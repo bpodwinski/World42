@@ -16,6 +16,8 @@ metadata:
 
 **Playwright virtual display cap (32Hz):** even in headed mode the RAF is capped at 31.25ms — FPS measurements are meaningless. Watt/GPU% measurements require a real browser opened by the user with `npm run gpu:hud`.
 
+**Visual validation DOES work in headed Playwright** (despite the timing caps): `mcp__playwright__browser_take_screenshot` returns the actual rendered WebGPU terrain — usable for A/B image comparison. Position the camera with `__world42Perf.setCameraDoublePos` + `lookAtDoublePos` (+ `getPlanets` for centers/radii), `setPerfMask(0)` vs `setPerfMask(256)`, and pixel-diff PNGs via .NET `System.Drawing` LockBits. Freeze topology first or a converging LOD inflates the same-mode diff floor from ~0.6% to ~2.6%. (Earlier "blank screen" claims were wrong for this environment.) See [[tile-cache-view-dependence]].
+
 **GRAIN PROBE:** `npm run grain` (`scripts/grain_probe.mjs`) — objectively measures grazing-sun normal aliasing: poses a deterministic raking-light nadir view (sun 5°), FREEZES topology, compares native vs 16×-SSAA (hwScale 0.25). Metric = luminance RMSE + Laplacian HF energy. KEY FINDING: grazing-SUN grain is intrinsic to per-pixel normal sampling under NdL amplification; NO static shading param fixes it cleanly — the clean fixes are TEMPORAL (TAA) or mean-preserving normal AA.
 
 Instrumentation counters (`frameMs`, `cbt.classifyMs`, `cbt.rebuildMs`, gpuMs) are DORMANT until you call `__world42Perf.enableCapture(true)` first — without it they read 0.

@@ -21,6 +21,7 @@ import {
     VertexData,
     Vector3,
     Constants,
+    type BaseTexture,
     type Scene,
     type StorageBuffer as StorageBufferType,
     type WebGPUEngine
@@ -33,6 +34,7 @@ import {
     type NoiseParams
 } from '../terrain_noise';
 import { DEFAULT_LIGHTING, type ResolvedLighting } from '../../../../game_world/stellar_system/planet_lighting';
+import { slotStateWgslPreamble } from './terrain_engine_buffers';
 import terrainNoiseWgsl from '../../../../assets/shaders/terrain/gpu/terrain_noise.wgsl';
 import terrainF64Wgsl from '../../../../assets/shaders/terrain/engine/terrain_f64.wgsl';
 import terrainNoiseDf64Wgsl from '../../../../assets/shaders/terrain/engine/terrain_noise_df64.wgsl';
@@ -57,7 +59,7 @@ export type TerrainRenderOptions = {
     lighting?: ResolvedLighting;
 };
 
-function bakedHeader(opts: TerrainRenderOptions): string {
+export function bakedHeader(opts: TerrainRenderOptions): string {
     const n = opts.noise;
     const L = opts.lighting ?? DEFAULT_LIGHTING;
     const g = L.ground;
@@ -88,6 +90,14 @@ function bakedHeader(opts: TerrainRenderOptions): string {
         `const TERRAIN_GROUND_STRENGTH : f32 = ${f(g.strength)};`,
         `const TERRAIN_GROUND_DETAIL_OCTAVES : i32 = ${Math.max(0, Math.floor(g.octaves))};`,
         `const TERRAIN_GROUND_BASE_FREQ : f32 = ${f(opts.radius * 1000)};`,
+        // Atlas tile-cache magnification gate (atlas texels per screen pixel). A tile is baked
+        // at its own texel footprint (~edge/64); when the screen pixel footprint is FINER than
+        // that (texPerPx < 1, the magnified/close regime) the live per-pixel path resolves more
+        // relief than the tile holds, so the cache reads as flat facets. Below this the fragment
+        // uses the live path; at texPerPx == 1 the tile is 1:1 (same footprint) so the handoff is
+        // seamless. Above it the coarse-mip blend handles minification. (Replaces the old minif
+        // gate, which had the comparison inverted and used the atlas exactly where it under-resolves.)
+        `const TERRAIN_TILE_MAG_GATE : f32 = ${f(1.0)};`,
         // Procedural albedo splatting driven by SLOPE + ALTITUDE (physically meaningful, not
         // random color blotches): REGOLITH on flats, darker greyer ROCK on slopes, HIGHLAND
         // tint by altitude. Slope is read from the SMOOTH landform normal (TERRAIN_SLOPE_DIST
@@ -185,6 +195,10 @@ function vertexSource(opts: TerrainRenderOptions): string {
         // Macro fbm gradient for the SMOOTH slope/AO normal, evaluated PER VERTEX (was a 2nd per-pixel
         // 8-octave fbm in terrainNoiseNormalSlope ~21W). Read back in the fragment via terrainNormalFromGrad.
         'varying vSlopeFbmGrad : vec3<f32>;',
+        // Tile-cache fast path: per-corner barycentric coord (1,0,0)/(0,1,0)/(0,0,1) for atlas UV
+        // reconstruction; slot index so the fragment can look up the per-slot slotState word.
+        'varying vBary    : vec3<f32>;',
+        'varying vSlotIdx : f32;',
         'attribute position : vec3<f32>;',
         '@vertex',
         'fn main(input : VertexInputs) -> FragmentInputs {',
@@ -203,6 +217,8 @@ function vertexSource(opts: TerrainRenderOptions): string {
         '        vertexOutputs.vCraterGrad = vec3<f32>(0.0);',
         '        vertexOutputs.vCraterGradSlope = vec3<f32>(0.0);',
         '        vertexOutputs.vSlopeFbmGrad = vec3<f32>(0.0);',
+        '        vertexOutputs.vBary    = vec3<f32>(0.0);',
+        '        vertexOutputs.vSlotIdx = 0.0;',
         '        return vertexOutputs;',
         '    }',
         '    let vi = vertexInputs.vertexIndex;',
@@ -246,6 +262,10 @@ function vertexSource(opts: TerrainRenderOptions): string {
         '    vertexOutputs.vLevel = f32(depth) - 3.0;',
         '    vertexOutputs.vFragmentDepth = 1.0 + vertexOutputs.position.w;',
         '    vertexOutputs.position.z = log2(max(0.000001, vertexOutputs.vFragmentDepth)) * uniforms.logarithmicDepthConstant;',
+        '    // Barycentric lookup table: corner vi%3 → (1,0,0), (0,1,0), (0,0,1).',
+        '    let baryLut = array<vec3<f32>, 3>(vec3<f32>(1.0,0.0,0.0), vec3<f32>(0.0,1.0,0.0), vec3<f32>(0.0,0.0,1.0));',
+        '    vertexOutputs.vBary    = baryLut[vi % 3u];',
+        '    vertexOutputs.vSlotIdx = f32(slot);',
         '    return vertexOutputs;',
         '}'
     ].join('\n');
@@ -253,8 +273,22 @@ function vertexSource(opts: TerrainRenderOptions): string {
 
 function fragmentSource(opts: TerrainRenderOptions): string {
     return [
+        slotStateWgslPreamble(),
         bakedHeader(opts),
-        'var<storage, read> terrainPerm : array<u32>;',
+        'var<storage, read> terrainPerm      : array<u32>;',
+        'var<storage, read> terrainSlotState : array<u32>;',
+        // Tile-cache atlas textures (sampled in the fast path). Declared with explicit samplers
+        // so BabylonJS WebGPU auto-binds the sampler state from the texture's filter settings.
+        'var uNormalAtlas        : texture_2d<f32>;',
+        'var uNormalAtlasSampler : sampler;',
+        'var uAlbedoAtlas        : texture_2d<f32>;',
+        'var uAlbedoAtlasSampler : sampler;',
+        // Coarse-mip atlases (8×8 per tile = ×8 downsample). Blended with mip0 by screen
+        // footprint so the cache stays grain-free at distance (replaces the old minif gate).
+        'var uCoarseNormal        : texture_2d<f32>;',
+        'var uCoarseNormalSampler : sampler;',
+        'var uCoarseAlbedo        : texture_2d<f32>;',
+        'var uCoarseAlbedoSampler : sampler;',
         terrainNoiseWgsl,
         // df64 domain noise (cm-precise ground detail). Order matters: terrain_noise.wgsl (terrainCorner/
         // terrainPermAt/TERRAIN_MAX_*) and the baked TERRAIN_* constants must precede these, then df64 prims,
@@ -300,6 +334,9 @@ function fragmentSource(opts: TerrainRenderOptions): string {
         'varying vCraterGrad : vec3<f32>;',
         'varying vCraterGradSlope : vec3<f32>;',
         'varying vSlopeFbmGrad : vec3<f32>;',
+        // Tile-cache fast path: per-corner barycentric coord for atlas UV; per-fragment slot index.
+        'varying vBary    : vec3<f32>;',
+        'varying vSlotIdx : f32;',
         // Procedural world-anchored albedo (no texture samplers). Driven by slope + altitude:
         // regolith on flats, rock on slopes, highland tint up high. `slope01` = 1 - dot(landform
         // normal, up) (0 flat) from the SMOOTH normal so rock follows landforms, not micro-bumps.
@@ -332,6 +369,11 @@ function fragmentSource(opts: TerrainRenderOptions): string {
         '        default: { return vec3<f32>(1.00, 0.00, 1.00); }',
         '    }',
         '}',
+        // perfMask bit 7 (128): skip the 12 detail octaves → isolates macro vs detail cost.
+        // Bit-identical to terrainNoiseNormalAtShared when bit 7 is clear.
+        'fn terrainFbmGradWithMask(p: vec3<f32>, camDistKm: f32, radius: f32, fp: f32, macroOnly: bool) -> vec3<f32> {',
+        '    return terrainFbmGradAt_core(p, camDistKm, radius, fp, macroOnly || (uniforms.uPerfMask & 128) != 0);',
+        '}',
         '@fragment',
         'fn main(input : FragmentInputs) -> FragmentOutputs {',
         '    if (uniforms.uDebugLod != 0) {',
@@ -361,38 +403,84 @@ function fragmentSource(opts: TerrainRenderOptions): string {
         '    let craterOff = (uniforms.uPerfMask & 64) != 0;',
         '    let craterGrad = select(fragmentInputs.vCraterGrad, vec3<f32>(0.0), craterOff);',
         '    let craterGradSlope = select(fragmentInputs.vCraterGradSlope, vec3<f32>(0.0), craterOff);',
-        '    var nLocal = terrainNoiseNormalAtShared(dir, TERRAIN_RADIUS, camDistKm, fpKm, craterGrad);',
-        '    // Landform slope for material splatting: a SMOOTH normal at a medium camera distance',
-        '    // (TERRAIN_SLOPE_DIST) so the cm micro-relief is faded out and rock follows 30m+ hills /',
-        '    // crater walls instead of speckling every per-pixel bump.',
+        '    // Landform slope/AO normal — per-vertex macro fbm, always needed for specular roughness + AO.',
         '    var nSlope = dir;',
-        '    // Slope/AO normal from the PER-VERTEX macro fbm gradient + crater gradient (interpolated):',
-        '    // only the tangent projection runs per pixel now (the 2nd per-pixel macro fbm is gone).',
         '    if ((uniforms.uPerfMask & 1) == 0) { nSlope = terrainNormalFromGrad(dir, TERRAIN_RADIUS, fragmentInputs.vSlopeFbmGrad + craterGradSlope); }',
         '    let slope01 = clamp(1.0 - dot(nSlope, dir), 0.0, 1.0);',
-        '    // Near-ground WORLD-ANCHORED micro-relief. Reconstruct the surface direction in',
-        '    // df64: world = uCamAnchor + rel (the eval subtracted the SAME f32 uCamAnchor, so',
-        '    // its rounding error cancels and world == the true surface point to ~um). normalize',
-        '    // is radial-invariant, so dirD is the smooth-sphere unit dir the noise is defined on,',
-        '    // frame-invariant (no swim) and cm-precise (no f32 banding). Gated to the near band',
-        '    // for cost; outside it the cheaper f32 macro normal is used unchanged.',
-        '    let dFade = 1.0 - smoothstep(TERRAIN_GROUND_ON_KM, TERRAIN_GROUND_OFF_KM, camDistKm);',
-        '    if (dFade > 0.0 && (uniforms.uPerfMask & 2) == 0) {',
-        '        let wx = df64_add(df64_from_f32(uniforms.uCamAnchor.x), df64_from_f32(rel.x));',
-        '        let wy = df64_add(df64_from_f32(uniforms.uCamAnchor.y), df64_from_f32(rel.y));',
-        '        let wz = df64_add(df64_from_f32(uniforms.uCamAnchor.z), df64_from_f32(rel.z));',
-        '        let len2 = df64_add(df64_add(df64_mul(wx, wx), df64_mul(wy, wy)), df64_mul(wz, wz));',
-        '        let inv = df64_invsqrt(len2);',
-        '        let dxD = df64_mul(wx, inv);',
-        '        let dyD = df64_mul(wy, inv);',
-        '        let dzD = df64_mul(wz, inv);',
-        '        // Macro+detail normal in df64 (kills the ~1-30 m f32 banding), blended in by the fade.',
-        '        let nDf = terrainNoiseNormalAtShared_df64(dxD, dyD, dzD, TERRAIN_RADIUS, camDistKm, craterGrad);',
-        '        nLocal = normalize(mix(nLocal, nDf, dFade));',
-        '        // Extra high-frequency micro-relief octaves (df64 high freq -> no banding).',
-        '        let dgrad = terrainGroundDetailGrad_df64(dxD, dyD, dzD, TERRAIN_GROUND_BASE_FREQ, TERRAIN_GROUND_DETAIL_OCTAVES);',
-        '        let tg = dgrad - dot(dgrad, nLocal) * nLocal;',
-        '        nLocal = normalize(nLocal - (TERRAIN_GROUND_STRENGTH * dFade) * tg);',
+        '    // Tile-cache fast path: if this slot has a baked atlas tile, sample normal+albedo (2 fetches)',
+        '    // instead of 24+ simplex evaluations per pixel. perfMask bit 8 (256) forces the full noise',
+        '    // path for visual A/B comparison (mask=0 → atlas, mask=256 → full noise).',
+        '    let tsc_slotIdx = u32(fragmentInputs.vSlotIdx);',
+        '    let tsc_sw      = terrainSlotState[tsc_slotIdx];',
+        '    let tsc_hasTile = (tsc_sw & SLOT_HAS_TILE_BIT) != 0u;',
+        '    let tsc_tileIdx = (tsc_sw >> SLOT_TILE_SHIFT) & SLOT_TILE_MASK;',
+        '    var nLocal : vec3<f32>;',
+        '    var albedo : vec3<f32>;',
+        '    var rays   : f32 = 0.0;',
+        '    // df64 ground-detail weight (cm-scale relief that fades in below GROUND_OFF_KM).',
+        '    // Baked tiles are evaluated in f32 dir space and CANNOT carry df64 detail, so the',
+        '    // fast path is only faithful where dFade == 0. Below that we fall through to the',
+        '    // live path; since dFade -> 0 at the threshold, the handoff is seamless (and it is',
+        '    // the SAME criterion live neighbours use, so no baked/live patchwork forms).',
+        '    let tsc_dFade = 1.0 - smoothstep(TERRAIN_GROUND_ON_KM, TERRAIN_GROUND_OFF_KM, camDistKm);',
+        '    // Coarse-mip LOD blend (replaces the old minification gate). mip0 = the 64x64 tile;',
+        '    // coarse = an 8x8 downsample (x8) baked by the reduce pass. vBary.yz spans the tile',
+        '    // [0,1]; its screen derivative * 63 = atlas texels per pixel. As the tile minifies',
+        '    // past 1 texel/px we blend toward the coarse level (footprint-matched), which kills',
+        '    // the inter-tile aliasing a mip-less point sample produced at distance — so the cache',
+        '    // now stays active (and grain-free) far away instead of falling back to the live path.',
+        '    // Derivatives are read in uniform control flow (before the branch) so they are defined.',
+        '    let tsc_texPerPx = max(length(dpdx(fragmentInputs.vBary.yz)), length(dpdy(fragmentInputs.vBary.yz))) * 63.0;',
+        '    // Use the cache only where the tile resolves at least as fine as the screen pixel',
+        '    // (texPerPx >= MAG_GATE). Below that the tile is magnified and under-resolves vs the',
+        '    // live per-pixel noise -> flat facets, so fall through to live. dFade gates df64 <150m.',
+        '    if (tsc_hasTile && (uniforms.uPerfMask & 256) == 0 && tsc_dFade <= 0.0 && tsc_texPerPx >= TERRAIN_TILE_MAG_GATE) {',
+        '        let tileRow = tsc_tileIdx / ATLAS_TILES_PER_ROW;',
+        '        let tileCol = tsc_tileIdx % ATLAS_TILES_PER_ROW;',
+        '        // mip0 UV: 64x64 tiles packed in the 8192 atlas.',
+        '        let atlasUv = vec2<f32>(',
+        '            (f32(tileCol * ATLAS_TILE_SIZE) + fragmentInputs.vBary.y * 63.0 + 0.5) / 8192.0,',
+        '            (f32(tileRow * ATLAS_TILE_SIZE) + fragmentInputs.vBary.z * 63.0 + 0.5) / 8192.0',
+        '        );',
+        '        // coarse UV: 8x8 tiles packed in the 1024 atlas (same tile layout).',
+        '        let coarseDim = f32(COARSE_TILES_PER_ROW * COARSE_TILE_SIZE);',
+        '        let coarseUv = vec2<f32>(',
+        '            (f32(tileCol * COARSE_TILE_SIZE) + fragmentInputs.vBary.y * 7.0 + 0.5) / coarseDim,',
+        '            (f32(tileRow * COARSE_TILE_SIZE) + fragmentInputs.vBary.z * 7.0 + 0.5) / coarseDim',
+        '        );',
+        '        // Blend weight: 0 at <=1 texel/px (pure mip0), 1 at >=8 texel/px (pure coarse). log2(8)=3.',
+        '        let lodT = clamp(log2(max(tsc_texPerPx, 1.0)) / 3.0, 0.0, 1.0);',
+        '        let nMip0   = textureSampleLevel(uNormalAtlas,  uNormalAtlasSampler,  atlasUv,  0.0).xyz;',
+        '        let nCoarse = textureSampleLevel(uCoarseNormal, uCoarseNormalSampler, coarseUv, 0.0).xyz;',
+        '        nLocal       = normalize(mix(nMip0, nCoarse, lodT));',
+        '        let aMip0    = textureSampleLevel(uAlbedoAtlas,  uAlbedoAtlasSampler,  atlasUv,  0.0);',
+        '        let aCoarse  = textureSampleLevel(uCoarseAlbedo, uCoarseAlbedoSampler, coarseUv, 0.0);',
+        '        let abPacked = mix(aMip0, aCoarse, lodT);',
+        '        albedo       = abPacked.rgb;',
+        '        rays         = abPacked.a;',
+        '    } else {',
+        '        // Full noise path: 24+ simplex evaluations + optional df64 near-ground detail.',
+        '        let fbmGradMain = terrainFbmGradWithMask(dir, camDistKm, TERRAIN_RADIUS, fpKm, false);',
+        '        nLocal = terrainNormalFromGrad(dir, TERRAIN_RADIUS, fbmGradMain + craterGrad);',
+        '        let dFade = tsc_dFade;',
+        '        if (dFade > 0.0 && (uniforms.uPerfMask & 2) == 0) {',
+        '            let wx = df64_add(df64_from_f32(uniforms.uCamAnchor.x), df64_from_f32(rel.x));',
+        '            let wy = df64_add(df64_from_f32(uniforms.uCamAnchor.y), df64_from_f32(rel.y));',
+        '            let wz = df64_add(df64_from_f32(uniforms.uCamAnchor.z), df64_from_f32(rel.z));',
+        '            let len2 = df64_add(df64_add(df64_mul(wx, wx), df64_mul(wy, wy)), df64_mul(wz, wz));',
+        '            let inv = df64_invsqrt(len2);',
+        '            let dxD = df64_mul(wx, inv);',
+        '            let dyD = df64_mul(wy, inv);',
+        '            let dzD = df64_mul(wz, inv);',
+        '            let nDf = terrainNoiseNormalAtShared_df64(dxD, dyD, dzD, TERRAIN_RADIUS, camDistKm, craterGrad);',
+        '            nLocal = normalize(mix(nLocal, nDf, dFade));',
+        '            let dgrad = terrainGroundDetailGrad_df64(dxD, dyD, dzD, TERRAIN_GROUND_BASE_FREQ, TERRAIN_GROUND_DETAIL_OCTAVES);',
+        '            let tg = dgrad - dot(dgrad, nLocal) * nLocal;',
+        '            nLocal = normalize(nLocal - (TERRAIN_GROUND_STRENGTH * dFade) * tg);',
+        '        }',
+        '        albedo = terrainGroundAlbedo(slope01, altKm);',
+        '        albedo = albedo * (1.0 + TERRAIN_PLAINS_AMP * terrainSimplex3_d(dir * TERRAIN_PLAINS_FREQ).x);',
+        '        if ((uniforms.uPerfMask & 4) == 0) { rays = craterRays(dir, TERRAIN_RADIUS, camDistKm); }',
         '    }',
         '    // Diffuse normal AA: where nLocal varies fast across a pixel (sub-pixel foreground',
         '    // micro-relief), blend it toward the smooth landform normal (nSlope) so the diffuse ndl',
@@ -462,14 +550,7 @@ function fragmentSource(opts: TerrainRenderOptions): string {
         '        spec = min((D * F * G) / (4.0 * NdL * NdV + 1e-4) * NdL, TERRAIN_SPEC_MAX);',
         '    }',
         '    let lighting = uniforms.uAmbient * ao + TERRAIN_LIGHTCOLOR * (uniforms.uLightIntensity * refl);',
-        '    // Procedural albedo + slope/altitude splatting (replaces the flat TERRAIN_ALBEDO).',
-        '    var albedo = terrainGroundAlbedo(slope01, altKm);',
-        '    // Broad plains/highlands brightness variation (continental scale, subtle, no swim).',
-        '    albedo = albedo * (1.0 + TERRAIN_PLAINS_AMP * terrainSimplex3_d(dir * TERRAIN_PLAINS_FREQ).x);',
-        '    // Bright ejecta rays + halos of FRESH craters (the white impact traces). Higher albedo,',
-        '    // so add before lighting (still shaded). Grey -> add to all channels.',
-        '    var rays = 0.0;',
-        '    if ((uniforms.uPerfMask & 4) == 0) { rays = craterRays(dir, TERRAIN_RADIUS, camDistKm); }',
+        '    // Ejecta ray brightness (baked into atlas.a for the fast path; computed inline in fallback).',
         '    albedo = albedo + vec3<f32>(rays);',
         '    var finalColor = albedo * lighting + TERRAIN_LIGHTCOLOR * (uniforms.uLightIntensity * spec);',
         '    if (uniforms.uAtmoDensity > 0.0) {',
@@ -507,7 +588,13 @@ export function buildTerrainRenderMaterial(
     opts: TerrainRenderOptions,
     heapBuffer: StorageBufferType,
     positionsBuffer: StorageBufferType,
-    indicesBuffer: StorageBufferType
+    indicesBuffer: StorageBufferType,
+    /** Optional tile-cache bindings for the fast-path atlas sampling. */
+    slotStateBuffer?: StorageBufferType,
+    normalAtlas?: BaseTexture | null,
+    albedoAtlas?: BaseTexture | null,
+    coarseNormalAtlas?: BaseTexture | null,
+    coarseAlbedoAtlas?: BaseTexture | null
 ): TerrainRenderMaterial {
     const engine = scene.getEngine() as WebGPUEngine;
 
@@ -519,7 +606,8 @@ export function buildTerrainRenderMaterial(
             shaderLanguage: ShaderLanguage.WGSL,
             attributes: ['position'],
             uniforms: ['viewProjection', 'world', 'uLightDirection', 'logarithmicDepthConstant', 'uDebugLod', 'uPerfMask', 'uCamAnchor', 'uCamDelta', 'uAmbient', 'uLightIntensity', 'uAtmoDensity', 'uAtmoColor'],
-            storageBuffers: ['terrainHeap', 'terrainPos', 'terrainIndices', 'terrainPerm']
+            storageBuffers: ['terrainHeap', 'terrainPos', 'terrainIndices', 'terrainPerm', 'terrainSlotState'],
+            samplers: ['uNormalAtlas', 'uAlbedoAtlas', 'uCoarseNormal', 'uCoarseAlbedo']
         }
     );
     // Back-face culling: the octahedron is consistently wound so only the camera-facing
@@ -554,6 +642,11 @@ export function buildTerrainRenderMaterial(
     material.setStorageBuffer('terrainPos', positionsBuffer);
     material.setStorageBuffer('terrainIndices', indicesBuffer);
     material.setStorageBuffer('terrainPerm', permBuffer);
+    if (slotStateBuffer) material.setStorageBuffer('terrainSlotState', slotStateBuffer);
+    if (normalAtlas) material.setTexture('uNormalAtlas', normalAtlas);
+    if (albedoAtlas) material.setTexture('uAlbedoAtlas', albedoAtlas);
+    if (coarseNormalAtlas) material.setTexture('uCoarseNormal', coarseNormalAtlas);
+    if (coarseAlbedoAtlas) material.setTexture('uCoarseAlbedo', coarseAlbedoAtlas);
     material.setVector3('uLightDirection', new Vector3(0, -1, 0));
     material.setInt('uDebugLod', 0);
     material.setInt('uPerfMask', 0);
