@@ -59,6 +59,9 @@ import terrainTopoEvalLebF64ActiveWgsl from '../../../../assets/shaders/terrain/
 import terrainTopoEvalLebF64DeltaWgsl from '../../../../assets/shaders/terrain/engine/terrain_topo_eval_leb_f64_delta.compute.wgsl';
 import terrainTopoEvalLebActiveWgsl from '../../../../assets/shaders/terrain/engine/terrain_topo_eval_leb_active.compute.wgsl';
 import terrainTopoEvalLebDeltaWgsl from '../../../../assets/shaders/terrain/engine/terrain_topo_eval_leb_delta.compute.wgsl';
+import terrainTopoClassifyMetricActiveWgsl from '../../../../assets/shaders/terrain/engine/terrain_topo_classify_metric_active.compute.wgsl';
+import terrainTopoCopyNeighborsActiveWgsl from '../../../../assets/shaders/terrain/engine/terrain_topo_copy_neighbors_active.compute.wgsl';
+import terrainTopoResetDrawCountWgsl from '../../../../assets/shaders/terrain/engine/terrain_topo_reset_drawcount.compute.wgsl';
 import {
     engineLayout,
     engineWgslPreamble,
@@ -128,9 +131,11 @@ const ARG = {
     PREPARE_SIMPLIFY: 64,
     SIMPLIFY: 80,
     PROPAGATE_SIMPLIFY: 96,
-    EVAL_LEB: 112
+    EVAL_LEB: 112,
+    CLASSIFY: 128,
+    COPY_NB: 144
 } as const;
-const ARG_RECORDS = 8;
+const ARG_RECORDS = 10;
 
 export class TerrainTopologyKernel {
     readonly capacity: number;
@@ -159,7 +164,6 @@ export class TerrainTopologyKernel {
     /** Compacted live-slot list + cursor (metric mode only; null in predicate). */
     private readonly bisectorIndices: StorageBuffer | null = null;
     private readonly drawCount: StorageBuffer | null = null;
-    private readonly drawCountZero = new Uint32Array(1);
     /** Indirect-dispatch args (7 records x 4 u32) + its builder pass (useIndirect only). */
     private readonly indirectArgs: StorageBuffer | null = null;
     private readonly prepareIndirect: ComputeShader | null = null;
@@ -186,6 +190,12 @@ export class TerrainTopologyKernel {
     private readonly evalLebDelta: ComputeShader | null = null;
     /** Writes the EvalLeb indirect-dispatch record (ARG.EVAL_LEB) from the draw count. */
     private readonly prepareEvalLeb: ComputeShader | null = null;
+    /** Active-list Classify (metric + indirect only): O(active) dispatch via bisectorIndices. */
+    private classifyActive: ComputeShader | null = null;
+    /** Active-list CopyNeighbors (metric + indirect only): O(active) slot-level ping-pong copy. */
+    private copyActive: ComputeShader | null = null;
+    /** Zeros drawCount[0] within the GPU command buffer (after classify reads it, before compact). */
+    private resetDrawCount: ComputeShader | null = null;
     /** True after the first compact has run; gates the active-list dispatch path. */
     private hasCompacted = false;
 
@@ -687,6 +697,18 @@ export class TerrainTopologyKernel {
             this.compact.setStorageBuffer('heapID', this.heapID);
             this.compact.setStorageBuffer('indices', this.bisectorIndices!);
             this.compact.setStorageBuffer('drawCount', this.drawCount!);
+
+            // GPU zero of drawCount: runs WITHIN the command buffer, AFTER classifyActive
+            // has read the previous frame's count, and BEFORE compact's atomicAdd sequence.
+            // Replaces the CPU-side drawCount.update(0) (queue.writeBuffer) which was
+            // submitted before the command buffer and caused classifyActive to see 0.
+            this.resetDrawCount = new ComputeShader(
+                'terrain_topo_reset_drawcount', engine,
+                { computeSource: compose(terrainTopoResetDrawCountWgsl) },
+                { bindingsMapping: { drawCount: { group: 0, binding: 21 } } }
+            );
+            this.resetDrawCount.onError = onErr('resetDrawCount');
+            this.resetDrawCount.setStorageBuffer('drawCount', this.drawCount!);
         }
 
         // --- indirect dispatch (optional): scale the 7 work-list passes' workgroup
@@ -708,7 +730,9 @@ export class TerrainTopologyKernel {
                         simplification: { group: 0, binding: 7 },
                         allocate: { group: 0, binding: 8 },
                         propagate: { group: 0, binding: 9 },
-                        args: { group: 0, binding: 11 }
+                        args: { group: 0, binding: 11 },
+                        // binding 21 (drawCount) only wired when in metric mode (drawCount != null)
+                        ...(this.drawCount ? { drawCount: { group: 0, binding: 21 } } : {})
                     }
                 }
             );
@@ -718,6 +742,69 @@ export class TerrainTopologyKernel {
             this.prepareIndirect.setStorageBuffer('allocate', this.allocateBuf);
             this.prepareIndirect.setStorageBuffer('propagate', this.propagate);
             this.prepareIndirect.setStorageBuffer('args', this.indirectArgs);
+            if (this.drawCount) {
+                this.prepareIndirect.setStorageBuffer('drawCount', this.drawCount);
+            }
+
+            // Active-list Classify and CopyNeighbors (metric + indirect only).
+            // Both use bisectorIndices (binding 13) and drawCount (binding 21) from compact.
+            // classifyActive replaces the O(capacity) metric classify; copyActive replaces
+            // the O(3*capacity) word-level neighbor ping-pong.
+            if (this.bisectorIndices && this.drawCount) {
+                this.classifyActive = new ComputeShader(
+                        'terrain_topo_classify_metric_active', engine,
+                        {
+                            computeSource: compose(
+                                terrainU64Wgsl,
+                                terrainTopoCommonWgsl,
+                                terrainTopoClassifyMetricActiveWgsl
+                            )
+                        },
+                        {
+                            bindingsMapping: {
+                                heapID:        { group: 0, binding: 2 },
+                                bisectorData:  { group: 0, binding: 5 },
+                                classification:{ group: 0, binding: 6 },
+                                activeSlots:   { group: 0, binding: 13 },
+                                cp:            { group: 0, binding: 17 },
+                                positions:     { group: 0, binding: 19 },
+                                fp:            { group: 0, binding: 20 },
+                                activeCount:   { group: 0, binding: 21 }
+                            }
+                        }
+                    );
+                this.classifyActive!.onError = onErr('classifyActive(metric)');
+                this.classifyActive!.setStorageBuffer('heapID', this.heapID);
+                this.classifyActive!.setStorageBuffer('bisectorData', this.bisectorData);
+                this.classifyActive!.setStorageBuffer('classification', this.classification);
+                this.classifyActive!.setStorageBuffer('activeSlots', this.bisectorIndices);
+                this.classifyActive!.setStorageBuffer('positions', this.positions);
+                this.classifyActive!.setStorageBuffer('activeCount', this.drawCount);
+                this.classifyActive!.setUniformBuffer('cp', this.classifyParams!);
+                this.classifyActive!.setUniformBuffer('fp', this.frustumParams!);
+
+                this.copyActive = new ComputeShader(
+                        'terrain_topo_copy_neighbors_active', engine,
+                        {
+                            computeSource: compose(
+                                terrainU64Wgsl,
+                                terrainTopoCommonWgsl,
+                                terrainTopoCopyNeighborsActiveWgsl
+                            )
+                        },
+                        {
+                            bindingsMapping: {
+                                nbIn:        { group: 0, binding: 3 },
+                                nbOut:       { group: 0, binding: 4 },
+                                activeSlots: { group: 0, binding: 13 },
+                                activeCount: { group: 0, binding: 21 }
+                            }
+                        }
+                    );
+                this.copyActive!.onError = onErr('copyActive');
+                this.copyActive!.setStorageBuffer('activeSlots', this.bisectorIndices);
+                this.copyActive!.setStorageBuffer('activeCount', this.drawCount);
+            }
 
             // One-thread shader that writes ARG.EVAL_LEB from the current drawCount
             // after each compact, so the next frame's evalLebActive dispatches O(active).
@@ -767,7 +854,10 @@ export class TerrainTopologyKernel {
             ...(this.prepareIndirect ? [this.prepareIndirect] : []),
             ...(this.evalLebActive ? [this.evalLebActive] : []),
             ...(this.evalLebDelta ? [this.evalLebDelta] : []),
-            ...(this.prepareEvalLeb ? [this.prepareEvalLeb] : [])
+            ...(this.prepareEvalLeb ? [this.prepareEvalLeb] : []),
+            ...(this.classifyActive ? [this.classifyActive] : []),
+            ...(this.copyActive ? [this.copyActive] : []),
+            ...(this.resetDrawCount ? [this.resetDrawCount] : [])
         ];
         const end = performance.now() + timeoutMs;
         while (!shaders.every((s) => s.isReady())) {
@@ -844,6 +934,24 @@ export class TerrainTopologyKernel {
         this.frustumParams.update();
     }
 
+    /** Dispatch Classify — O(active) after first compact, O(capacity) otherwise. */
+    private runClassify(full: [number, number]): void {
+        if (this.hasCompacted && this.indirectArgs && this.classifyActive) {
+            this.classifyActive.dispatchIndirect(this.indirectArgs, ARG.CLASSIFY);
+        } else {
+            this.classify.dispatch(full[0], full[1], 1);
+        }
+    }
+
+    /** Dispatch CopyNeighbors — O(active) after first compact, O(capacity) otherwise. */
+    private runCopyNeighbors(nbWords: [number, number]): void {
+        if (this.hasCompacted && this.indirectArgs && this.copyActive) {
+            this.copyActive.dispatchIndirect(this.indirectArgs, ARG.COPY_NB);
+        } else {
+            this.copy.dispatch(nbWords[0], nbWords[1], 1);
+        }
+    }
+
     /** Rebuild the pool sum-tree from the bitfield (leaf prepass, then levels D-1..0). */
     runReduce(): void {
         this.reduce.setUniformBuffer('reduceParams', this.levelParams[this.depth]);
@@ -868,6 +976,8 @@ export class TerrainTopologyKernel {
         this.copy.setStorageBuffer('nbOut', next);
         this.bisect.setStorageBuffer('neighbors', current);
         this.bisect.setStorageBuffer('neighborsOut', next);
+        this.copyActive?.setStorageBuffer('nbIn', current);
+        this.copyActive?.setStorageBuffer('nbOut', next);
         // PropagateBisect runs AFTER the conceptual swap -> operates on `next`.
         this.propagateBisect.setStorageBuffer('neighbors', next);
 
@@ -875,7 +985,7 @@ export class TerrainTopologyKernel {
         const nbWords = grid2D(Math.ceil((this.capacity * NEIGHBORS_WORDS) / WORKGROUP_SIZE));
 
         this.reset.dispatch(1, 1, 1);
-        this.classify.dispatch(full[0], full[1], 1); // builder: stays O(capacity)
+        this.runClassify(full);
         if (this.useIndirect && this.prepareIndirect && this.indirectArgs) {
             // Work-list passes dispatch over their candidate counts (PrepareIndirect
             // rebuilds the args after each producer finalizes its count).
@@ -883,7 +993,7 @@ export class TerrainTopologyKernel {
             this.split.dispatchIndirect(this.indirectArgs, ARG.SPLIT);
             this.prepareIndirect.dispatch(1, 1, 1); // allocate+bisect recs <- allocate[0]
             this.allocate.dispatchIndirect(this.indirectArgs, ARG.ALLOCATE);
-            this.copy.dispatch(nbWords[0], nbWords[1], 1); // whole-buffer ping-pong: O(capacity)
+            this.runCopyNeighbors(nbWords);
             this.bisect.dispatchIndirect(this.indirectArgs, ARG.BISECT);
             this.prepareIndirect.dispatch(1, 1, 1); // propagate rec <- propagate[0]
             this.propagateBisect.dispatchIndirect(this.indirectArgs, ARG.PROPAGATE_BISECT);
@@ -917,7 +1027,7 @@ export class TerrainTopologyKernel {
 
         const full = grid2D(Math.ceil(this.capacity / WORKGROUP_SIZE));
         this.reset.dispatch(1, 1, 1);
-        this.classify.dispatch(full[0], full[1], 1); // builder: stays O(capacity)
+        this.runClassify(full);
         if (this.useIndirect && this.prepareIndirect && this.indirectArgs) {
             this.prepareIndirect.dispatch(1, 1, 1); // prepareSimplify rec <- classification[SIMPLIFY_COUNTER]
             this.prepareSimplify.dispatchIndirect(this.indirectArgs, ARG.PREPARE_SIMPLIFY);
@@ -952,12 +1062,24 @@ export class TerrainTopologyKernel {
     /** Compact the live slots into the contiguous index list (metric mode only). */
     runCompact(): void {
         if (!this.compact || !this.drawCount) return;
-        this.drawCount.update(this.drawCountZero); // CPU clear the atomic cursor (4 bytes)
+        // Zero drawCount INSIDE the command buffer so classifyActive (dispatched earlier in
+        // the same buffer) sees the PREVIOUS frame's count rather than 0.
+        // A CPU queue.writeBuffer(0) would arrive before the buffer, causing classifyActive
+        // to exit early (i >= 0 always true), producing 0 split candidates.
+        this.resetDrawCount?.dispatch(1, 1, 1);
         const full = grid2D(Math.ceil(this.capacity / WORKGROUP_SIZE));
         this.compact.dispatch(full[0], full[1], 1);
         // Write ARG.EVAL_LEB from the just-built drawCount so the NEXT frame's
         // evalLebActive dispatches O(alive) instead of O(capacity).
         this.prepareEvalLeb?.dispatch(1, 1, 1);
+        // Also write ARG.CLASSIFY (8) and ARG.COPY_NB (9) from the same drawCount so the
+        // NEXT frame's classify and copyNeighbors active-list dispatches are O(alive).
+        // prepareIndirect reads classification[]/allocate[]/etc. too but those values are
+        // stale at this point; records 0-7 will be re-written at the START of the next
+        // runFrame/runMergeFrame before they are consumed — only 8+9 matter here.
+        if (this.classifyActive && this.copyActive) {
+            this.prepareIndirect?.dispatch(1, 1, 1);
+        }
         this.hasCompacted = true;
     }
 
@@ -993,9 +1115,17 @@ export class TerrainTopologyKernel {
             const ns = cs?.gpuTimeInFrame?.counter.lastSecAverage ?? 0;
             return Number.isFinite(ns) ? ns / 1e6 : 0;
         };
+        // classify and copy run their O(active) variant after first compact;
+        // both shaders report timing independently — sum whichever ran.
+        const classifyMs = this.hasCompacted
+            ? ms(this.classifyActive)
+            : ms(this.classify);
+        const copyMs = this.hasCompacted
+            ? ms(this.copyActive)
+            : ms(this.copy);
         const topoMs =
-            ms(this.reset) + ms(this.classify) + ms(this.split) + ms(this.allocate) +
-            ms(this.copy) + ms(this.bisect) + ms(this.propagateBisect) +
+            ms(this.reset) + classifyMs + ms(this.split) + ms(this.allocate) +
+            copyMs + ms(this.bisect) + ms(this.propagateBisect) +
             ms(this.prepareSimplify) + ms(this.simplify) + ms(this.propagateSimplify) +
             ms(this.reduce) + ms(this.prepareIndirect);
         const evalMs = this.hasCompacted ? ms(this.evalLebActive) : ms(this.evalLeb);
