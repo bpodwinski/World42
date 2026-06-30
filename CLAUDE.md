@@ -6,6 +6,10 @@
 
 > **Language rule:** All source code, comments, identifiers, commit messages, PR descriptions, and this file must be written in **American English**. No French anywhere in the codebase.
 
+> **Playwright rule:** Always use Playwright in **headed** mode. Never headless. Applies to all browser automation in this project (visual tests, WebGPU checks, performance observations).
+
+> **AI Memory:** Canonical memory lives in `.claude/memory/` (committed, exportable). Read `MEMORY.md` there at the start of any session. When writing a new memory entry, write it to `.claude/memory/` **and** mirror it to the system-level path (`~/.claude/projects/d--Dev-World42/memory/`) for auto-loading.
+
 ## Overview
 
 **World42** is a real-time 1:1 scale planetary rendering engine designed to explore planetary surfaces at any altitude (ground level to orbit). Terrain is rendered with a single GPU LOD engine — **OCBT** (a *pool-CBT*: a Concurrent Binary Tree used as a fixed-capacity GPU memory-pool allocator, after Benyoub & Dupuy, HPG 2024) — on a quad-sphere, paired with a **floating-origin camera** that preserves numerical precision at interplanetary scale.
