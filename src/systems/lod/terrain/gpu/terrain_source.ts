@@ -259,10 +259,23 @@ export class TerrainSource implements TerrainGeometrySource {
     requestUpdate(frame: TerrainFrameParams): void {
         if (this.disposed || !this.ready) return;
 
-        // Camera in planet-local space = inverse(renderParentWorld) * renderOrigin
-        // (the camera sits at the render origin under floating origin).
-        frame.renderParentWorldMatrix.invertToRef(this.tmpInv);
-        Vector3.TransformCoordinatesToRef(Vector3.ZeroReadOnly, this.tmpInv, this.tmpCamLocal);
+        // Camera in planet-local space = R^-1 * (camera.doublepos - entity.doublepos).
+        // The camera sits at the render origin under floating origin, so naively this is
+        // inverse(renderParentWorld) * (0,0,0,1) — but that reads the f32 matrix 4th column
+        // (renderParent.position ≈ -R ≈ -1,737 sim units), whose ULP at planet-radius scale
+        // is ~20 cm. When the camera drifts slowly near ground, that value oscillates across
+        // f32 boundaries every frame → uCamDelta jitters by ~20 cm → visible left-right shimmer
+        // AND spurious rebakes (the 20 cm jump exceeds the ~19 cm driftThreshKm at ground level).
+        // Fix: use f64 arithmetic for the translation offset; only the rotation (3x3, values ≤ 1)
+        // needs the f32 matrix. TransformNormal ignores the 4th column — same technique as
+        // resolveGroundCollision, which already handles this correctly.
+        {
+            const ep = frame.planetCenterWorldDouble;
+            const dp = frame.cameraWorldDouble;
+            this.tmpCamLocal.set(dp.x - ep.x, dp.y - ep.y, dp.z - ep.z);
+            frame.renderParentWorldMatrix.invertToRef(this.tmpInv);
+            Vector3.TransformNormalToRef(this.tmpCamLocal, this.tmpInv, this.tmpCamLocal);
+        }
         const focalPx = frame.viewportHeightPx / (2 * Math.tan(frame.cameraFovRadians * 0.5));
 
         // --- Re-bake-on-drift gate -----------------------------------------------------------

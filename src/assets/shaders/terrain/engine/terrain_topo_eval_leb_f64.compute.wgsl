@@ -22,9 +22,10 @@
 // Reuses the metric classify camera UBO (binding 17): camRadius.xyz = camLocal, .w = radius.
 
 struct EvalParams {
-    camRadius : vec4<f32>,
-    thresh    : vec4<f32>,
-    limits    : vec4<f32>  // x = maxLevel, y = minLevel, z = DF64_NEAR_KM (df64->f32 cutoff, km)
+    camRadius   : vec4<f32>,  // xyz = camLocal hi, w = planet radius
+    thresh      : vec4<f32>,
+    limits      : vec4<f32>,  // x = maxLevel, y = minLevel, z = DF64_NEAR_KM (df64->f32 cutoff, km)
+    camRadiusLo : vec4<f32>   // xyz = camLocal df64 lo part (x - fround(x)); w unused
 };
 
 // A vec3 in df64: each component carried as (hi, lo).
@@ -134,10 +135,14 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>,
     v2 = dv_normalize(v2);
 
     let radius = ep.camRadius.w;
-    let camX = df64_from_f32(ep.camRadius.x);
-    let camY = df64_from_f32(ep.camRadius.y);
-    let camZ = df64_from_f32(ep.camRadius.z);
-    let cam = DVec3(camX, camY, camZ);
+    // camRadius.xyz is the f32 hi part; camRadiusLo.xyz is the df64 lo remainder
+    // (lo = actual_f64 - fround(actual_f64), written by setCameraParams on the CPU).
+    // Using df64_from_f32 alone discards the lo part → up to ±6.1 cm error per rebake.
+    let cam = DVec3(
+        vec2<f32>(ep.camRadius.x, ep.camRadiusLo.x),
+        vec2<f32>(ep.camRadius.y, ep.camRadiusLo.y),
+        vec2<f32>(ep.camRadius.z, ep.camRadiusLo.z)
+    );
 
     // Unit surface directions (f32) first — needed for both the noise height and the render.
     let d0 = narrow(v0);

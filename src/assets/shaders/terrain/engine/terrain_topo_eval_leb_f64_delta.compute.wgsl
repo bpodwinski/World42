@@ -7,9 +7,10 @@
 //   terrain_u64.wgsl + terrain_f64.wgsl + terrain_noise_df64.wgsl + terrain_topo_common.wgsl.
 
 struct EvalParams {
-    camRadius : vec4<f32>,
-    thresh    : vec4<f32>,
-    limits    : vec4<f32>
+    camRadius   : vec4<f32>,
+    thresh      : vec4<f32>,
+    limits      : vec4<f32>,
+    camRadiusLo : vec4<f32>
 };
 
 struct DVec3 { x : vec2<f32>, y : vec2<f32>, z : vec2<f32> };
@@ -104,10 +105,11 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>,
     v2 = dv_normalize(v2);
 
     let radius = ep.camRadius.w;
-    let camX = df64_from_f32(ep.camRadius.x);
-    let camY = df64_from_f32(ep.camRadius.y);
-    let camZ = df64_from_f32(ep.camRadius.z);
-    let cam = DVec3(camX, camY, camZ);
+    let cam = DVec3(
+        vec2<f32>(ep.camRadius.x, ep.camRadiusLo.x),
+        vec2<f32>(ep.camRadius.y, ep.camRadiusLo.y),
+        vec2<f32>(ep.camRadius.z, ep.camRadiusLo.z)
+    );
 
     let d0 = narrow(v0);
     let d1 = narrow(v1);

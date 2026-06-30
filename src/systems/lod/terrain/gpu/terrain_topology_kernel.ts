@@ -327,9 +327,15 @@ export class TerrainTopologyKernel {
             this.classifyParams.addUniform('camRadius', 4);
             this.classifyParams.addUniform('thresh', 4);
             this.classifyParams.addUniform('limits', 4);
+            // df64 lo part of camLocal: lo = actual_f64 - Math.fround(actual_f64).
+            // Written by setCameraParams; read by EvaluateLEB to construct cam as a proper
+            // df64 DVec3, eliminating the ±6.1 cm f32-quantization error in the baked
+            // camera-relative vertex positions.
+            this.classifyParams.addUniform('camRadiusLo', 4);
             this.classifyParams.updateFloat4('camRadius', 0, 0, 0, 1);
             this.classifyParams.updateFloat4('thresh', 1, 1e9, 1e9, -1);
             this.classifyParams.updateFloat4('limits', 0, 0, 0, 0);
+            this.classifyParams.updateFloat4('camRadiusLo', 0, 0, 0, 0);
             this.classifyParams.update();
             // Frustum UBO (camera-relative planet-local planes). Default disabled.
             this.frustumParams = new UniformBuffer(engine, undefined, undefined, 'terrain_frustum_params');
@@ -914,6 +920,12 @@ export class TerrainTopologyKernel {
         // limits.z = DF64_NEAR_KM: the eval (which shares this UBO as `ep`) reads it as the df64->f32
         // cutoff. The metric classify ignores limits.z (it only uses x = maxLevel, y = minLevel).
         this.classifyParams.updateFloat4('limits', p.maxLevel, p.minLevel, p.df64NearKm, 0);
+        // df64 lo part: lo = actual_f64 - fround(hi). EvaluateLEB uses vec2(hi, lo) for cam,
+        // eliminating the ±6.1 cm f32 quantization error in the baked camera-relative positions.
+        const loX = p.camLocal[0] - Math.fround(p.camLocal[0]);
+        const loY = p.camLocal[1] - Math.fround(p.camLocal[1]);
+        const loZ = p.camLocal[2] - Math.fround(p.camLocal[2]);
+        this.classifyParams.updateFloat4('camRadiusLo', loX, loY, loZ, 0);
         this.classifyParams.update();
     }
 
