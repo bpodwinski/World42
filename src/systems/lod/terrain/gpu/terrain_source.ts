@@ -211,8 +211,8 @@ export class TerrainSource implements TerrainGeometrySource {
             .then(() => {
                 if (this.disposed) return;
                 this.kernel.uploadSeed();
-                this.kernel.runEvalLeb(); // decode the seed so the metric classify has corners
-                this.kernel.runCompact(); // build the seed's draw-index list
+                this.kernel.runCompact(); // build the seed's draw-index list, arms evalLebActive
+                this.kernel.runEvalLeb(); // decode the seed corners via active-list dispatch
                 // Re-apply any debug toggles requested before init completed.
                 this.render.material.wireframe = this.wantWireframe;
                 this.render.setDebugLod(this.wantDebugLod);
@@ -454,12 +454,12 @@ export class TerrainSource implements TerrainGeometrySource {
             } else {
                 this.kernel.runMergeFrame();
             }
+            // Compact first: builds the current-frame active list so evalLebActive can
+            // dispatch O(alive) over exactly the right slots (no stale-list gap).
+            this.kernel.runCompact();
             // Decode the live slots to vertex corners for this frame's draw (and next
             // frame's classify, which reads the positions buffer).
             this.kernel.runEvalLeb();
-            // Compact the live slots into the draw-index list so the draw issues liveCount
-            // instances (not CAPACITY) — the per-vertex fbm noise makes that the big win.
-            this.kernel.runCompact();
 
             // Re-anchor: POSITIONS is now baked against the live camera. uCamAnchor MUST be the same
             // f32 camLocal the df64 eval subtracted (world = uCamAnchor + rel cancels its rounding).

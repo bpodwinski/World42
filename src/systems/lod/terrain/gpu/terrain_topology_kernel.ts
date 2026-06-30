@@ -54,6 +54,11 @@ import terrainTopoEvalLebWgsl from '../../../../assets/shaders/terrain/engine/te
 import terrainTopoEvalLebF64Wgsl from '../../../../assets/shaders/terrain/engine/terrain_topo_eval_leb_f64.compute.wgsl';
 import terrainTopoCompactWgsl from '../../../../assets/shaders/terrain/engine/terrain_topo_compact.compute.wgsl';
 import terrainTopoPrepareIndirectWgsl from '../../../../assets/shaders/terrain/engine/terrain_topo_prepare_indirect.compute.wgsl';
+import terrainTopoPrepareEvalLebWgsl from '../../../../assets/shaders/terrain/engine/terrain_topo_prepare_eval_leb.compute.wgsl';
+import terrainTopoEvalLebF64ActiveWgsl from '../../../../assets/shaders/terrain/engine/terrain_topo_eval_leb_f64_active.compute.wgsl';
+import terrainTopoEvalLebF64DeltaWgsl from '../../../../assets/shaders/terrain/engine/terrain_topo_eval_leb_f64_delta.compute.wgsl';
+import terrainTopoEvalLebActiveWgsl from '../../../../assets/shaders/terrain/engine/terrain_topo_eval_leb_active.compute.wgsl';
+import terrainTopoEvalLebDeltaWgsl from '../../../../assets/shaders/terrain/engine/terrain_topo_eval_leb_delta.compute.wgsl';
 import {
     engineLayout,
     engineWgslPreamble,
@@ -122,9 +127,10 @@ const ARG = {
     PROPAGATE_BISECT: 48,
     PREPARE_SIMPLIFY: 64,
     SIMPLIFY: 80,
-    PROPAGATE_SIMPLIFY: 96
+    PROPAGATE_SIMPLIFY: 96,
+    EVAL_LEB: 112
 } as const;
-const ARG_RECORDS = 7;
+const ARG_RECORDS = 8;
 
 export class TerrainTopologyKernel {
     readonly capacity: number;
@@ -174,6 +180,14 @@ export class TerrainTopologyKernel {
     private readonly evalLeb: ComputeShader;
     /** Draw compaction (metric mode only). */
     private readonly compact: ComputeShader | null = null;
+    /** Active-list EvalLeb (indirect + metric only): O(active) dispatch via bisectorIndices. */
+    private readonly evalLebActive: ComputeShader | null = null;
+    /** Delta EvalLeb: covers newly-allocated slots absent from the previous compact list. */
+    private readonly evalLebDelta: ComputeShader | null = null;
+    /** Writes the EvalLeb indirect-dispatch record (ARG.EVAL_LEB) from the draw count. */
+    private readonly prepareEvalLeb: ComputeShader | null = null;
+    /** True after the first compact has run; gates the active-list dispatch path. */
+    private hasCompacted = false;
 
     /** One UBO per reduce level 0..depth (index `depth` = leaf prepass). */
     private readonly levelParams: UniformBuffer[] = [];
@@ -228,6 +242,12 @@ export class TerrainTopologyKernel {
         this.positionsWords = posWords;
         this.positions = mk(capacity * posWords * 4, STORAGE | READ | WRITE, 'terrain_topo_positions');
         this.liveNeighbors = this.nbA;
+        // Compaction buffers created early so the active-list EvalLeb shaders can reference
+        // them inside the metric evalLeb constructor block (where noiseHeader is in scope).
+        if (classifyMode === 'metric') {
+            this.bisectorIndices = mk(capacity * 4, STORAGE | READ | WRITE, 'terrain_topo_indices');
+            this.drawCount = mk(4, STORAGE | WRITE, 'terrain_topo_drawcount');
+        }
 
         const onErr = (tag: string) => (_e: unknown, errors: string) => {
             // eslint-disable-next-line no-console
@@ -571,6 +591,66 @@ export class TerrainTopologyKernel {
             this.evalLeb.setStorageBuffer('terrainPerm', this.evalPerm);
             // Reuse the metric classify camera UBO (camRadius.xyz=camLocal, .w=radius).
             this.evalLeb.setUniformBuffer('ep', this.classifyParams!);
+
+            // --- Active-list EvalLeb (indirect + metric): O(alive) dispatch pair.
+            // evalLebActive covers the prev-frame active list; evalLebDelta covers newly-
+            // allocated slots absent from that list. Both shaders use identical LEB decode
+            // + noise chains; the difference is how the slot id is sourced.
+            if (useIndirect) {
+                this.evalLebActive = new ComputeShader(
+                    'terrain_topo_eval_leb_f64_active', engine,
+                    {
+                        computeSource: compose(
+                            noiseHeader, terrainNoiseWgsl, terrainU64Wgsl,
+                            terrainF64Wgsl, terrainNoiseDf64Wgsl,
+                            terrainTopoCommonWgsl, terrainTopoEvalLebF64ActiveWgsl
+                        )
+                    },
+                    {
+                        bindingsMapping: {
+                            heapID: { group: 0, binding: 2 },
+                            ep: { group: 0, binding: 17 },
+                            positions: { group: 0, binding: 19 },
+                            terrainPerm: { group: 0, binding: 21 },
+                            activeSlots: { group: 0, binding: 22 },
+                            activeCount: { group: 0, binding: 23 }
+                        }
+                    }
+                );
+                this.evalLebActive.onError = onErr('evalLebActive(f64)');
+                this.evalLebActive.setStorageBuffer('heapID', this.heapID);
+                this.evalLebActive.setStorageBuffer('positions', this.positions);
+                this.evalLebActive.setStorageBuffer('terrainPerm', this.evalPerm);
+                this.evalLebActive.setUniformBuffer('ep', this.classifyParams!);
+                this.evalLebActive.setStorageBuffer('activeSlots', this.bisectorIndices!);
+                this.evalLebActive.setStorageBuffer('activeCount', this.drawCount!);
+
+                this.evalLebDelta = new ComputeShader(
+                    'terrain_topo_eval_leb_f64_delta', engine,
+                    {
+                        computeSource: compose(
+                            noiseHeader, terrainNoiseWgsl, terrainU64Wgsl,
+                            terrainF64Wgsl, terrainNoiseDf64Wgsl,
+                            terrainTopoCommonWgsl, terrainTopoEvalLebF64DeltaWgsl
+                        )
+                    },
+                    {
+                        bindingsMapping: {
+                            heapID: { group: 0, binding: 2 },
+                            allocate: { group: 0, binding: 8 },
+                            ep: { group: 0, binding: 17 },
+                            positions: { group: 0, binding: 19 },
+                            terrainPerm: { group: 0, binding: 21 }
+                        }
+                    }
+                );
+                this.evalLebDelta.onError = onErr('evalLebDelta(f64)');
+                this.evalLebDelta.setStorageBuffer('heapID', this.heapID);
+                this.evalLebDelta.setStorageBuffer('allocate', this.allocateBuf);
+                this.evalLebDelta.setStorageBuffer('positions', this.positions);
+                this.evalLebDelta.setStorageBuffer('terrainPerm', this.evalPerm);
+                this.evalLebDelta.setUniformBuffer('ep', this.classifyParams!);
+            }
         } else {
             this.evalLeb = new ComputeShader(
                 'terrain_topo_eval_leb',
@@ -591,8 +671,6 @@ export class TerrainTopologyKernel {
         // --- draw compaction (metric only): live slots -> contiguous index list so the
         // render draws liveCount instances instead of CAPACITY. ---
         if (classifyMode === 'metric') {
-            this.bisectorIndices = mk(capacity * 4, STORAGE | READ | WRITE, 'terrain_topo_indices');
-            this.drawCount = mk(4, STORAGE | WRITE, 'terrain_topo_drawcount');
             this.compact = new ComputeShader(
                 'terrain_topo_compact',
                 engine,
@@ -607,8 +685,8 @@ export class TerrainTopologyKernel {
             );
             this.compact.onError = onErr('compact');
             this.compact.setStorageBuffer('heapID', this.heapID);
-            this.compact.setStorageBuffer('indices', this.bisectorIndices);
-            this.compact.setStorageBuffer('drawCount', this.drawCount);
+            this.compact.setStorageBuffer('indices', this.bisectorIndices!);
+            this.compact.setStorageBuffer('drawCount', this.drawCount!);
         }
 
         // --- indirect dispatch (optional): scale the 7 work-list passes' workgroup
@@ -640,6 +718,24 @@ export class TerrainTopologyKernel {
             this.prepareIndirect.setStorageBuffer('allocate', this.allocateBuf);
             this.prepareIndirect.setStorageBuffer('propagate', this.propagate);
             this.prepareIndirect.setStorageBuffer('args', this.indirectArgs);
+
+            // One-thread shader that writes ARG.EVAL_LEB from the current drawCount
+            // after each compact, so the next frame's evalLebActive dispatches O(active).
+            if (this.drawCount) {
+                this.prepareEvalLeb = new ComputeShader(
+                    'terrain_topo_prepare_eval_leb', engine,
+                    { computeSource: compose(terrainTopoPrepareEvalLebWgsl) },
+                    {
+                        bindingsMapping: {
+                            args: { group: 0, binding: 11 },
+                            drawCount: { group: 0, binding: 21 }
+                        }
+                    }
+                );
+                this.prepareEvalLeb.onError = onErr('prepareEvalLeb');
+                this.prepareEvalLeb.setStorageBuffer('args', this.indirectArgs);
+                this.prepareEvalLeb.setStorageBuffer('drawCount', this.drawCount);
+            }
         }
 
         // One UBO per reduce level (0..depth). Reusing one UBO across same-submit
@@ -668,7 +764,10 @@ export class TerrainTopologyKernel {
             this.propagateSimplify,
             this.evalLeb,
             ...(this.compact ? [this.compact] : []),
-            ...(this.prepareIndirect ? [this.prepareIndirect] : [])
+            ...(this.prepareIndirect ? [this.prepareIndirect] : []),
+            ...(this.evalLebActive ? [this.evalLebActive] : []),
+            ...(this.evalLebDelta ? [this.evalLebDelta] : []),
+            ...(this.prepareEvalLeb ? [this.prepareEvalLeb] : [])
         ];
         const end = performance.now() + timeoutMs;
         while (!shaders.every((s) => s.isReady())) {
@@ -856,12 +955,28 @@ export class TerrainTopologyKernel {
         this.drawCount.update(this.drawCountZero); // CPU clear the atomic cursor (4 bytes)
         const full = grid2D(Math.ceil(this.capacity / WORKGROUP_SIZE));
         this.compact.dispatch(full[0], full[1], 1);
+        // Write ARG.EVAL_LEB from the just-built drawCount so the NEXT frame's
+        // evalLebActive dispatches O(alive) instead of O(capacity).
+        this.prepareEvalLeb?.dispatch(1, 1, 1);
+        this.hasCompacted = true;
     }
 
     /** Decode every live slot's heap id to 3 unit-dir corners into the positions buffer. */
     runEvalLeb(): void {
-        const full = grid2D(Math.ceil(this.capacity / WORKGROUP_SIZE));
-        this.evalLeb.dispatch(full[0], full[1], 1);
+        if (
+            this.useIndirect &&
+            this.indirectArgs &&
+            this.evalLebActive &&
+            this.hasCompacted
+        ) {
+            // Active list: compact ran immediately before this call (see terrain_source.ts),
+            // so bisectorIndices is the CURRENT frame's live set — no stale-list gap, no delta needed.
+            this.evalLebActive.dispatchIndirect(this.indirectArgs, ARG.EVAL_LEB);
+        } else {
+            // Bootstrap (first frame before compact runs) or predicate mode: O(capacity).
+            const full = grid2D(Math.ceil(this.capacity / WORKGROUP_SIZE));
+            this.evalLeb.dispatch(full[0], full[1], 1);
+        }
     }
 
     /**
@@ -883,7 +998,8 @@ export class TerrainTopologyKernel {
             ms(this.copy) + ms(this.bisect) + ms(this.propagateBisect) +
             ms(this.prepareSimplify) + ms(this.simplify) + ms(this.propagateSimplify) +
             ms(this.reduce) + ms(this.prepareIndirect);
-        return { topoMs, evalMs: ms(this.evalLeb), compactMs: ms(this.compact) };
+        const evalMs = this.hasCompacted ? ms(this.evalLebActive) : ms(this.evalLeb);
+        return { topoMs, evalMs, compactMs: ms(this.compact) };
     }
 
     /** Read the positions buffer back (capacity * 9 f32: c0.xyz,c1.xyz,c2.xyz per slot). */
