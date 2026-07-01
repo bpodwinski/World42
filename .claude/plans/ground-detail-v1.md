@@ -101,6 +101,32 @@ Conditions: Dev/Moon, ground-still (alt 60 m), hwScale 0.5 (supersample ×4 to b
 
 **The core step. All remaining steps depend on it.**
 
+### Status ✅ PARTIAL — done 2026-07-01, updated to reflect actual implementation
+
+The sketch below (manual `@binding(20)/(21)/(22)`, unresolved TypeScript API) is **superseded**:
+BabylonJS 9.14 auto-assigns `@group/@binding` by scanning WGSL text; no manual numbers needed
+(confirmed by reading `webgpuShaderProcessorsWGSL.pure.js`). See branch `feat/ground-detail-textures`.
+
+**Done:**
+- `tAlbedoHeight` texture_2d_array bound and working (`terrain_render_material.ts`, `samplers: ['tAlbedoHeight']`)
+- Real material assets loaded from Poly Haven (CC0), 5 layers: regolith_fine, regolith_coarse,
+  basalt_dark, ejecta_bright, rock_face — async load + hot-swap, cached per profileId
+  (`terrain_material_asset_loader.ts`, `terrain_material_assets.ts`)
+- `softDominantUV(d)` implemented exactly as sketched below — no seam
+- Material weight selection (`terrainMaterialWeights(slope01)`: regolith/basalt/rock_face) implemented
+- 2-material-max height blend implemented (using the albedo texture's alpha/height channel)
+- `tNormalRoughness` deliberately NOT bound yet (Step 3's job, per the original decision)
+
+**NOT done (remaining Step 1 work):**
+- **UV frequency is uncalibrated** — currently `softDominantUV(dir) * (TERRAIN_RADIUS / 1.0)` at
+  Moon radius (1737 km) means the 512×512 texture repeats ~1700× across the surface → aliases to
+  a uniform fine grain, real texture detail invisible on screen. Needs a sane tile-size constant
+  (e.g. ~1-5 m per tile, not literally `radius/1.0`) — this is the next concrete blocker.
+- Macro-scale UV + material-selection-at-distance (`uvMacro`) not implemented — only detail scale used
+- Stochastic tiling (item 3 below) not implemented — now meaningful to verify with real textures
+- Distance fade + procedural-color-anchor calibration (item 5 below) not implemented
+- Regolith_coarse / ejecta_bright (layers 1/3) still unused — no craterMaturity modulation yet
+
 ### 1a — Texture assets
 
 `texture_2d_array`, RGBA8, two arrays:

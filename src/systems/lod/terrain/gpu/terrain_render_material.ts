@@ -117,6 +117,17 @@ function bakedHeader(opts: TerrainRenderOptions): string {
         // Slope is read from the SMOOTH landform normal (TERRAIN_SLOPE_DIST fades the cm
         // micro-relief out so rock follows 30m+ hills/crater walls, not per-pixel bumps).
         `const TERRAIN_SLOPE_DIST : f32 = ${f(t.slopeDist)};`,
+        // Material texture UV frequencies (ground-detail-v1.md Step 1a). softDominantUV(dir)
+        // spans roughly [-1,1] over one octahedron face (~radius km of physical distance), so a
+        // multiplier of (radius / (2*tileKm)) gives a tile of ~tileKm on the ground. Detail ≈ 3 m
+        // (photographed ground-swatch scale); macro ≈ 500 m (regional look — this was the ORIGINAL
+        // single-scale formula radius/1.0, repurposed as the coarse/far scale for the Step 1c fade).
+        `const TERRAIN_DETAIL_UV_FREQ : f32 = ${f(opts.radius / (2 * 0.003))};`,
+        `const TERRAIN_MACRO_UV_FREQ : f32 = ${f(opts.radius / (2 * 0.5))};`,
+        // Detail->macro texture crossfade window (ground-detail-v1.md Step 1c) — fine ground
+        // detail is irrelevant past this altitude anyway, so this also bounds the extra sample cost.
+        `const TERRAIN_DETAIL_FADE_ON_KM : f32 = ${f(20)};`,
+        `const TERRAIN_DETAIL_FADE_OFF_KM : f32 = ${f(60)};`,
         // Smooth plains vs cratered highlands: a BROAD (continental ~400 km), SUBTLE brightness
         // variation so the surface isn't uniform — NOT the fine blotches. dir-based (no swim).
         `const TERRAIN_PLAINS_FREQ : f32 = ${f(opts.radius / 400)};`,
@@ -339,6 +350,32 @@ function fragmentSource(opts: TerrainRenderOptions): string {
         '    let wRegolith = 1.0 - wRockFace - wBasalt;',
         '    return vec3<f32>(wRegolith, wBasalt, wRockFace);',
         '}',
+        // 2D hash via the existing permutation table (terrain_noise.wgsl) — same terrainPermAt
+        // chaining pattern craterField/terrainSimplex3_d already use, kept consistent rather than
+        // adding an unrelated (e.g. sine-based) hash family with its own precision pitfalls.
+        'fn terrainHash2D(cell : vec2<f32>) -> vec2<f32> {',
+        '    let ix = i32(cell.x) & 255;',
+        '    let iy = i32(cell.y) & 255;',
+        '    let h0 = terrainPermAt(ix + terrainPermAt(iy));',
+        '    let h1 = terrainPermAt(ix + 1 + terrainPermAt(iy + 7));',
+        '    return vec2<f32>(f32(h0) / 256.0, f32(h1) / 256.0);',
+        '}',
+        // Stochastic tiling (ground-detail-v1.md Step 1b, option A): rotate+offset the sample
+        // point per-grid-cell so the same tile does not repeat identically across the ground.
+        // Single sample (no extra texture fetches) — leaves a seam at cell boundaries, accepted
+        // for now; a seamless 3-sample blend is a strictly additive upgrade if seams prove
+        // objectionable in practice.
+        'fn stochasticSampleA(tex : texture_2d_array<f32>, samp : sampler, uv : vec2<f32>, layer : i32) -> vec4<f32> {',
+        '    let cell = floor(uv);',
+        '    let h = terrainHash2D(cell);',
+        '    let angle = h.x * 6.2831853;',
+        '    let c = cos(angle);',
+        '    let s = sin(angle);',
+        '    let rot = mat2x2<f32>(c, s, -s, c);',
+        '    let local = uv - cell - 0.5;',
+        '    let rotated = rot * local + 0.5 + h.y;',
+        '    return textureSampleLevel(tex, samp, cell + rotated, layer, 0.0);',
+        '}',
         // Per-LOD-level palette — mirrors LEVEL_COLORS / the implicit material's
         // terrainLodColor so the X-key debug view matches the rest of the terrain.
         'fn terrainLodColor(level : u32) -> vec3<f32> {',
@@ -491,10 +528,11 @@ function fragmentSource(opts: TerrainRenderOptions): string {
         '        spec = min((D * F * G) / (4.0 * NdL * NdV + 1e-4) * NdL, TERRAIN_SPEC_MAX);',
         '    }',
         '    let lighting = uniforms.uAmbient * ao + TERRAIN_LIGHTCOLOR * (uniforms.uLightIntensity * refl);',
-        '    // Material-driven albedo (ground-detail-v1.md Step 1c). textureSampleLevel, not',
+        '    // Material-driven albedo (ground-detail-v1.md Step 1a/1b/1c). textureSampleLevel, not',
         '    // textureSample: this call sits after non-uniform branches (dFade/uPerfMask), so',
         '    // implicit-derivative LOD is not legal here anyway.',
-        '    let uvDetail = softDominantUV(dir) * (TERRAIN_RADIUS / 1.0);',
+        '    let uvDetail = softDominantUV(dir) * TERRAIN_DETAIL_UV_FREQ;',
+        '    let uvMacro  = softDominantUV(dir) * TERRAIN_MACRO_UV_FREQ;',
         '    let matW = terrainMaterialWeights(slope01); // x=regolith(layer0) y=basalt(layer2) z=rockFace(layer4)',
         '    // 2-material-max height blend (ground-detail-v1.md): pick the top-2 weighted layers,',
         '    // height-blend those via the albedo texture s alpha channel so rock emerges from dust',
@@ -503,10 +541,21 @@ function fragmentSource(opts: TerrainRenderOptions): string {
         '    if (matW.y > wa) { layerA = 2; wa = matW.y; layerB = 0; wb = matW.x; }',
         '    if (matW.z > wa) { layerB = layerA; wb = wa; layerA = 4; wa = matW.z; }',
         '    else if (matW.z > wb) { layerB = 4; wb = matW.z; }',
-        '    let sampA = textureSampleLevel(tAlbedoHeight, tAlbedoHeightSampler, uvDetail, layerA, 0.0);',
-        '    let sampB = textureSampleLevel(tAlbedoHeight, tAlbedoHeightSampler, uvDetail, layerB, 0.0);',
+        '    let sampA = stochasticSampleA(tAlbedoHeight, tAlbedoHeightSampler, uvDetail, layerA);',
+        '    let sampB = stochasticSampleA(tAlbedoHeight, tAlbedoHeightSampler, uvDetail, layerB);',
         '    let hBlend = saturate((sampA.a + wa - sampB.a - wb) / 0.1 + 0.5);',
         '    var albedo = mix(sampB.rgb, sampA.rgb, hBlend);',
+        '    // Detail->macro crossfade (ground-detail-v1.md Step 1c): fine ground detail fades into',
+        '    // a coarser regional sample as distance grows, instead of a flat-color fallback (avoids',
+        '    // any manual color calibration / pop). Gated so the common ground-level case pays nothing.',
+        '    let macroFade = smoothstep(TERRAIN_DETAIL_FADE_ON_KM, TERRAIN_DETAIL_FADE_OFF_KM, camDistKm);',
+        '    if (macroFade > 0.0) {',
+        '        let sampAMacro = stochasticSampleA(tAlbedoHeight, tAlbedoHeightSampler, uvMacro, layerA);',
+        '        let sampBMacro = stochasticSampleA(tAlbedoHeight, tAlbedoHeightSampler, uvMacro, layerB);',
+        '        let hBlendMacro = saturate((sampAMacro.a + wa - sampBMacro.a - wb) / 0.1 + 0.5);',
+        '        let albedoMacro = mix(sampBMacro.rgb, sampAMacro.rgb, hBlendMacro);',
+        '        albedo = mix(albedo, albedoMacro, macroFade);',
+        '    }',
         '    // Broad plains/highlands brightness variation (continental scale, subtle, no swim).',
         '    albedo = albedo * (1.0 + TERRAIN_PLAINS_AMP * terrainSimplex3_d(dir * TERRAIN_PLAINS_FREQ).x);',
         '    // Bright ejecta rays + halos of FRESH craters (the white impact traces). Higher albedo,',
