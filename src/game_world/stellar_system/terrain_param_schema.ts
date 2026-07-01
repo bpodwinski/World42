@@ -170,6 +170,10 @@ export const TERRAIN_PARAM_SCHEMA: ParamSpec[] = [
     min: 0, max: 2, step: 0.05, description: 'Scale of the real-texture tangent-space bump (regolith/basalt/rock micro-relief).'
   },
   {
+    path: 'lighting.brdf.normalTileM', group: 'Lighting', label: 'Normal tile size (m)', kind: 'baked',
+    min: 0.05, max: 3, step: 0.05, description: 'Physical size of one normal-map tile on the ground. Too large makes the bump look flat/smeared.'
+  },
+  {
     path: 'lighting.ground.onKm', group: 'Lighting', label: 'Ground detail on (km)', kind: 'baked',
     min: 0, max: 0.5, step: 0.005, description: 'Camera distance under which near-ground df64 micro-relief is full-on.'
   },

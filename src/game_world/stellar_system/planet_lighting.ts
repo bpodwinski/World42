@@ -42,6 +42,9 @@ export type BrdfLightingParams = {
     /** Scale of the real-texture tangent-space bump (ground-detail-v1.md Step 3). 0 = pure
      *  geometric/df64 normal; 1 = the texture-authored bump at full strength. */
     normalMapStrength?: number;
+    /** Physical size (metres) of one normal-map tile on the ground. Smaller = finer grain;
+     *  too large makes the bump read as flat/smeared (ground-detail-v1.md Step 3). */
+    normalTileM?: number;
     /**
      * Fresnel reflectance at normal incidence.
      * Physical range [0.02, 0.07] for geological/icy materials:
@@ -167,6 +170,7 @@ export const DEFAULT_LIGHTING: ResolvedLighting = {
         roughLo:    0.6,
         roughHi:    0.9,
         normalMapStrength: 0.6,
+        normalTileM: 0.5,
         f0:         0.04,
         specAa:     0.5,
         specMax:    4.0,
@@ -234,6 +238,7 @@ export function resolveLighting(json: PlanetLightingJSON, override?: PlanetLight
             roughLo:    ob.roughLo    ?? db.roughLo    ?? D.brdf.roughLo,
             roughHi:    ob.roughHi    ?? db.roughHi    ?? D.brdf.roughHi,
             normalMapStrength: ob.normalMapStrength ?? db.normalMapStrength ?? D.brdf.normalMapStrength,
+            normalTileM: ob.normalTileM ?? db.normalTileM ?? D.brdf.normalTileM,
             f0:         ob.f0         ?? db.f0         ?? D.brdf.f0,
             specAa:     ob.specAa     ?? db.specAa     ?? D.brdf.specAa,
             specMax:    ob.specMax    ?? db.specMax    ?? D.brdf.specMax,

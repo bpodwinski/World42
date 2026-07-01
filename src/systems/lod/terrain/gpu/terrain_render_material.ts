@@ -127,6 +127,12 @@ function bakedHeader(opts: TerrainRenderOptions): string {
         // single-scale formula radius/1.0, repurposed as the coarse/far scale for the Step 1c fade).
         `const TERRAIN_DETAIL_UV_FREQ : f32 = ${f(opts.radius / (2 * 0.003))};`,
         `const TERRAIN_MACRO_UV_FREQ : f32 = ${f(opts.radius / (2 * 0.5))};`,
+        // Normal map UV frequency (ground-detail-v1.md Step 3, revised): decoupled from the albedo
+        // detail tile (~3 m) because a real PBR normal map's bump grain reads at a much finer
+        // physical scale than the photographed color swatch — reusing TERRAIN_DETAIL_UV_FREQ
+        // stretched the bump too large, making it look flat/smeared instead of fine-grained.
+        // b.normalTileM is menu-tunable (metres); converted to km for the tile-size formula.
+        `const TERRAIN_NORMAL_UV_FREQ : f32 = ${f(opts.radius / (2 * (b.normalTileM / 1000)))};`,
         // Detail->macro texture crossfade window (ground-detail-v1.md Step 1c) — fine ground
         // detail is irrelevant past this altitude anyway, so this also bounds the extra sample cost.
         `const TERRAIN_DETAIL_FADE_ON_KM : f32 = ${f(20)};`,
@@ -461,6 +467,9 @@ function fragmentSource(opts: TerrainRenderOptions): string {
         '    // computed later, next to the albedo block) so Step 3 s normal/roughness pick can reuse',
         '    // them before the BRDF roughness term below needs the result.',
         '    let uvDetail = softDominantUV(dir) * TERRAIN_DETAIL_UV_FREQ;',
+        '    // Finer UV just for the normal map (ground-detail-v1.md Step 3, revised) -- see',
+        '    // TERRAIN_NORMAL_UV_FREQ s comment: reusing uvDetail made the bump read as oversized.',
+        '    let uvNormal = softDominantUV(dir) * TERRAIN_NORMAL_UV_FREQ;',
         '    let matW0 = terrainMaterialWeights(slope01); // x=regolith(layer0) y=basalt(layer2) z=rockFace(layer4)',
         '    // Near-ground WORLD-ANCHORED micro-relief. Reconstruct the surface direction in',
         '    // df64: world = uCamAnchor + rel (the eval subtracted the SAME f32 uCamAnchor, so',
@@ -492,12 +501,12 @@ function fragmentSource(opts: TerrainRenderOptions): string {
         '    // ground bump). Placed AFTER the df64 block so the texture bump stacks on top of both',
         '    // the macro fbm normal and the df64 micro-relief, and BEFORE the normal-AA block below',
         '    // so grazing-angle smoothing also catches the new high-frequency bump for free.',
-        '    // Fade by PIXEL FOOTPRINT (fpKm), not camera distance: uvDetail tiles are ~a few metres,',
-        '    // sampled at a fixed mip (stochasticSampleA forces LOD 0, since its per-cell rotation',
-        '    // breaks hardware derivative-based mip selection), so a straight-line distance fade left',
-        '    // the bump aliasing into visible noise at any grazing angle/altitude where the footprint',
-        '    // already exceeds the tile size. Same Nyquist idiom as TERRAIN_NORMAL_FP_LO/HI elsewhere.',
-        '    let bumpTileKm = TERRAIN_RADIUS / TERRAIN_DETAIL_UV_FREQ;',
+        '    // Fade by PIXEL FOOTPRINT (fpKm), not camera distance: uvNormal tiles are well under a',
+        '    // metre, sampled at a fixed mip (stochasticSampleA forces LOD 0, since its per-cell',
+        '    // rotation breaks hardware derivative-based mip selection), so a straight-line distance',
+        '    // fade left the bump aliasing into visible noise at any grazing angle/altitude where the',
+        '    // footprint already exceeds the tile size. Same Nyquist idiom as TERRAIN_NORMAL_FP_LO/HI.',
+        '    let bumpTileKm = TERRAIN_RADIUS / TERRAIN_NORMAL_UV_FREQ;',
         '    let bumpFpFade = 1.0 - smoothstep(bumpTileKm * TERRAIN_NORMAL_FP_LO, bumpTileKm * TERRAIN_NORMAL_FP_HI, fpKm);',
         '    var roughnessMapMod = 1.0;',
         '    if (bumpFpFade > 0.0 && (uniforms.uPerfMask & 128) == 0) {',
@@ -505,7 +514,7 @@ function fragmentSource(opts: TerrainRenderOptions): string {
         '        var wN = matW0.x;',
         '        if (matW0.y > wN) { layerN = 2; wN = matW0.y; }',
         '        if (matW0.z > wN) { layerN = 4; wN = matW0.z; }',
-        '        let nrSample = stochasticSampleA(tNormalRoughness, tNormalRoughnessSampler, uvDetail, layerN);',
+        '        let nrSample = stochasticSampleA(tNormalRoughness, tNormalRoughnessSampler, uvNormal, layerN);',
         '        let tsN = vec2<f32>(nrSample.r, nrSample.g) * 2.0 - 1.0;',
         '        let tsZ = sqrt(max(0.0, 1.0 - dot(tsN, tsN)));',
         '        var tangN: vec3<f32>; var bitanN: vec3<f32>;',
@@ -716,7 +725,10 @@ export function buildTerrainRenderMaterial(
     material.setStorageBuffer('terrainPerm', permBuffer);
     material.setVector3('uLightDirection', new Vector3(0, -1, 0));
     material.setInt('uDebugLod', 0);
-    material.setInt('uPerfMask', 0);
+    // Default perf mask: bit1 (2) disables the df64 near-ground micro-relief block
+    // (ground-detail-v1.md Step 4) — the real-texture normal map (Step 3) now supplies the
+    // close-range detail. Still toggleable live via __world42Perf.setPerfMask(0) to A/B compare.
+    material.setInt('uPerfMask', 2);
     material.setVector3('uCamAnchor', new Vector3(0, 0, 0));
     material.setVector3('uCamDelta', new Vector3(0, 0, 0));
     material.setVector3('uAmbient', opts.ambient ?? new Vector3(0.008, 0.008, 0.008));
