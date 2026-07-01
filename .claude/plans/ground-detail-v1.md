@@ -115,7 +115,7 @@ BabylonJS 9.14 auto-assigns `@group/@binding` by scanning WGSL text; no manual n
 - `softDominantUV(d)` implemented exactly as sketched below — no seam
 - Material weight selection (`terrainMaterialWeights(slope01)`: regolith/basalt/rock_face) implemented
 - 2-material-max height blend implemented (using the albedo texture's alpha/height channel)
-- `tNormalRoughness` deliberately NOT bound yet (Step 3's job, per the original decision)
+- `tNormalRoughness` now bound too — see Step 3 below (done 2026-07-01, same session)
 
 **Also done (2026-07-01, second pass):**
 - UV frequency calibrated: `TERRAIN_DETAIL_UV_FREQ` (~3 m/tile) + `TERRAIN_MACRO_UV_FREQ` (~500 m/tile,
@@ -256,36 +256,55 @@ crater basins and highland plains.
 
 ## Step 3 — Normal Map Perturbation
 
-**What:** Replace the stub `tNormalRoughness` (bound in Step 1) with real normal map layers,
-and perturb `nFinal` at close range using a **dedicated fade constant** `TERRAIN_NM_FADE_KM`
-(~30 km) — NOT `dFade`, which is the df64 block fade capped at ~5 km and too restrictive.
+### Status ✅ DONE — completed 2026-07-01
 
-```wgsl
-let nmFade = 1.0 - smoothstep(0.0, TERRAIN_NM_FADE_KM, camDistKm);
-if (nmFade > 0.0) {
-    let nmSample = textureSampleLevel(tNormalRoughness, sTerrainMat, uvDetail, matA, 0.0);
-    let dn = (nmSample.rg * 2.0 - 1.0) * nmFade * NM_STRENGTH;
-    // tangent/bitangent from vDir × softDominantUV dominant axis (consistent with UV orientation)
-    let tangent   = normalize(cross(vDir, dominantAxisRef(vDir)));
-    let bitangent = cross(vDir, tangent);
-    nFinal = normalize(nFinal + tangent * dn.x + bitangent * dn.y);
-}
-```
+The sketch below (`TERRAIN_NM_FADE_KM`, `NM_STRENGTH`, `dominantAxisRef`) is **superseded** by the
+actual implementation, which reuses more existing infrastructure than originally planned:
 
-`TERRAIN_NM_FADE_KM` and `NM_STRENGTH` are baked constants, tunable via "Apply" in the options menu.
+- New `tNormalRoughness : texture_2d_array<f32>` binding + sampler, mirroring `tAlbedoHeight`
+  exactly (placeholder → async hot-swap via the same generic `loadMaterialArrayTexture` loader,
+  new `TERRAIN_NORMAL_ROUGHNESS_ASSET_MANIFEST` in `terrain_material_assets.ts`).
+- Placeholder is a flat neutral tangent-space normal `(0,0,1)` + roughness alpha `127`
+  (`mix(0.7,1.3,127/255) ≈ 1.0`, a no-op) — confirmed via `read_texture`: R=0.502, G=0.502,
+  B=1.0, A=0.498, exactly as designed.
+- Fade reuses the **existing** `TERRAIN_DETAIL_FADE_ON_KM`/`_OFF_KM` (from Step 1c's albedo
+  macro-crossfade) instead of a new dedicated constant — one wavelength range for both the
+  material texture AND its bump, which is simpler and avoids the "dedicated vs shared fade"
+  ambiguity the original sketch worried about.
+- Sample uses a **top-1** material pick (`layerN`, cheapest weight of `matW0`) rather than the
+  full top-2 height-blend used for albedo — accepted simplification, negligible visually for
+  isotropic ground bump.
+- Applied via `normalize(mix(nLocal, tangent*x + bitangent*y + nLocal*z, bumpFade))`, matching the
+  existing `nLocal = normalize(mix(nLocal, nDf, dFade))` idiom from the df64 block (not an ad-hoc
+  additive perturbation) — placed right after the df64 block closes, so it stacks on top of it, and
+  right before the grazing-angle normal-AA block, so that smoothing also catches the new bump for
+  free.
+- Roughness modulated by `mix(0.7, 1.3, nrSample.a)`, multiplied into the existing slope-driven
+  `mix(TERRAIN_ROUGH_LO, TERRAIN_ROUGH_HI, slope01)` and clamped to `[0.05, 1]`.
+- New `TERRAIN_NORMAL_MAP_STRENGTH` baked constant (default `0.6`), menu-tunable
+  (`lighting.brdf.normalMapStrength`, `Lighting` group, following the `regionalAmp`/`roughLo`
+  precedent).
+- New `uPerfMask` bit7 (`128`) skips the block entirely — console A/B via
+  `__world42Perf.setPerfMask(128)` vs `0`, matching the existing perf-flag convention.
+- Two small hoists (`matW0`, `macroFade`, `uvDetail` moved earlier, no behavior change) so the
+  normal/roughness pick can run before the BRDF roughness term needs the result — the duplicate
+  computations further down were deleted, not left redundant.
 
-**Why after Step 1:** reuses the same texture array binding and the same `dFade` scalar
-already computed for the df64 block. Adding it in the same frame budget as Step 1 would
-make the first step harder to profile.
+**Verified:** `npm run build` exits 0; `npx vitest run` stays green (149/150, unaffected — pure
+fragment-shading change, no geometry/collision impact); zero WebGPU validation errors; baked
+`TERRAIN_NORMAL_MAP_STRENGTH = 0.6` confirmed via `get_draw_state`; placeholder texture read back
+exactly neutral; missing asset files (none placed yet — see below) fail gracefully with a console
+warning and the neutral placeholder stays bound, confirmed via the dev console; full-disc render
+sanity-checked with the block active (mask=0) — no crash, no artifact, no regression vs Step 2's
+maria/highlands look.
 
-**Why before Step 4:** the normal map replaces the sub-meter detail that fragment df64
-provided via extra micro-relief octaves. Step 4 (df64 removal) is only safe after Step 3
-is confirmed visually.
-
-**Files:** `terrain_render_material.ts` (fragment only)
-
-**Done when:** sub-meter surface grain visible at ground level without fragment df64 active
-(verify with `uPerfMask bit 1` still toggled from Step 0).
+**Not yet done:** no real Poly Haven `nor_gl.png`/`rough.png` assets have been placed under
+`public/assets/terrain/selena/` yet, so the actual bump is not visually confirmed — only the
+plumbing (binding, fade, hoists, menu, perfMask toggle) is. The Poly Haven zips already downloaded
+for Step 1's albedo/height ship these maps for the same materials; dropping them in
+(`<material>_normal.png` / `<material>_roughness.png`) requires no further code changes — the
+async loader will hot-swap them in automatically. Verify orientation once they land (flip the G
+channel if bumps look like pits instead of raised grain).
 
 ---
 
@@ -338,10 +357,10 @@ no visual regression vs Step 3 state.
 |---|---|---|
 | 1 | Dominant-axis UV seam at octahedron edges | `softDominantUV` — weighted blend of 3 projections via `pow(a, 8)` |
 | 2 | TypeScript `texture_2d_array` API undefined | Documented: prototype first, new `createTerrainArrayTexture` helper likely needed |
-| 3 | Normal map fade reused `dFade` (< 5 km) | Dedicated `TERRAIN_NM_FADE_KM` constant (~30 km) in Step 3 |
+| 3 | Normal map fade reused `dFade` (< 5 km) | Actually shipped: reuses `TERRAIN_DETAIL_FADE_ON/OFF_KM` (Step 1c's albedo crossfade, ~20-60 km) instead of a new dedicated constant — simpler, one fade range for the material texture and its bump |
 | 4 | Height blend described for 2 materials, plan has 3+ | 2-material-max rule: pick top-2 weights per pixel, height-blend those only |
 | 5 | Color pop at 120 km fade boundary | Calibrate `TERRAIN_REGOLITH/ROCK` baked constants to match texture average albedo |
-| 6 | `tNormalRoughness` bound unused in Step 1 | Bind 1×1 neutral normal stub `(0.5, 0.5, 1.0, 0)` in Step 1; replaced in Step 3 |
+| 6 | `tNormalRoughness` bound unused in Step 1 | Bind 1×1 neutral normal stub `(0.5, 0.5, 1.0, 0)` in Step 1; replaced by a real 5-layer array + async load in Step 3 (done) |
 
 ---
 

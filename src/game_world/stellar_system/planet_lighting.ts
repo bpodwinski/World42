@@ -39,6 +39,9 @@ export type BrdfLightingParams = {
     roughLo?: number;
     /** Cook-Torrance roughness on steep slopes. */
     roughHi?: number;
+    /** Scale of the real-texture tangent-space bump (ground-detail-v1.md Step 3). 0 = pure
+     *  geometric/df64 normal; 1 = the texture-authored bump at full strength. */
+    normalMapStrength?: number;
     /**
      * Fresnel reflectance at normal incidence.
      * Physical range [0.02, 0.07] for geological/icy materials:
@@ -163,6 +166,7 @@ export const DEFAULT_LIGHTING: ResolvedLighting = {
         aoStrength: 0.35,
         roughLo:    0.6,
         roughHi:    0.9,
+        normalMapStrength: 0.6,
         f0:         0.04,
         specAa:     0.5,
         specMax:    4.0,
@@ -229,6 +233,7 @@ export function resolveLighting(json: PlanetLightingJSON, override?: PlanetLight
             aoStrength: ob.aoStrength ?? db.aoStrength ?? D.brdf.aoStrength,
             roughLo:    ob.roughLo    ?? db.roughLo    ?? D.brdf.roughLo,
             roughHi:    ob.roughHi    ?? db.roughHi    ?? D.brdf.roughHi,
+            normalMapStrength: ob.normalMapStrength ?? db.normalMapStrength ?? D.brdf.normalMapStrength,
             f0:         ob.f0         ?? db.f0         ?? D.brdf.f0,
             specAa:     ob.specAa     ?? db.specAa     ?? D.brdf.specAa,
             specMax:    ob.specMax    ?? db.specMax    ?? D.brdf.specMax,

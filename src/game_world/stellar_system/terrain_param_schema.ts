@@ -166,6 +166,10 @@ export const TERRAIN_PARAM_SCHEMA: ParamSpec[] = [
     min: 0, max: 1, step: 0.01, description: 'Specular roughness on steep slopes.'
   },
   {
+    path: 'lighting.brdf.normalMapStrength', group: 'Lighting', label: 'Normal map strength', kind: 'baked',
+    min: 0, max: 2, step: 0.05, description: 'Scale of the real-texture tangent-space bump (regolith/basalt/rock micro-relief).'
+  },
+  {
     path: 'lighting.ground.onKm', group: 'Lighting', label: 'Ground detail on (km)', kind: 'baked',
     min: 0, max: 0.5, step: 0.005, description: 'Camera distance under which near-ground df64 micro-relief is full-on.'
   },

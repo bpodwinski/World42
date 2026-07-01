@@ -35,7 +35,10 @@ import {
     type NoiseParams
 } from '../terrain_noise';
 import { DEFAULT_LIGHTING, type ResolvedLighting } from '../../../../game_world/stellar_system/planet_lighting';
-import { TERRAIN_MATERIAL_ASSET_MANIFEST } from '../../../../game_world/stellar_system/terrain_material_assets';
+import {
+    TERRAIN_MATERIAL_ASSET_MANIFEST,
+    TERRAIN_NORMAL_ROUGHNESS_ASSET_MANIFEST
+} from '../../../../game_world/stellar_system/terrain_material_assets';
 import { loadMaterialArrayTexture } from './terrain_material_asset_loader';
 import terrainNoiseWgsl from '../../../../assets/shaders/terrain/gpu/terrain_noise.wgsl';
 import terrainF64Wgsl from '../../../../assets/shaders/terrain/engine/terrain_f64.wgsl';
@@ -154,6 +157,9 @@ function bakedHeader(opts: TerrainRenderOptions): string {
         // instead of a sharp glossy lobe that blotches/sparkles on every micro-bump toward the Sun.
         `const TERRAIN_ROUGH_LO : f32 = ${f(b.roughLo)};`,
         `const TERRAIN_ROUGH_HI : f32 = ${f(b.roughHi)};`,
+        // Real-texture tangent-space bump scale (ground-detail-v1.md Step 3). 0 = pure geometric/
+        // df64 normal (unchanged); 1 = the texture-authored bump applied at full strength.
+        `const TERRAIN_NORMAL_MAP_STRENGTH : f32 = ${f(b.normalMapStrength)};`,
         `const TERRAIN_F0 : f32 = ${f(b.f0)};`,
         // Geometric specular antialiasing: scales the screen-space normal variance added to
         // roughness^2. Higher = more de-sparkle (softer highlight under micro-relief / at grazing).
@@ -296,7 +302,8 @@ function fragmentSource(opts: TerrainRenderOptions): string {
         // via the P-HUD gpuMs. bit0 = skip the slope normal; bit1 = skip the df64 near-ground
         // detail block; bit2 = skip the crater rays; bit3 = skip AO; bit4 = skip GGX specular;
         // bit6 (64) = zero the per-vertex crater gradient in the normals (visual A/B; the crater
-        // compute now lives in the vertex shader, so this no longer changes fragment cost).
+        // compute now lives in the vertex shader, so this no longer changes fragment cost);
+        // bit7 (128) = skip the real-texture normal/roughness sample (ground-detail-v1.md Step 3).
         'uniform uPerfMask : i32;',
         // Camera position in planet-local sim units (= the SAME f32 value the df64 eval
         // subtracted to make `rel`). world = uCamAnchor + rel reconstructs the surface point
@@ -322,6 +329,10 @@ function fragmentSource(opts: TerrainRenderOptions): string {
         // be exactly '<textureName>Sampler' — BabylonJS auto-pairs it via a naming-convention regex.
         'var tAlbedoHeight : texture_2d_array<f32>;',
         'var tAlbedoHeightSampler : sampler;',
+        // Real-texture tangent-space normal (rgb, decoded *2-1) + roughness (alpha), one layer per
+        // material (ground-detail-v1.md Step 3). Same layer indices as tAlbedoHeight.
+        'var tNormalRoughness : texture_2d_array<f32>;',
+        'var tNormalRoughnessSampler : sampler;',
         'varying vDir : vec3<f32>;',
         'varying vRel : vec3<f32>;',
         'varying vFragmentDepth : f32;',
@@ -417,6 +428,10 @@ function fragmentSource(opts: TerrainRenderOptions): string {
         '    // Same per-vertex camera distance (km) the height decode used -> the detail',
         '    // octaves in the normal match the displaced geometry (no shading mismatch).',
         '    let camDistKm = length(rel + uniforms.uCamDelta);',
+        '    // Detail->macro crossfade distance (ground-detail-v1.md Step 1c): hoisted here (was',
+        '    // computed later, next to the albedo block) so the Step 3 normal/roughness bump can',
+        '    // also fade out at the same distance the material textures do.',
+        '    let macroFade = smoothstep(TERRAIN_DETAIL_FADE_ON_KM, TERRAIN_DETAIL_FADE_OFF_KM, camDistKm);',
         '    // Pixel world footprint (km): how much surface one pixel covers. Huge at grazing -> used',
         '    // to Nyquist-fade sub-footprint fbm octaves out of the SHADING normal (kills grazing-sun',
         '    // normal grain at the source; height/collision are untouched). dpdx/dpdy of the local',
@@ -442,6 +457,11 @@ function fragmentSource(opts: TerrainRenderOptions): string {
         '    // only the tangent projection runs per pixel now (the 2nd per-pixel macro fbm is gone).',
         '    if ((uniforms.uPerfMask & 1) == 0) { nSlope = terrainNormalFromGrad(dir, TERRAIN_RADIUS, fragmentInputs.vSlopeFbmGrad + craterGradSlope); }',
         '    let slope01 = clamp(1.0 - dot(nSlope, dir), 0.0, 1.0);',
+        '    // Material weights (ground-detail-v1.md Step 1c) and detail UV: hoisted here (was',
+        '    // computed later, next to the albedo block) so Step 3 s normal/roughness pick can reuse',
+        '    // them before the BRDF roughness term below needs the result.',
+        '    let uvDetail = softDominantUV(dir) * TERRAIN_DETAIL_UV_FREQ;',
+        '    let matW0 = terrainMaterialWeights(slope01); // x=regolith(layer0) y=basalt(layer2) z=rockFace(layer4)',
         '    // Near-ground WORLD-ANCHORED micro-relief. Reconstruct the surface direction in',
         '    // df64: world = uCamAnchor + rel (the eval subtracted the SAME f32 uCamAnchor, so',
         '    // its rounding error cancels and world == the true surface point to ~um). normalize',
@@ -465,6 +485,35 @@ function fragmentSource(opts: TerrainRenderOptions): string {
         '        let dgrad = terrainGroundDetailGrad_df64(dxD, dyD, dzD, TERRAIN_GROUND_BASE_FREQ, TERRAIN_GROUND_DETAIL_OCTAVES);',
         '        let tg = dgrad - dot(dgrad, nLocal) * nLocal;',
         '        nLocal = normalize(nLocal - (TERRAIN_GROUND_STRENGTH * dFade) * tg);',
+        '    }',
+        '    // Real-texture tangent-space normal + roughness (ground-detail-v1.md Step 3). Top-1',
+        '    // material pick (cheaper than the height-blended top-2 used for albedo below -- the',
+        '    // boundary mismatch against the blended albedo is visually negligible for isotropic',
+        '    // ground bump). Placed AFTER the df64 block so the texture bump stacks on top of both',
+        '    // the macro fbm normal and the df64 micro-relief, and BEFORE the normal-AA block below',
+        '    // so grazing-angle smoothing also catches the new high-frequency bump for free.',
+        '    // Fade by PIXEL FOOTPRINT (fpKm), not camera distance: uvDetail tiles are ~a few metres,',
+        '    // sampled at a fixed mip (stochasticSampleA forces LOD 0, since its per-cell rotation',
+        '    // breaks hardware derivative-based mip selection), so a straight-line distance fade left',
+        '    // the bump aliasing into visible noise at any grazing angle/altitude where the footprint',
+        '    // already exceeds the tile size. Same Nyquist idiom as TERRAIN_NORMAL_FP_LO/HI elsewhere.',
+        '    let bumpTileKm = TERRAIN_RADIUS / TERRAIN_DETAIL_UV_FREQ;',
+        '    let bumpFpFade = 1.0 - smoothstep(bumpTileKm * TERRAIN_NORMAL_FP_LO, bumpTileKm * TERRAIN_NORMAL_FP_HI, fpKm);',
+        '    var roughnessMapMod = 1.0;',
+        '    if (bumpFpFade > 0.0 && (uniforms.uPerfMask & 128) == 0) {',
+        '        var layerN = 0;',
+        '        var wN = matW0.x;',
+        '        if (matW0.y > wN) { layerN = 2; wN = matW0.y; }',
+        '        if (matW0.z > wN) { layerN = 4; wN = matW0.z; }',
+        '        let nrSample = stochasticSampleA(tNormalRoughness, tNormalRoughnessSampler, uvDetail, layerN);',
+        '        let tsN = vec2<f32>(nrSample.r, nrSample.g) * 2.0 - 1.0;',
+        '        let tsZ = sqrt(max(0.0, 1.0 - dot(tsN, tsN)));',
+        '        var tangN: vec3<f32>; var bitanN: vec3<f32>;',
+        '        terrainSphereTangents(nLocal, &tangN, &bitanN);',
+        '        let bumpedN = normalize(tangN * tsN.x + bitanN * tsN.y + nLocal * tsZ);',
+        '        let bumpFade = bumpFpFade * TERRAIN_NORMAL_MAP_STRENGTH;',
+        '        nLocal = normalize(mix(nLocal, bumpedN, saturate(bumpFade)));',
+        '        roughnessMapMod = mix(0.7, 1.3, nrSample.a);',
         '    }',
         '    // Diffuse normal AA: where nLocal varies fast across a pixel (sub-pixel foreground',
         '    // micro-relief), blend it toward the smooth landform normal (nSlope) so the diffuse ndl',
@@ -510,7 +559,7 @@ function fragmentSource(opts: TerrainRenderOptions): string {
         '        let H       = normalize(L + V);',
         '        let NdH     = max(dot(nWorld, H), 0.0);',
         '        let VdH     = max(dot(V, H), 0.0);',
-        '        let roughness = mix(TERRAIN_ROUGH_LO, TERRAIN_ROUGH_HI, slope01);',
+        '        let roughness = clamp(mix(TERRAIN_ROUGH_LO, TERRAIN_ROUGH_HI, slope01) * roughnessMapMod, 0.05, 1.0);',
         '        let alpha   = roughness * roughness;',
         '        // Geometric specular AA (Kaplanyan): where the shading normal varies fast across a',
         '        // pixel (per-pixel micro-relief, worst at grazing toward the light) widen the GGX',
@@ -536,10 +585,9 @@ function fragmentSource(opts: TerrainRenderOptions): string {
         '    let lighting = uniforms.uAmbient * ao + TERRAIN_LIGHTCOLOR * (uniforms.uLightIntensity * refl);',
         '    // Material-driven albedo (ground-detail-v1.md Step 1a/1b/1c). textureSampleLevel, not',
         '    // textureSample: this call sits after non-uniform branches (dFade/uPerfMask), so',
-        '    // implicit-derivative LOD is not legal here anyway.',
-        '    let uvDetail = softDominantUV(dir) * TERRAIN_DETAIL_UV_FREQ;',
+        '    // implicit-derivative LOD is not legal here anyway. uvDetail/matW0 are computed earlier',
+        '    // (next to slope01) so Step 3 s normal/roughness pick can reuse them.',
         '    let uvMacro  = softDominantUV(dir) * TERRAIN_MACRO_UV_FREQ;',
-        '    let matW0 = terrainMaterialWeights(slope01); // x=regolith(layer0) y=basalt(layer2) z=rockFace(layer4)',
         '    // 2-material-max height blend (ground-detail-v1.md): pick the top-2 weighted layers,',
         '    // height-blend those via the albedo texture s alpha channel so rock emerges from dust',
         '    // instead of a flat linear mix. Avoids undefined 3-way height blending.',
@@ -554,7 +602,7 @@ function fragmentSource(opts: TerrainRenderOptions): string {
         '    // Detail->macro crossfade (ground-detail-v1.md Step 1c): fine ground detail fades into',
         '    // a coarser regional sample as distance grows, instead of a flat-color fallback (avoids',
         '    // any manual color calibration / pop). Gated so the common ground-level case pays nothing.',
-        '    let macroFade = smoothstep(TERRAIN_DETAIL_FADE_ON_KM, TERRAIN_DETAIL_FADE_OFF_KM, camDistKm);',
+        '    // (macroFade computed earlier, next to camDistKm.)',
         '    if (macroFade > 0.0) {',
         '        let sampAMacro = stochasticSampleA(tAlbedoHeight, tAlbedoHeightSampler, uvMacro, layerA);',
         '        let sampBMacro = stochasticSampleA(tAlbedoHeight, tAlbedoHeightSampler, uvMacro, layerB);',
@@ -598,6 +646,7 @@ export type TerrainRenderMaterial = {
     material: ShaderMaterial;
     permBuffer: StorageBufferType;
     albedoArrayTexture: RawTexture2DArray;
+    normalRoughnessArrayTexture: RawTexture2DArray;
     setLightDirection(dir: Vector3): void;
     setDebugLod(on: boolean): void;
     setPerfMask(mask: number): void;
@@ -630,7 +679,7 @@ export function buildTerrainRenderMaterial(
             attributes: ['position'],
             uniforms: ['viewProjection', 'world', 'uLightDirection', 'logarithmicDepthConstant', 'uDebugLod', 'uPerfMask', 'uCamAnchor', 'uCamDelta', 'uAmbient', 'uLightIntensity', 'uAtmoDensity', 'uAtmoColor'],
             storageBuffers: ['terrainHeap', 'terrainPos', 'terrainIndices', 'terrainPerm'],
-            samplers: ['tAlbedoHeight']
+            samplers: ['tAlbedoHeight', 'tNormalRoughness']
         }
     );
     // Back-face culling: the octahedron is consistently wound so only the camera-facing
@@ -707,10 +756,39 @@ export function buildTerrainRenderMaterial(
             });
     }
 
+    // Placeholder flat tangent-space normal (0,0,1) + neutral roughness (ground-detail-v1.md
+    // Step 3). Alpha 127 -> mix(0.7, 1.3, 127/255) ~= 1.0, so the roughness term is a no-op until
+    // the real texture hot-swaps in (no visible pop).
+    const packedNormalRoughnessData = packLayersRgba8(
+        TERRAIN_MATERIAL_LAYERS.map(() => solidColorLayer(MATERIAL_TEX_SIZE, MATERIAL_TEX_SIZE, 128, 128, 255, 127)),
+        MATERIAL_TEX_SIZE,
+        MATERIAL_TEX_SIZE
+    );
+    const normalRoughnessArrayTexture = createArrayTexture(
+        scene,
+        packedNormalRoughnessData,
+        MATERIAL_TEX_SIZE,
+        MATERIAL_TEX_SIZE,
+        TERRAIN_MATERIAL_LAYERS.length,
+        false, // generateMipMaps — no benefit on a flat placeholder
+        Constants.TEXTURE_NEAREST_SAMPLINGMODE
+    );
+    material.setTexture('tNormalRoughness', normalRoughnessArrayTexture);
+
+    const normalRoughnessSources = opts.profileId ? TERRAIN_NORMAL_ROUGHNESS_ASSET_MANIFEST[opts.profileId] : undefined;
+    if (normalRoughnessSources) {
+        loadMaterialArrayTexture(scene, `${opts.profileId}:normalRoughness`, normalRoughnessSources, 512)
+            .then((real) => material.setTexture('tNormalRoughness', real))
+            .catch((err: unknown) => {
+                console.warn(`[terrain] '${key}' normal/roughness texture load failed, keeping placeholder:`, err);
+            });
+    }
+
     return {
         material,
         permBuffer,
         albedoArrayTexture,
+        normalRoughnessArrayTexture,
         setLightDirection(dir: Vector3): void {
             material.setVector3('uLightDirection', dir);
         },
@@ -742,6 +820,7 @@ export function buildTerrainRenderMaterial(
             material.dispose();
             permBuffer.dispose();
             albedoArrayTexture.dispose();
+            normalRoughnessArrayTexture.dispose();
         }
     };
 }
