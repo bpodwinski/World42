@@ -446,13 +446,11 @@ export class TerrainSource implements TerrainGeometrySource {
         this.render.setCamDelta(this.tmpCamDelta);
 
         // Debug fragment perf-profiling mask (set via __world42Perf.setPerfMask): bit0 skip slope
-        // normal, bit1 skip df64 ground detail, bit2 skip crater rays — to A/B each block's GPU cost.
+        // normal, bit2 skip crater rays — to A/B each block's GPU cost. bit1 is retired (used to
+        // skip the fragment df64 near-ground detail block, removed in ground-detail-v1.md Step 4).
         // Set every frame (even when the topology is frozen) so toggles take effect immediately.
-        // Default bit1 (2) ON: df64 near-ground micro-relief is disabled by default now that the
-        // real-texture normal map (ground-detail-v1.md Step 3) supplies close-range detail —
-        // __world42Perf.setPerfMask(0) re-enables df64 for A/B comparison.
         this.render.setPerfMask(
-            (globalThis as unknown as { __terrainPerfMask?: number }).__terrainPerfMask ?? 2
+            (globalThis as unknown as { __terrainPerfMask?: number }).__terrainPerfMask ?? 0
         );
         this.render.setLightIntensity(this.starIntensity);
 

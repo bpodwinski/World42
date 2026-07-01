@@ -189,7 +189,6 @@ function mergeLightingParams(
         ...base,
         ...over,
         atmosphere: mergeObj(base.atmosphere, over.atmosphere),
-        ground: mergeObj(base.ground, over.ground),
         terrain: mergeObj(base.terrain, over.terrain),
         brdf: mergeObj(base.brdf, over.brdf)
     };

@@ -7,7 +7,6 @@ const FULL_DEFAULTS: PlanetLightingJSON = {
         ambient:     [0.008, 0.008, 0.008],
         atmoDensity: 0,
         atmoColor:   [0, 0, 0],
-        ground:  { onKm: 0.05, offKm: 0.15, strength: 0.03, octaves: 4 },
         terrain: { highlandTint: [1.12, 1.12, 1.16], slopeLo: 0.03, slopeHi: 0.22, slopeDist: 2.0, plainsAmp: 0.12 },
         brdf:    { lunarLs: 0.7, oppAmp: 0.15, oppCos: 0.93, aoStrength: 0.35, roughLo: 0.6, roughHi: 0.9, f0: 0.04, specAa: 0.5, specMax: 4.0 }
     }
@@ -18,7 +17,6 @@ describe('resolveLighting', () => {
         const result = resolveLighting(FULL_DEFAULTS);
         expect(result.albedo).toEqual([0.15, 0.14, 0.13]);
         expect(result.brdf.lunarLs).toBe(0.7);
-        expect(result.ground.onKm).toBe(0.05);
         expect(result.terrain.slopeLo).toBe(0.03);
     });
 
@@ -27,7 +25,6 @@ describe('resolveLighting', () => {
         const result = resolveLighting(json);
         expect(result.albedo).toEqual(DEFAULT_LIGHTING.albedo);
         expect(result.brdf.roughLo).toBe(DEFAULT_LIGHTING.brdf.roughLo);
-        expect(result.ground.offKm).toBe(DEFAULT_LIGHTING.ground.offKm);
     });
 
     it('override replaces only specified fields', () => {
@@ -80,7 +77,6 @@ describe('resolveLighting', () => {
         expect(Array.isArray(result.ambient)).toBe(true);
         expect(typeof result.atmoDensity).toBe('number');
         expect(Array.isArray(result.atmoColor)).toBe(true);
-        expect(typeof result.ground.onKm).toBe('number');
         expect(typeof result.terrain.plainsAmp).toBe('number');
         expect(typeof result.brdf.f0).toBe('number');
         expect(typeof result.brdf.specAa).toBe('number');

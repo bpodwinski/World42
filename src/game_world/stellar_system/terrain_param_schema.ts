@@ -174,18 +174,6 @@ export const TERRAIN_PARAM_SCHEMA: ParamSpec[] = [
     min: 0.05, max: 3, step: 0.05, description: 'Physical size of one normal-map tile on the ground. Too large makes the bump look flat/smeared.'
   },
   {
-    path: 'lighting.ground.onKm', group: 'Lighting', label: 'Ground detail on (km)', kind: 'baked',
-    min: 0, max: 0.5, step: 0.005, description: 'Camera distance under which near-ground df64 micro-relief is full-on.'
-  },
-  {
-    path: 'lighting.ground.offKm', group: 'Lighting', label: 'Ground detail off (km)', kind: 'baked',
-    min: 0.05, max: 2, step: 0.01, description: 'Camera distance over which near-ground micro-relief has fully faded out.'
-  },
-  {
-    path: 'lighting.ground.strength', group: 'Lighting', label: 'Ground detail strength', kind: 'baked',
-    min: 0, max: 0.2, step: 0.005, description: 'Near-ground micro-relief normal-tilt amount.'
-  },
-  {
     path: 'lighting.brdf.oppCos', group: 'Lighting', label: 'Opposition width', kind: 'baked',
     min: 0.8, max: 1, step: 0.005, description: 'Cosine threshold of the opposition surge (higher = narrower hotspot).'
   },
@@ -200,10 +188,6 @@ export const TERRAIN_PARAM_SCHEMA: ParamSpec[] = [
   {
     path: 'lighting.brdf.specMax', group: 'Lighting', label: 'Specular clamp', kind: 'baked',
     min: 0, max: 10, step: 0.1, description: 'Firefly clamp on the specular term (caps grazing blow-ups).'
-  },
-  {
-    path: 'lighting.ground.octaves', group: 'Lighting', label: 'Ground detail octaves', kind: 'baked', int: true,
-    min: 0, max: 8, step: 1, description: 'Number of near-ground df64 micro-relief octaves.'
   },
   {
     path: 'lighting.atmoDensity', group: 'Lighting', label: 'Aerial fog', kind: 'uniform',

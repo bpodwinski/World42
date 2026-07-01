@@ -1,16 +1,5 @@
 /** Per-planet lighting configuration — types, defaults, and merge logic. */
 
-export type GroundLightingParams = {
-    /** Camera distance (km) at which the df64 ground detail fades in. */
-    onKm?: number;
-    /** Camera distance (km) at which the df64 ground detail fades out. */
-    offKm?: number;
-    /** Normal-tilt amplitude for the micro-relief octaves near the ground. */
-    strength?: number;
-    /** Number of high-frequency octaves added near the ground (df64 path). */
-    octaves?: number;
-};
-
 export type TerrainLightingParams = {
     /** RGB multiplier applied at high altitude (values > 1 brighten a channel). */
     highlandTint?: [number, number, number];
@@ -99,7 +88,6 @@ export type PlanetLightingParams = {
     atmoColor?: [number, number, number];
     /** Single-scattering atmosphere (omit for airless bodies). */
     atmosphere?: AtmosphereParams;
-    ground?: GroundLightingParams;
     terrain?: TerrainLightingParams;
     brdf?: BrdfLightingParams;
 };
@@ -113,7 +101,6 @@ export type PlanetLightingJSON = {
 };
 
 /** Fully resolved lighting — all fields present (no optionals). Passed to bakedHeader(). */
-export type ResolvedGround   = Required<GroundLightingParams>;
 export type ResolvedTerrain  = Required<TerrainLightingParams>;
 export type ResolvedBrdf     = Required<BrdfLightingParams>;
 export type ResolvedAtmosphere = Required<AtmosphereParams>;
@@ -125,7 +112,6 @@ export type ResolvedLighting = {
     atmoColor: [number, number, number];
     /** Resolved single-scattering atmosphere, or null for airless bodies. */
     atmosphere: ResolvedAtmosphere | null;
-    ground: ResolvedGround;
     terrain: ResolvedTerrain;
     brdf: ResolvedBrdf;
 };
@@ -148,12 +134,6 @@ export const DEFAULT_LIGHTING: ResolvedLighting = {
     atmoDensity: 0,
     atmoColor:   [0, 0, 0],
     atmosphere:  null,
-    ground: {
-        onKm:     0.05,
-        offKm:    0.15,
-        strength: 0.03,
-        octaves:  4
-    },
     terrain: {
         highlandTint: [1.12, 1.12, 1.16],
         slopeLo:      0.03,
@@ -202,10 +182,8 @@ function resolveAtmosphere(a: AtmosphereParams | undefined): ResolvedAtmosphere 
 export function resolveLighting(json: PlanetLightingJSON, override?: PlanetLightingParams): ResolvedLighting {
     const d = json._defaults ?? {};
     const o = override ?? {};
-    const dg = d.ground   ?? {};
     const dt = d.terrain  ?? {};
     const db = d.brdf     ?? {};
-    const og = o.ground   ?? {};
     const ot = o.terrain  ?? {};
     const ob = o.brdf     ?? {};
     const D = DEFAULT_LIGHTING;
@@ -216,12 +194,6 @@ export function resolveLighting(json: PlanetLightingJSON, override?: PlanetLight
         atmoDensity: o.atmoDensity ?? d.atmoDensity ?? D.atmoDensity,
         atmoColor:   o.atmoColor   ?? d.atmoColor   ?? D.atmoColor,
         atmosphere:  resolveAtmosphere(o.atmosphere ?? d.atmosphere),
-        ground: {
-            onKm:     og.onKm     ?? dg.onKm     ?? D.ground.onKm,
-            offKm:    og.offKm    ?? dg.offKm    ?? D.ground.offKm,
-            strength: og.strength ?? dg.strength ?? D.ground.strength,
-            octaves:  og.octaves  ?? dg.octaves  ?? D.ground.octaves
-        },
         terrain: {
             highlandTint: ot.highlandTint ?? dt.highlandTint ?? D.terrain.highlandTint,
             slopeLo:      ot.slopeLo      ?? dt.slopeLo      ?? D.terrain.slopeLo,

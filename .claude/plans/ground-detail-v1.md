@@ -308,22 +308,36 @@ channel if bumps look like pits instead of raised grain).
 
 ---
 
-## Step 4 — Remove Fragment df64 (conditional)
+## Step 4 — Remove Fragment df64
 
-**Precondition:** Step 0 baseline shows ≥ measurable GPU gain at low altitude AND Step 3
-normal map visually compensates the micro-relief.
+### Status ✅ DONE — completed 2026-07-01
 
-**What:** Delete the `dFade`-gated fragment df64 block from `fragmentSource()`. Remove
-`bit 1` from `uPerfMask` documentation. Remove the `df64_normalize` + extra FBM octaves.
+Removed outright (no A/B baseline gate — the user asked to drop it directly for GPU cost, having
+already been disabled by default since Step 3 landed with no reported visual regression):
 
-**Note:** EvaluateLEB df64 (`terrain_topo_eval_leb_f64.compute.wgsl`) is **NOT** removed.
-Compute cost is negligible vs fragment cost, and it protects geometry precision at
-high/ultra quality presets (maxDepth 28–30). Only the fragment side is removed.
+- Deleted the `dFade`-gated fragment df64 block from `fragmentSource()` (world-anchored df64
+  reconstruction + `terrainNoiseNormalAtShared_df64` + `terrainGroundDetailGrad_df64`).
+- Removed the now-dead `terrainF64Wgsl` / `terrainNoiseDf64Wgsl` imports and splices (were used
+  exclusively by the removed block — confirmed via grep before deleting).
+- Removed the now-dead baked constants `TERRAIN_GROUND_ON_KM/OFF_KM/STRENGTH/BASE_FREQ/DETAIL_OCTAVES`.
+- Removed the entire `GroundLightingParams`/`ResolvedGround`/`ground` field chain end-to-end
+  (`planet_lighting.ts` type + `DEFAULT_LIGHTING` + `resolveLighting()` merge, `planet_profiles.ts`
+  merge, `planet_lighting.json`'s `_defaults.ground` block, 4 dead `lighting.ground.*` menu entries
+  in `terrain_param_schema.ts`, `planet_lighting.test.ts` assertions) — leaving any of this in place
+  would have reintroduced the exact "menu edits a value, Apply does nothing, no error" class of bug
+  found and fixed earlier the same session (see memory: bug-spawn-ignored-default-system.md).
+- `uPerfMask` bit1 retired (left unassigned, not reused) with an updated doc comment; default
+  `uPerfMask` reset from `2` to `0` in both `terrain_render_material.ts` (initial material value)
+  and `terrain_source.ts` (the actual per-frame effective default).
 
-**Files:** `terrain_render_material.ts` (fragment only, baked header `uPerfMask` doc)
+**Note:** EvaluateLEB df64 (`terrain_topo_eval_leb_f64.compute.wgsl`) is **untouched** — separate
+compute-kernel file, negligible cost vs the removed fragment block, still protects geometry
+precision at high/ultra quality presets (maxDepth 28-30).
 
-**Done when:** perf HUD GPU% at ground equals Step 0 baseline (with bit 1 disabled),
-no visual regression vs Step 3 state.
+**Verified:** `npm run build` exits 0 (bundle 7.116→7.113 MiB); `npx vitest run` 149/150 green;
+fresh page load renders with zero console errors/WebGPU validation errors; visual spot-check at
+ground level shows no regression vs the Step 3 state (real-texture normal map alone supplies the
+close-range bump).
 
 ---
 

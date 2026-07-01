@@ -4,12 +4,6 @@
     "ambient":     [0.008, 0.008, 0.008],
     "atmoDensity": 0.0,
     "atmoColor":   [0.0, 0.0, 0.0],
-    "ground": {
-      "onKm":     0.05,
-      "offKm":    0.15,
-      "strength": 0.03,
-      "octaves":  4
-    },
     "terrain": {
       "highlandTint": [1.12, 1.12, 1.16],
       "slopeLo":      0.03,

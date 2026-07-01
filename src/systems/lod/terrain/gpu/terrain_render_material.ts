@@ -41,8 +41,6 @@ import {
 } from '../../../../game_world/stellar_system/terrain_material_assets';
 import { loadMaterialArrayTexture } from './terrain_material_asset_loader';
 import terrainNoiseWgsl from '../../../../assets/shaders/terrain/gpu/terrain_noise.wgsl';
-import terrainF64Wgsl from '../../../../assets/shaders/terrain/engine/terrain_f64.wgsl';
-import terrainNoiseDf64Wgsl from '../../../../assets/shaders/terrain/engine/terrain_noise_df64.wgsl';
 
 /** WGSL f32 literal (always has a decimal point). */
 function f(x: number): string {
@@ -89,7 +87,6 @@ const TERRAIN_MATERIAL_LAYERS: ReadonlyArray<readonly [number, number, number]> 
 function bakedHeader(opts: TerrainRenderOptions): string {
     const n = opts.noise;
     const L = opts.lighting ?? DEFAULT_LIGHTING;
-    const g = L.ground;
     const t = L.terrain;
     const b = L.brdf;
     const albedo = opts.albedo ?? new Vector3(L.albedo[0], L.albedo[1], L.albedo[2]);
@@ -109,14 +106,6 @@ function bakedHeader(opts: TerrainRenderOptions): string {
         craterHeaderWgsl(opts.craters ?? DEFAULT_CRATERS),
         `const TERRAIN_ALBEDO : vec3<f32> = vec3<f32>(${f(albedo.x)}, ${f(albedo.y)}, ${f(albedo.z)});`,
         `const TERRAIN_LIGHTCOLOR : vec3<f32> = vec3<f32>(${f(lightColor.x)}, ${f(lightColor.y)}, ${f(lightColor.z)});`,
-        // Near-ground detail band (world-anchored df64 micro-relief). ON/OFF in km = the
-        // camera-distance fade; STRENGTH = normal-tilt amount; BASE_FREQ = first ground
-        // octave's frequency on the UNIT dir (= radius / wavelength; 1 m base wavelength).
-        `const TERRAIN_GROUND_ON_KM : f32 = ${f(g.onKm)};`,
-        `const TERRAIN_GROUND_OFF_KM : f32 = ${f(g.offKm)};`,
-        `const TERRAIN_GROUND_STRENGTH : f32 = ${f(g.strength)};`,
-        `const TERRAIN_GROUND_DETAIL_OCTAVES : i32 = ${Math.max(0, Math.floor(g.octaves))};`,
-        `const TERRAIN_GROUND_BASE_FREQ : f32 = ${f(opts.radius * 1000)};`,
         // Slope is read from the SMOOTH landform normal (TERRAIN_SLOPE_DIST fades the cm
         // micro-relief out so rock follows 30m+ hills/crater walls, not per-pixel bumps).
         `const TERRAIN_SLOPE_DIST : f32 = ${f(t.slopeDist)};`,
@@ -295,18 +284,16 @@ function fragmentSource(opts: TerrainRenderOptions): string {
         bakedHeader(opts),
         'var<storage, read> terrainPerm : array<u32>;',
         terrainNoiseWgsl,
-        // df64 domain noise (cm-precise ground detail). Order matters: terrain_noise.wgsl (terrainCorner/
-        // terrainPermAt/TERRAIN_MAX_*) and the baked TERRAIN_* constants must precede these, then df64 prims,
-        // then the df64 noise. Same compose order as the metric eval kernel (proven to compile).
-        terrainF64Wgsl,
-        terrainNoiseDf64Wgsl,
         'uniform world : mat4x4<f32>;',
         'uniform uLightDirection : vec3<f32>;',
         'uniform logarithmicDepthConstant : f32;',
         'uniform uDebugLod : i32;',
         // Fragment perf-profiling mask (debug): skip heavy blocks to measure each one s GPU cost
-        // via the P-HUD gpuMs. bit0 = skip the slope normal; bit1 = skip the df64 near-ground
-        // detail block; bit2 = skip the crater rays; bit3 = skip AO; bit4 = skip GGX specular;
+        // via the P-HUD gpuMs. bit0 = skip the slope normal; bit1 = RETIRED (used to skip the
+        // fragment df64 near-ground detail block, removed in ground-detail-v1.md Step 4 -- the
+        // real-texture normal map below replaces it; bit1 is now a no-op, kept unassigned rather
+        // than reused so old __world42Perf.setPerfMask() calls don't silently start meaning
+        // something else); bit2 = skip the crater rays; bit3 = skip AO; bit4 = skip GGX specular;
         // bit6 (64) = zero the per-vertex crater gradient in the normals (visual A/B; the crater
         // compute now lives in the vertex shader, so this no longer changes fragment cost);
         // bit7 (128) = skip the real-texture normal/roughness sample (ground-detail-v1.md Step 3).
@@ -471,36 +458,14 @@ function fragmentSource(opts: TerrainRenderOptions): string {
         '    // TERRAIN_NORMAL_UV_FREQ s comment: reusing uvDetail made the bump read as oversized.',
         '    let uvNormal = softDominantUV(dir) * TERRAIN_NORMAL_UV_FREQ;',
         '    let matW0 = terrainMaterialWeights(slope01); // x=regolith(layer0) y=basalt(layer2) z=rockFace(layer4)',
-        '    // Near-ground WORLD-ANCHORED micro-relief. Reconstruct the surface direction in',
-        '    // df64: world = uCamAnchor + rel (the eval subtracted the SAME f32 uCamAnchor, so',
-        '    // its rounding error cancels and world == the true surface point to ~um). normalize',
-        '    // is radial-invariant, so dirD is the smooth-sphere unit dir the noise is defined on,',
-        '    // frame-invariant (no swim) and cm-precise (no f32 banding). Gated to the near band',
-        '    // for cost; outside it the cheaper f32 macro normal is used unchanged.',
-        '    let dFade = 1.0 - smoothstep(TERRAIN_GROUND_ON_KM, TERRAIN_GROUND_OFF_KM, camDistKm);',
-        '    if (dFade > 0.0 && (uniforms.uPerfMask & 2) == 0) {',
-        '        let wx = df64_add(df64_from_f32(uniforms.uCamAnchor.x), df64_from_f32(rel.x));',
-        '        let wy = df64_add(df64_from_f32(uniforms.uCamAnchor.y), df64_from_f32(rel.y));',
-        '        let wz = df64_add(df64_from_f32(uniforms.uCamAnchor.z), df64_from_f32(rel.z));',
-        '        let len2 = df64_add(df64_add(df64_mul(wx, wx), df64_mul(wy, wy)), df64_mul(wz, wz));',
-        '        let inv = df64_invsqrt(len2);',
-        '        let dxD = df64_mul(wx, inv);',
-        '        let dyD = df64_mul(wy, inv);',
-        '        let dzD = df64_mul(wz, inv);',
-        '        // Macro+detail normal in df64 (kills the ~1-30 m f32 banding), blended in by the fade.',
-        '        let nDf = terrainNoiseNormalAtShared_df64(dxD, dyD, dzD, TERRAIN_RADIUS, camDistKm, craterGrad);',
-        '        nLocal = normalize(mix(nLocal, nDf, dFade));',
-        '        // Extra high-frequency micro-relief octaves (df64 high freq -> no banding).',
-        '        let dgrad = terrainGroundDetailGrad_df64(dxD, dyD, dzD, TERRAIN_GROUND_BASE_FREQ, TERRAIN_GROUND_DETAIL_OCTAVES);',
-        '        let tg = dgrad - dot(dgrad, nLocal) * nLocal;',
-        '        nLocal = normalize(nLocal - (TERRAIN_GROUND_STRENGTH * dFade) * tg);',
-        '    }',
         '    // Real-texture tangent-space normal + roughness (ground-detail-v1.md Step 3). Top-1',
         '    // material pick (cheaper than the height-blended top-2 used for albedo below -- the',
         '    // boundary mismatch against the blended albedo is visually negligible for isotropic',
-        '    // ground bump). Placed AFTER the df64 block so the texture bump stacks on top of both',
-        '    // the macro fbm normal and the df64 micro-relief, and BEFORE the normal-AA block below',
-        '    // so grazing-angle smoothing also catches the new high-frequency bump for free.',
+        '    // ground bump). Placed BEFORE the normal-AA block below so grazing-angle smoothing',
+        '    // also catches the high-frequency bump for free. (ground-detail-v1.md Step 4: the',
+        '    // fragment df64 near-ground micro-relief block that used to sit here was removed --',
+        '    // the real-texture normal map above supplies the close-range detail at a fraction of',
+        '    // the GPU cost; EvaluateLEB df64, in the compute kernel, is untouched.)',
         '    // Fade by PIXEL FOOTPRINT (fpKm), not camera distance: uvNormal tiles are well under a',
         '    // metre, sampled at a fixed mip (stochasticSampleA forces LOD 0, since its per-cell',
         '    // rotation breaks hardware derivative-based mip selection), so a straight-line distance',
@@ -593,7 +558,7 @@ function fragmentSource(opts: TerrainRenderOptions): string {
         '    }',
         '    let lighting = uniforms.uAmbient * ao + TERRAIN_LIGHTCOLOR * (uniforms.uLightIntensity * refl);',
         '    // Material-driven albedo (ground-detail-v1.md Step 1a/1b/1c). textureSampleLevel, not',
-        '    // textureSample: this call sits after non-uniform branches (dFade/uPerfMask), so',
+        '    // textureSample: this call sits after non-uniform branches (uPerfMask), so',
         '    // implicit-derivative LOD is not legal here anyway. uvDetail/matW0 are computed earlier',
         '    // (next to slope01) so Step 3 s normal/roughness pick can reuse them.',
         '    let uvMacro  = softDominantUV(dir) * TERRAIN_MACRO_UV_FREQ;',
@@ -725,10 +690,7 @@ export function buildTerrainRenderMaterial(
     material.setStorageBuffer('terrainPerm', permBuffer);
     material.setVector3('uLightDirection', new Vector3(0, -1, 0));
     material.setInt('uDebugLod', 0);
-    // Default perf mask: bit1 (2) disables the df64 near-ground micro-relief block
-    // (ground-detail-v1.md Step 4) — the real-texture normal map (Step 3) now supplies the
-    // close-range detail. Still toggleable live via __world42Perf.setPerfMask(0) to A/B compare.
-    material.setInt('uPerfMask', 2);
+    material.setInt('uPerfMask', 0);
     material.setVector3('uCamAnchor', new Vector3(0, 0, 0));
     material.setVector3('uCamDelta', new Vector3(0, 0, 0));
     material.setVector3('uAmbient', opts.ambient ?? new Vector3(0.008, 0.008, 0.008));
