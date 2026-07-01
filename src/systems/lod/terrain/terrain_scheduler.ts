@@ -49,6 +49,8 @@ export type TerrainPlanetOptions = {
     lighting?: ResolvedLighting;
     /** TERRAIN LOD / pool knobs. Default DEFAULT_LOD. */
     lod?: TerrainLodParams;
+    /** Terrain archetype id, forwarded to the render material for real material texture lookup. */
+    profileId?: string;
 };
 
 /** Per-planet telemetry, refreshed on each {@link TerrainPlanet.update}. */
@@ -178,7 +180,8 @@ export class TerrainPlanet {
                 mergeThresholdPx: lod.mergePx,
                 maxLevel: Math.round(lod.maxLevel),
                 minLevel: Math.round(lod.minLevel),
-                lighting: opts.lighting
+                lighting: opts.lighting,
+                profileId: opts.profileId
             },
             this.onSourceUpdate
         );

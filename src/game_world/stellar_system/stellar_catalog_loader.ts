@@ -325,6 +325,7 @@ export function createTerrainForSystem(
             starColor,
             starIntensity,
             lighting,
+            profileId: body.profile,
         });
 
         console.log(

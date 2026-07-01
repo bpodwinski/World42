@@ -35,6 +35,8 @@ import {
     type NoiseParams
 } from '../terrain_noise';
 import { DEFAULT_LIGHTING, type ResolvedLighting } from '../../../../game_world/stellar_system/planet_lighting';
+import { TERRAIN_MATERIAL_ASSET_MANIFEST } from '../../../../game_world/stellar_system/terrain_material_assets';
+import { loadMaterialArrayTexture } from './terrain_material_asset_loader';
 import terrainNoiseWgsl from '../../../../assets/shaders/terrain/gpu/terrain_noise.wgsl';
 import terrainF64Wgsl from '../../../../assets/shaders/terrain/engine/terrain_f64.wgsl';
 import terrainNoiseDf64Wgsl from '../../../../assets/shaders/terrain/engine/terrain_noise_df64.wgsl';
@@ -57,6 +59,13 @@ export type TerrainRenderOptions = {
     atmoColor?: Vector3;
     /** Per-planet resolved lighting params. When absent, bakedHeader uses DEFAULT_LIGHTING. */
     lighting?: ResolvedLighting;
+    /**
+     * Terrain archetype id (planet_profiles.ts) — used to look up real material textures in
+     * TERRAIN_MATERIAL_ASSET_MANIFEST and to key the shared texture cache so multiple bodies
+     * on the same profile reuse one decode/GPU-upload. When absent or unmapped, the flat-color
+     * placeholder stays bound (no real-asset load is attempted).
+     */
+    profileId?: string;
 };
 
 /**
@@ -618,6 +627,19 @@ export function buildTerrainRenderMaterial(
         Constants.TEXTURE_NEAREST_SAMPLINGMODE // nearest — makes any layer-bleed bug maximally obvious
     );
     material.setTexture('tAlbedoHeight', albedoArrayTexture);
+
+    // Real material textures (async, fire-and-forget): the placeholder above stays bound and
+    // visible until this resolves, so a slow/missing asset never blocks or breaks scene
+    // bootstrap (buildTerrainRenderMaterial stays fully synchronous — see the asset-loading
+    // plan). Cached per profileId so multiple bodies on the same profile share one decode.
+    const materialSources = opts.profileId ? TERRAIN_MATERIAL_ASSET_MANIFEST[opts.profileId] : undefined;
+    if (materialSources) {
+        loadMaterialArrayTexture(scene, `${opts.profileId}:albedoHeight`, materialSources, 512)
+            .then((real) => material.setTexture('tAlbedoHeight', real))
+            .catch((err: unknown) => {
+                console.warn(`[terrain] '${key}' albedo/height texture load failed, keeping placeholder:`, err);
+            });
+    }
 
     return {
         material,

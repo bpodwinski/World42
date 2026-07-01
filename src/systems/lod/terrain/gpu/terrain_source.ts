@@ -46,6 +46,8 @@ export type TerrainSourceOptions = {
     minLevel: number;
     /** Per-planet resolved lighting params forwarded to the render material. */
     lighting?: ResolvedLighting;
+    /** Terrain archetype id, forwarded to the render material for real material texture lookup. */
+    profileId?: string;
 };
 
 export class TerrainSource implements TerrainGeometrySource {
@@ -188,7 +190,8 @@ export class TerrainSource implements TerrainGeometrySource {
                 atmoColor: opts.lighting
                     ? new Vector3(opts.lighting.atmoColor[0], opts.lighting.atmoColor[1], opts.lighting.atmoColor[2])
                     : undefined,
-                lighting: opts.lighting
+                lighting: opts.lighting,
+                profileId: opts.profileId
             },
             this.kernel.heapBuffer,
             this.kernel.positionsBuffer,
