@@ -328,6 +328,7 @@ no visual regression vs Step 3 state.
 | Virtual texturing / megatexture | No tile cache (see memory: tile-cache-view-dependence.md) |
 | Atmospheric scattering interaction with terrain albedo | Separate system; Moon has no atmosphere |
 | Per-planet rotation in uLightDirection | Open roadmap item, independent of material |
+| Step 2.5 — regional crater density (maria have fewer/smaller craters than highlands, resurfaced by lava) | More invasive than the Step 2 color fix: `craterField()` drives actual mesh geometry, not just fragment shading, and exists as synchronized copies in the fragment shader, the topology GPU compute kernel (`terrain_topology_kernel.ts`), and the CPU validation oracle (`terrain_noise.ts` + `terrain_cpu_mirror.ts`). Modulating crater existence (`rExist >= prm.w`) by `regionalBias` means threading the same bias into all 3-4 copies and keeping GPU/CPU bit-identical (the oracle must still match, or collision/tests break). Math is simple (one extra term in the existence check); the risk is purely in keeping the duplicated implementations in sync. Revisit after Step 3/4 (normal map, df64 removal) land.
 
 ---
 
