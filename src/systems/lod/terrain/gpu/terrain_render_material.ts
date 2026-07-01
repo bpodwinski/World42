@@ -21,10 +21,12 @@ import {
     VertexData,
     Vector3,
     Constants,
+    RawTexture2DArray,
     type Scene,
     type StorageBuffer as StorageBufferType,
     type WebGPUEngine
 } from '@babylonjs/core';
+import { createArrayTexture, packLayersRgba8, solidColorLayer } from './terrain_material_textures';
 import {
     buildPerm,
     craterHeaderWgsl,
@@ -57,6 +59,21 @@ export type TerrainRenderOptions = {
     lighting?: ResolvedLighting;
 };
 
+/**
+ * Placeholder flat-color material layers (Step 1c) — replaced by real seamless-tileable art
+ * later. Index order matches ground-detail-v1.md's selena/Moon material table; only indices
+ * 0 (regolith_fine), 2 (basalt_dark) and 4 (rock_face) are selected today (terrainMaterialWeights
+ * below) — 1 (regolith_coarse) and 3 (ejecta_bright) are reserved for crater-driven modulation,
+ * not yet wired since no craterMaturity scalar is exposed at the albedo call site.
+ */
+const TERRAIN_MATERIAL_LAYERS: ReadonlyArray<readonly [number, number, number]> = [
+    [140, 140, 140], // 0: regolith_fine (flat plains)
+    [100, 95, 90],   // 1: regolith_coarse (rough mare) — unused until crater modulation
+    [70, 68, 66],    // 2: basalt_dark (exposed rock)
+    [210, 205, 190], // 3: ejecta_bright (fresh crater) — unused until crater modulation
+    [95, 85, 78]     // 4: rock_face (steep slopes, fractured rock)
+];
+
 function bakedHeader(opts: TerrainRenderOptions): string {
     const n = opts.noise;
     const L = opts.lighting ?? DEFAULT_LIGHTING;
@@ -88,25 +105,9 @@ function bakedHeader(opts: TerrainRenderOptions): string {
         `const TERRAIN_GROUND_STRENGTH : f32 = ${f(g.strength)};`,
         `const TERRAIN_GROUND_DETAIL_OCTAVES : i32 = ${Math.max(0, Math.floor(g.octaves))};`,
         `const TERRAIN_GROUND_BASE_FREQ : f32 = ${f(opts.radius * 1000)};`,
-        // Procedural albedo splatting driven by SLOPE + ALTITUDE (physically meaningful, not
-        // random color blotches): REGOLITH on flats, darker greyer ROCK on slopes, HIGHLAND
-        // tint by altitude. Slope is read from the SMOOTH landform normal (TERRAIN_SLOPE_DIST
-        // fades the cm micro-relief out so rock follows 30m+ hills/crater walls, not per-pixel
-        // bumps). SLOPE_* are in slope units = 1 - dot(landformNormal, up); 0 = flat.
-        ...(() => {
-            const gv = (albedo.x + albedo.y + albedo.z) / 3;
-            const rk = (c: number) => 0.45 * (0.5 * c + 0.5 * gv); // darker + desaturated
-            return [
-                `const TERRAIN_REGOLITH : vec3<f32> = vec3<f32>(${f(albedo.x)}, ${f(albedo.y)}, ${f(albedo.z)});`,
-                `const TERRAIN_ROCK : vec3<f32> = vec3<f32>(${f(rk(albedo.x))}, ${f(rk(albedo.y))}, ${f(rk(albedo.z))});`
-            ];
-        })(),
-        `const TERRAIN_HIGHLAND_TINT : vec3<f32> = vec3<f32>(${f(t.highlandTint[0])}, ${f(t.highlandTint[1])}, ${f(t.highlandTint[2])});`,
-        `const TERRAIN_SLOPE_LO : f32 = ${f(t.slopeLo)};`,
-        `const TERRAIN_SLOPE_HI : f32 = ${f(t.slopeHi)};`,
+        // Slope is read from the SMOOTH landform normal (TERRAIN_SLOPE_DIST fades the cm
+        // micro-relief out so rock follows 30m+ hills/crater walls, not per-pixel bumps).
         `const TERRAIN_SLOPE_DIST : f32 = ${f(t.slopeDist)};`,
-        `const TERRAIN_ALT_LO : f32 = ${f(opts.noise.globalAmplitude * 0.25)};`,
-        `const TERRAIN_ALT_HI : f32 = ${f(opts.noise.globalAmplitude * 0.65)};`,
         // Smooth plains vs cratered highlands: a BROAD (continental ~400 km), SUBTLE brightness
         // variation so the surface isn't uniform — NOT the fine blotches. dir-based (no swim).
         `const TERRAIN_PLAINS_FREQ : f32 = ${f(opts.radius / 400)};`,
@@ -291,6 +292,10 @@ function fragmentSource(opts: TerrainRenderOptions): string {
         // that already have the atmospheric scattering post-process applied).
         'uniform uAtmoDensity : f32;',
         'uniform uAtmoColor   : vec3<f32>;',
+        // Step 1 prototype: proves the texture_2d_array binding path end-to-end. Sampler name MUST
+        // be exactly '<textureName>Sampler' — BabylonJS auto-pairs it via a naming-convention regex.
+        'var tAlbedoHeight : texture_2d_array<f32>;',
+        'var tAlbedoHeightSampler : sampler;',
         'varying vDir : vec3<f32>;',
         'varying vRel : vec3<f32>;',
         'varying vFragmentDepth : f32;',
@@ -300,15 +305,30 @@ function fragmentSource(opts: TerrainRenderOptions): string {
         'varying vCraterGrad : vec3<f32>;',
         'varying vCraterGradSlope : vec3<f32>;',
         'varying vSlopeFbmGrad : vec3<f32>;',
-        // Procedural world-anchored albedo (no texture samplers). Driven by slope + altitude:
-        // regolith on flats, rock on slopes, highland tint up high. `slope01` = 1 - dot(landform
-        // normal, up) (0 flat) from the SMOOTH normal so rock follows landforms, not micro-bumps.
-        'fn terrainGroundAlbedo(slope01 : f32, altKm : f32) -> vec3<f32> {',
-        '    let rockW = smoothstep(TERRAIN_SLOPE_LO, TERRAIN_SLOPE_HI, slope01);',
-        '    var base = mix(TERRAIN_REGOLITH, TERRAIN_ROCK, rockW);',
-        '    let highW = smoothstep(TERRAIN_ALT_LO, TERRAIN_ALT_HI, altKm);',
-        '    base = mix(base, base * TERRAIN_HIGHLAND_TINT, highW);',
-        '    return base;',
+        // Direction-based UV basis (ground-detail-v1.md "UV Strategy"): a hard dominant-axis
+        // projection seams at the 12 octahedron edges where two axis components are close in
+        // magnitude. Blending the three axis projections by how dominant each is (pow(.,8) keeps
+        // each axis fully in control near its own pole) removes the seam for one texture sample.
+        'fn softDominantUV(d : vec3<f32>) -> vec2<f32> {',
+        '    let a = abs(d);',
+        '    let wx = pow(a.x, 8.0);',
+        '    let wy = pow(a.y, 8.0);',
+        '    let wz = pow(a.z, 8.0);',
+        '    let wsum = wx + wy + wz;',
+        '    let uvX = d.zy / (a.x + 1e-6);',
+        '    let uvY = d.xz / (a.y + 1e-6);',
+        '    let uvZ = d.xy / (a.z + 1e-6);',
+        '    return (uvX * wx + uvY * wy + uvZ * wz) / wsum;',
+        '}',
+        // Material weights driven by slope (ground-detail-v1.md Step 1c): regolith on flats,
+        // basalt on moderate slopes, rock_face on steep slopes. Returns (wRegolith, wBasalt,
+        // wRockFace), summing to 1. Crater-driven modulation toward regolith_coarse/ejecta_bright
+        // is deferred — no craterMaturity scalar is exposed at this call site yet.
+        'fn terrainMaterialWeights(slope01 : f32) -> vec3<f32> {',
+        '    let wRockFace = smoothstep(0.4, 0.7, slope01);',
+        '    let wBasalt = (1.0 - wRockFace) * smoothstep(0.0, 0.2, slope01);',
+        '    let wRegolith = 1.0 - wRockFace - wBasalt;',
+        '    return vec3<f32>(wRegolith, wBasalt, wRockFace);',
         '}',
         // Per-LOD-level palette — mirrors LEVEL_COLORS / the implicit material's
         // terrainLodColor so the X-key debug view matches the rest of the terrain.
@@ -462,8 +482,22 @@ function fragmentSource(opts: TerrainRenderOptions): string {
         '        spec = min((D * F * G) / (4.0 * NdL * NdV + 1e-4) * NdL, TERRAIN_SPEC_MAX);',
         '    }',
         '    let lighting = uniforms.uAmbient * ao + TERRAIN_LIGHTCOLOR * (uniforms.uLightIntensity * refl);',
-        '    // Procedural albedo + slope/altitude splatting (replaces the flat TERRAIN_ALBEDO).',
-        '    var albedo = terrainGroundAlbedo(slope01, altKm);',
+        '    // Material-driven albedo (ground-detail-v1.md Step 1c). textureSampleLevel, not',
+        '    // textureSample: this call sits after non-uniform branches (dFade/uPerfMask), so',
+        '    // implicit-derivative LOD is not legal here anyway.',
+        '    let uvDetail = softDominantUV(dir) * (TERRAIN_RADIUS / 1.0);',
+        '    let matW = terrainMaterialWeights(slope01); // x=regolith(layer0) y=basalt(layer2) z=rockFace(layer4)',
+        '    // 2-material-max height blend (ground-detail-v1.md): pick the top-2 weighted layers,',
+        '    // height-blend those via the albedo texture s alpha channel so rock emerges from dust',
+        '    // instead of a flat linear mix. Avoids undefined 3-way height blending.',
+        '    var layerA = 0; var layerB = 2; var wa = matW.x; var wb = matW.y;',
+        '    if (matW.y > wa) { layerA = 2; wa = matW.y; layerB = 0; wb = matW.x; }',
+        '    if (matW.z > wa) { layerB = layerA; wb = wa; layerA = 4; wa = matW.z; }',
+        '    else if (matW.z > wb) { layerB = 4; wb = matW.z; }',
+        '    let sampA = textureSampleLevel(tAlbedoHeight, tAlbedoHeightSampler, uvDetail, layerA, 0.0);',
+        '    let sampB = textureSampleLevel(tAlbedoHeight, tAlbedoHeightSampler, uvDetail, layerB, 0.0);',
+        '    let hBlend = saturate((sampA.a + wa - sampB.a - wb) / 0.1 + 0.5);',
+        '    var albedo = mix(sampB.rgb, sampA.rgb, hBlend);',
         '    // Broad plains/highlands brightness variation (continental scale, subtle, no swim).',
         '    albedo = albedo * (1.0 + TERRAIN_PLAINS_AMP * terrainSimplex3_d(dir * TERRAIN_PLAINS_FREQ).x);',
         '    // Bright ejecta rays + halos of FRESH craters (the white impact traces). Higher albedo,',
@@ -488,6 +522,7 @@ function fragmentSource(opts: TerrainRenderOptions): string {
 export type TerrainRenderMaterial = {
     material: ShaderMaterial;
     permBuffer: StorageBufferType;
+    albedoArrayTexture: RawTexture2DArray;
     setLightDirection(dir: Vector3): void;
     setDebugLod(on: boolean): void;
     setPerfMask(mask: number): void;
@@ -519,7 +554,8 @@ export function buildTerrainRenderMaterial(
             shaderLanguage: ShaderLanguage.WGSL,
             attributes: ['position'],
             uniforms: ['viewProjection', 'world', 'uLightDirection', 'logarithmicDepthConstant', 'uDebugLod', 'uPerfMask', 'uCamAnchor', 'uCamDelta', 'uAmbient', 'uLightIntensity', 'uAtmoDensity', 'uAtmoColor'],
-            storageBuffers: ['terrainHeap', 'terrainPos', 'terrainIndices', 'terrainPerm']
+            storageBuffers: ['terrainHeap', 'terrainPos', 'terrainIndices', 'terrainPerm'],
+            samplers: ['tAlbedoHeight']
         }
     );
     // Back-face culling: the octahedron is consistently wound so only the camera-facing
@@ -564,9 +600,29 @@ export function buildTerrainRenderMaterial(
     material.setFloat('uAtmoDensity', opts.atmoDensity ?? 0);
     material.setVector3('uAtmoColor', opts.atmoColor ?? new Vector3(0, 0, 0));
 
+    // Placeholder flat-color texture_2d_array (ground-detail-v1.md Step 1) — replaced by real
+    // seamless-tileable material art once assets are authored; the binding/sampling path is unchanged.
+    const MATERIAL_TEX_SIZE = 4;
+    const packedMaterialData = packLayersRgba8(
+        TERRAIN_MATERIAL_LAYERS.map(([r, g, b]) => solidColorLayer(MATERIAL_TEX_SIZE, MATERIAL_TEX_SIZE, r, g, b)),
+        MATERIAL_TEX_SIZE,
+        MATERIAL_TEX_SIZE
+    );
+    const albedoArrayTexture = createArrayTexture(
+        scene,
+        packedMaterialData,
+        MATERIAL_TEX_SIZE,
+        MATERIAL_TEX_SIZE,
+        TERRAIN_MATERIAL_LAYERS.length,
+        false, // generateMipMaps — no benefit on a flat-color placeholder
+        Constants.TEXTURE_NEAREST_SAMPLINGMODE // nearest — makes any layer-bleed bug maximally obvious
+    );
+    material.setTexture('tAlbedoHeight', albedoArrayTexture);
+
     return {
         material,
         permBuffer,
+        albedoArrayTexture,
         setLightDirection(dir: Vector3): void {
             material.setVector3('uLightDirection', dir);
         },
@@ -597,6 +653,7 @@ export function buildTerrainRenderMaterial(
         dispose(): void {
             material.dispose();
             permBuffer.dispose();
+            albedoArrayTexture.dispose();
         }
     };
 }
