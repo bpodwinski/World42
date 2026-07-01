@@ -33,6 +33,14 @@
     "pw:install-browser": "node ./scripts/playwright_cli.mjs install-browser"
   },
   "devDependencies": {
+    "@babylonjs/addons": "^9.14.0",
+    "@babylonjs/gui-editor": "^9.14.0",
+    "@babylonjs/serializers": "^9.14.0",
+    "@fluentui-contrib/react-resize-handle": "^0.8.4",
+    "@fluentui-contrib/react-virtualizer": "^1.0.0",
+    "@fluentui/react-components": "^9.74.3",
+    "@fluentui/react-icons": "^2.0.331",
+    "@fluentui/react-motion-components-preview": "^0.15.6",
     "@rsbuild/core": "^2.1.0",
     "@rspack/cli": "^2.1.0",
     "@rspack/core": "^2.1.0",
@@ -44,9 +52,12 @@
     "dotenv-webpack": "^9.0.0",
     "html-webpack-plugin": "^5.6.7",
     "playwright": "^1.61.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
     "ts-checker-rspack-plugin": "^1.5.1",
     "ts-shader-loader": "^2.0.2",
     "typescript": "^5.9.3",
+    "usehooks-ts": "^3.1.1",
     "vitest": "^4.1.9"
   },
   "dependencies": {
