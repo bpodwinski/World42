@@ -101,7 +101,7 @@ Conditions: Dev/Moon, ground-still (alt 60 m), hwScale 0.5 (supersample ×4 to b
 
 **The core step. All remaining steps depend on it.**
 
-### Status ✅ PARTIAL — done 2026-07-01, updated to reflect actual implementation
+### Status ✅ DONE — completed 2026-07-01
 
 The sketch below (manual `@binding(20)/(21)/(22)`, unresolved TypeScript API) is **superseded**:
 BabylonJS 9.14 auto-assigns `@group/@binding` by scanning WGSL text; no manual numbers needed
@@ -117,15 +117,23 @@ BabylonJS 9.14 auto-assigns `@group/@binding` by scanning WGSL text; no manual n
 - 2-material-max height blend implemented (using the albedo texture's alpha/height channel)
 - `tNormalRoughness` deliberately NOT bound yet (Step 3's job, per the original decision)
 
-**NOT done (remaining Step 1 work):**
-- **UV frequency is uncalibrated** — currently `softDominantUV(dir) * (TERRAIN_RADIUS / 1.0)` at
-  Moon radius (1737 km) means the 512×512 texture repeats ~1700× across the surface → aliases to
-  a uniform fine grain, real texture detail invisible on screen. Needs a sane tile-size constant
-  (e.g. ~1-5 m per tile, not literally `radius/1.0`) — this is the next concrete blocker.
-- Macro-scale UV + material-selection-at-distance (`uvMacro`) not implemented — only detail scale used
-- Stochastic tiling (item 3 below) not implemented — now meaningful to verify with real textures
-- Distance fade + procedural-color-anchor calibration (item 5 below) not implemented
+**Also done (2026-07-01, second pass):**
+- UV frequency calibrated: `TERRAIN_DETAIL_UV_FREQ` (~3 m/tile) + `TERRAIN_MACRO_UV_FREQ` (~500 m/tile,
+  the former single-scale formula repurposed). Root cause derived precisely (see plan history) —
+  the old formula was a reasonable MACRO scale mistakenly used as the only/detail scale.
+- Stochastic tiling option A (per-cell hash rotate+offset, `terrainHash2D`/`stochasticSampleA`,
+  built on the existing `terrainPermAt` table) — 0 extra texture samples, accepted cell-boundary seam.
+- Detail→macro crossfade (`TERRAIN_DETAIL_FADE_ON/OFF_KM`, 20–60 km) replaces the flat-color-anchor
+  idea entirely — no procedural color calibration needed, no pop.
+- Diagnostic finding: the "flat grain" visual complaint is NOT from texture/UV/df64/shading-extras
+  (all individually toggled off, no change) — it's the base geometric crater/regolith height field's
+  diffuse shading contrast (sun-angle-dependent, camera-angle-independent, confirmed via nadir test).
+  Real texture color variance exists (confirmed via direct GPU texture readback) but is subtle
+  against this dominant shading contrast — expected for a low-contrast natural dirt photo.
+
+**Remaining (deferred, not blocking):**
 - Regolith_coarse / ejecta_bright (layers 1/3) still unused — no craterMaturity modulation yet
+- Stochastic tiling option B (seamless 3-sample blend) — only if option A's seams prove objectionable
 
 ### 1a — Texture assets
 

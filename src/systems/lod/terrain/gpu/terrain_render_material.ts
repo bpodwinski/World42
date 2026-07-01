@@ -132,6 +132,12 @@ function bakedHeader(opts: TerrainRenderOptions): string {
         // variation so the surface isn't uniform — NOT the fine blotches. dir-based (no swim).
         `const TERRAIN_PLAINS_FREQ : f32 = ${f(opts.radius / 400)};`,
         `const TERRAIN_PLAINS_AMP : f32 = ${f(t.plainsAmp)};`,
+        // Regional material bias (ground-detail-v1.md Step 2): large-wavelength simplex, ~500 km
+        // period, nudges regolith<->basalt regionally (maria/terrae character). Independent of
+        // TERRAIN_PLAINS_FREQ (the brightness-only variation above) so wavelength/amplitude can be
+        // tuned separately — the region that leans basalt need not coincide with where brightness dims.
+        `const TERRAIN_REGIONAL_FREQ : f32 = ${f(opts.radius / 500)};`,
+        `const TERRAIN_REGIONAL_AMP : f32 = ${f(t.regionalAmp)};`,
         // Lunar (airless-regolith) BRDF. TERRAIN_LUNAR_LS blends Lambert (0) <-> Lommel-Seeliger (1):
         // the regolith reflects flat, with NO limb darkening (a full Moon looks like a uniform
         // disc, not a shaded sphere) and slight limb BRIGHTENING. TERRAIN_OPP_* is the opposition
@@ -533,14 +539,14 @@ function fragmentSource(opts: TerrainRenderOptions): string {
         '    // implicit-derivative LOD is not legal here anyway.',
         '    let uvDetail = softDominantUV(dir) * TERRAIN_DETAIL_UV_FREQ;',
         '    let uvMacro  = softDominantUV(dir) * TERRAIN_MACRO_UV_FREQ;',
-        '    let matW = terrainMaterialWeights(slope01); // x=regolith(layer0) y=basalt(layer2) z=rockFace(layer4)',
+        '    let matW0 = terrainMaterialWeights(slope01); // x=regolith(layer0) y=basalt(layer2) z=rockFace(layer4)',
         '    // 2-material-max height blend (ground-detail-v1.md): pick the top-2 weighted layers,',
         '    // height-blend those via the albedo texture s alpha channel so rock emerges from dust',
         '    // instead of a flat linear mix. Avoids undefined 3-way height blending.',
-        '    var layerA = 0; var layerB = 2; var wa = matW.x; var wb = matW.y;',
-        '    if (matW.y > wa) { layerA = 2; wa = matW.y; layerB = 0; wb = matW.x; }',
-        '    if (matW.z > wa) { layerB = layerA; wb = wa; layerA = 4; wa = matW.z; }',
-        '    else if (matW.z > wb) { layerB = 4; wb = matW.z; }',
+        '    var layerA = 0; var layerB = 2; var wa = matW0.x; var wb = matW0.y;',
+        '    if (matW0.y > wa) { layerA = 2; wa = matW0.y; layerB = 0; wb = matW0.x; }',
+        '    if (matW0.z > wa) { layerB = layerA; wb = wa; layerA = 4; wa = matW0.z; }',
+        '    else if (matW0.z > wb) { layerB = 4; wb = matW0.z; }',
         '    let sampA = stochasticSampleA(tAlbedoHeight, tAlbedoHeightSampler, uvDetail, layerA);',
         '    let sampB = stochasticSampleA(tAlbedoHeight, tAlbedoHeightSampler, uvDetail, layerB);',
         '    let hBlend = saturate((sampA.a + wa - sampB.a - wb) / 0.1 + 0.5);',
@@ -556,6 +562,17 @@ function fragmentSource(opts: TerrainRenderOptions): string {
         '        let albedoMacro = mix(sampBMacro.rgb, sampAMacro.rgb, hBlendMacro);',
         '        albedo = mix(albedo, albedoMacro, macroFade);',
         '    }',
+        '    // Regional variation (ground-detail-v1.md Step 2, revised): the slope-driven weight gap',
+        '    // above (up to 1.0 on flat ground) swamps any bias small enough to leave the rock_face',
+        '    // split intact, so biasing the height-blend picker has no visible effect (confirmed: a',
+        '    // whole-hemisphere screenshot showed zero variation with that approach). Blend directly in',
+        '    // albedo space instead, independent of the height-blend picker, so the effect reads',
+        '    // regardless of local slope. Fades out with wRockFace so it tints regolith/basalt ground,',
+        '    // not rock cliffs.',
+        '    let regionalBias = terrainSimplex3_d(dir * TERRAIN_REGIONAL_FREQ).x * TERRAIN_REGIONAL_AMP;',
+        '    let regionalMix = smoothstep(-0.08, 0.08, regionalBias) * (1.0 - matW0.z);',
+        '    let albedoBasaltRegional = stochasticSampleA(tAlbedoHeight, tAlbedoHeightSampler, uvDetail, 2).rgb;',
+        '    albedo = mix(albedo, albedoBasaltRegional, regionalMix * 0.85);',
         '    // Broad plains/highlands brightness variation (continental scale, subtle, no swim).',
         '    albedo = albedo * (1.0 + TERRAIN_PLAINS_AMP * terrainSimplex3_d(dir * TERRAIN_PLAINS_FREQ).x);',
         '    // Bright ejecta rays + halos of FRESH craters (the white impact traces). Higher albedo,',

@@ -139,6 +139,10 @@ export const TERRAIN_PARAM_SCHEMA: ParamSpec[] = [
     path: 'lighting.terrain.plainsAmp', group: 'Material', label: 'Plains variation', kind: 'baked',
     min: 0, max: 0.5, step: 0.01, description: 'Amplitude of the broad continental brightness variation.'
   },
+  {
+    path: 'lighting.terrain.regionalAmp', group: 'Material', label: 'Regional variation', kind: 'baked',
+    min: 0, max: 0.5, step: 0.01, description: 'Amplitude of the regional regolith<->basalt material bias (maria/terrae character).'
+  },
 
   // --- Lighting -- mostly baked BRDF; atmoDensity is a live uniform. ------------------------------
   {

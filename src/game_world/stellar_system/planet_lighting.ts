@@ -22,6 +22,8 @@ export type TerrainLightingParams = {
     slopeDist?: number;
     /** Amplitude of the broad continental brightness variation. */
     plainsAmp?: number;
+    /** Amplitude of the regional regolith<->basalt material bias (maria/terrae character). */
+    regionalAmp?: number;
 };
 
 export type BrdfLightingParams = {
@@ -151,7 +153,8 @@ export const DEFAULT_LIGHTING: ResolvedLighting = {
         slopeLo:      0.03,
         slopeHi:      0.22,
         slopeDist:    2.0,
-        plainsAmp:    0.12
+        plainsAmp:    0.12,
+        regionalAmp:  0.3
     },
     brdf: {
         lunarLs:    0.7,
@@ -216,7 +219,8 @@ export function resolveLighting(json: PlanetLightingJSON, override?: PlanetLight
             slopeLo:      ot.slopeLo      ?? dt.slopeLo      ?? D.terrain.slopeLo,
             slopeHi:      ot.slopeHi      ?? dt.slopeHi      ?? D.terrain.slopeHi,
             slopeDist:    ot.slopeDist    ?? dt.slopeDist    ?? D.terrain.slopeDist,
-            plainsAmp:    ot.plainsAmp    ?? dt.plainsAmp    ?? D.terrain.plainsAmp
+            plainsAmp:    ot.plainsAmp    ?? dt.plainsAmp    ?? D.terrain.plainsAmp,
+            regionalAmp:  ot.regionalAmp  ?? dt.regionalAmp  ?? D.terrain.regionalAmp
         },
         brdf: {
             lunarLs:    ob.lunarLs    ?? db.lunarLs    ?? D.brdf.lunarLs,
