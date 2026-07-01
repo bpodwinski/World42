@@ -146,6 +146,11 @@ export function listStellarSystems(jsonSource: unknown): string[] {
     return Object.keys(cat.systems);
 }
 
+/** The catalog's top-level `"default"` system id (data.json), or undefined if unset/invalid. */
+export function getDefaultSystemId(jsonSource: unknown): string | undefined {
+    return normalizeCatalogJSONFromSource(jsonSource).default;
+}
+
 /**
  * Build un système (par id) et renvoie (root, bodies).
  * Nommage sans collisions:

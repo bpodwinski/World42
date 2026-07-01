@@ -82,6 +82,10 @@ export class TerrainSource implements TerrainGeometrySource {
     /** Frames left in a post-jump convergence burst (incremental topology needs ~SETTLE_FRAMES to
      *  fully refine a new view): force a re-bake every frame while > 0. */
     private convergeFrames = 0;
+    /** Frames elapsed since the burst was armed — drives BURST_REBAKE_STRIDE (skip every Nth frame
+     *  even while forcedRebake is active, to avoid submitting SETTLE_FRAMES consecutive heavy
+     *  rebakes with no gap; see BURST_REBAKE_STRIDE). */
+    private burstFrameCounter = 0;
     /** Frames since the last heavy re-bake — drives the Axe 3 throttle (re-bake 1 frame in N
      *  under steady drift; the draw stays exact between via uCamDelta + the world rotation). */
     private framesSinceRebake = 0;
@@ -123,6 +127,17 @@ export class TerrainSource implements TerrainGeometrySource {
     /** Frames to keep refining AFTER a discrete jump, so the concurrent topology (bounded work/frame)
      *  fully converges for the new view before its passes are skipped. Reused as the burst length. */
     private static readonly SETTLE_FRAMES = 90;
+    /** Stride between forced rebakes DURING a convergence burst (1 = every frame, the old behavior).
+     *  The full topology pipeline (classify/copy/reduce over the pool + split/merge + eval + compact)
+     *  costs ~7-31 ms depending on pool size; SETTLE_FRAMES consecutive such frames with no gap
+     *  submits a sustained back-to-back GPU load that was observed to trigger a
+     *  DXGI_ERROR_DEVICE_HUNG driver hang (close/instant camera jump onto dense ground topology).
+     *  Skipping every other frame lets each heavy submission drain before the next one queues;
+     *  the draw stays exact on skipped frames (uCamDelta carries the residual) and the classify
+     *  metric already tolerates a few frames of lag (see the Axe 3 steady-drift throttle above), so
+     *  this only doubles wall-clock convergence time, not visual correctness. Live-tunable via
+     *  globalThis.__terrainBurstStride. */
+    private static readonly BURST_REBAKE_STRIDE = 2;
     /** Default df64->f32 noise cutoff (km) for the eval. Aggressive: df64 only within ~2 km of the
      *  camera (where f32 dir quantization would band the relief); f32 beyond. Live-tunable via
      *  globalThis.__terrainDf64NearKm. Raise it if banding appears very close to the ground. */
@@ -350,6 +365,7 @@ export class TerrainSource implements TerrainGeometrySource {
         this.lastFrameCamLocal.copyFrom(this.tmpCamLocal);
         if (!this.anchorValid || jump > TerrainSource.JUMP_FACTOR * driftThreshKm) {
             this.convergeFrames = TerrainSource.SETTLE_FRAMES;
+            this.burstFrameCounter = 0;
         }
 
         // Axe 3 — throttle the heavy re-bake. The full pipeline (topology classify/copy/reduce over
@@ -404,8 +420,25 @@ export class TerrainSource implements TerrainGeometrySource {
         const freezeTopology = !!(
             globalThis as unknown as { __terrainFreezeTopology?: boolean | number }
         ).__terrainFreezeTopology;
+        // Throttle the convergence burst itself (BURST_REBAKE_STRIDE): skip every Nth frame even
+        // while forcedRebake is true, so SETTLE_FRAMES heavy rebakes don't submit back-to-back with
+        // zero gap (observed to trigger a driver TDR). The very first bake (!anchorValid, no mesh
+        // yet) always goes through regardless of the stride.
+        this.burstFrameCounter++;
+        const burstStride = Math.max(
+            1,
+            Math.round(
+                (globalThis as unknown as { __terrainBurstStride?: number }).__terrainBurstStride ??
+                TerrainSource.BURST_REBAKE_STRIDE
+            )
+        );
+        const burstGap =
+            this.anchorValid &&
+            this.convergeFrames > 0 &&
+            this.burstFrameCounter % burstStride !== 0;
         const needRebake =
             !freezeTopology &&
+            !burstGap &&
             (forcedRebake || (driftDriven && this.framesSinceRebake >= rebakeEvery));
 
         // uCamDelta carries the residual so the draw is exact between re-bakes (0 on a re-bake frame).

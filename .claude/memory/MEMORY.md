@@ -18,3 +18,5 @@ It travels with the repo (committed, exportable).
 - [Babylon 9 migration](babylon9-migration.md) — on BabylonJS 9.14 (from 8.51); only break was GPUFeatureName → needs @webgpu/types dep + types/webgpu.d.ts
 - [Frame Graph integration](frame-graph-integration.md) — render+post pipeline is a Babylon 9 Frame Graph; OCBT compute as a graph task; MSAA dropped to single-sample; per-pass GPU profiling
 - [Atmosphere integration](atmosphere-integration.md) — custom single-scattering atmosphere as a Frame Graph task; frame-graph depth NOT sampleable → analytic sphere; star occlusion TODO
+- [GPU device-hang near dense topology](gpu-device-hang-dense-topology.md) — UNRESOLVED DXGI_ERROR_DEVICE_HUNG crash at close-range dense OCBT topology; not caused by Apply/rebuildTerrain (ruled out); root cause still open
+- [Spawn ignored default system (FIXED)](bug-spawn-ignored-default-system.md) — spawn hardcoded Sol/Mercury, ignoring data.json's "default"; Mercury has no profile so options-menu Apply silently did nothing (no error). Fixed 2026-07-01

@@ -303,8 +303,17 @@ export class TerrainPlanet {
             const old = this.source;
             this.source = null;
             old.dispose();
-            // Recreate immediately so there is no empty-mesh frame; refresh + reapply debug flags.
-            this.getOrCreateSource();
+            // Defer recreation to the frame AFTER this one is submitted/presented, instead of
+            // disposing ~15 GPU storage buffers + compute pipelines and immediately allocating a
+            // fresh set in the same synchronous tick. Doing both back-to-back with no frame
+            // boundary between them was observed to trigger a DXGI_ERROR_DEVICE_HUNG driver hang
+            // on Apply from the options menu (close to the ground, dense converged topology). One
+            // frame with no mesh for this planet is an acceptable trade-off for a user-initiated,
+            // infrequent action.
+            this.scene.onAfterRenderObservable.addOnce(() => {
+                if (this.source) return; // a newer rebuild already recreated it
+                this.getOrCreateSource();
+            });
         }
     }
 

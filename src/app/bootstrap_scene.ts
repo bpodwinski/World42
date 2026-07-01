@@ -16,6 +16,7 @@ import { ScaleManager } from '../core/scale/scale_manager';
 import { DEFAULT_NOISE, fbmNoise } from '../systems/lod/terrain/terrain_noise';
 import planetsJson from '../game_world/stellar_system/data.json';
 import {
+    getDefaultSystemId,
     listStellarSystems,
     loadStellarSystemFromCatalog,
     type LoadedBody,
@@ -40,7 +41,8 @@ export type SceneBootstrapResult = {
 
 function pickSpawnBody(
     loadedSystems: Map<string, LoadedSystem>,
-    planetName: string | null
+    planetName: string | null,
+    defaultSystemId: string | undefined
 ): LoadedBody {
     // `?planet=<name>`: spawn at the named planet (case-insensitive), searched across loaded systems.
     if (planetName) {
@@ -54,8 +56,14 @@ function pickSpawnBody(
         }
     }
 
+    // Respect data.json's top-level `"default"` system id (e.g. "Dev" while iterating on terrain —
+    // see CLAUDE.md's Development Pipeline). Falls back to Sol, then whatever loaded first, if the
+    // declared default isn't a loaded system (e.g. filtered out via ?system=).
     const loadedSystemsArr = Array.from(loadedSystems.values());
-    const activeSystem = loadedSystems.get('Sol') ?? loadedSystemsArr[0];
+    const activeSystem =
+        (defaultSystemId ? loadedSystems.get(defaultSystemId) : undefined) ??
+        loadedSystems.get('Sol') ??
+        loadedSystemsArr[0];
     const body =
         activeSystem.bodies.get('Mercury') ??
         Array.from(activeSystem.bodies.values()).find((candidate) => candidate.bodyType !== 'star');
@@ -90,7 +98,7 @@ export async function bootstrapScene(
     );
     const loadedSystems = new Map(loadedSystemsArr.map((system) => [system.systemId, system]));
     applyBenchOverride(loadedSystems, benchAlgo);
-    const spawnBody = pickSpawnBody(loadedSystems, planetName);
+    const spawnBody = pickSpawnBody(loadedSystems, planetName, getDefaultSystemId(planetsJson));
 
     scene.textures.forEach((texture) => {
         texture.anisotropicFilteringLevel = 16;
