@@ -393,6 +393,29 @@ function fragmentSource(opts: TerrainRenderOptions): string {
         '    let rotated = rot * local + 0.5 + h.y;',
         '    return textureSampleLevel(tex, samp, cell + rotated, layer, 0.0);',
         '}',
+        // Same per-cell stochastic rotation as stochasticSampleA, but for a TANGENT-SPACE NORMAL
+        // map: rotating the sample UV (above) rotates which texel each cell reads, but the RG
+        // tilt direction baked into that texel is still expressed in the texture's own (unrotated)
+        // frame. Left uncorrected, every cell's bump points in an unrelated per-cell-random
+        // direction, so adjacent cells cancel out into flat-looking shading instead of readable
+        // relief (ground-detail-v1.md Step 3 bug). Counter-rotate the decoded XY by the inverse
+        // of the same per-cell angle so the bump direction stays consistent with how the texture
+        // pattern itself appears rotated on screen. If the relief still reads wrong (e.g. bumps
+        // seem to slide sideways as the camera orbits), flip the sign of `s` below.
+        'fn stochasticSampleNormalA(tex : texture_2d_array<f32>, samp : sampler, uv : vec2<f32>, layer : i32) -> vec4<f32> {',
+        '    let cell = floor(uv);',
+        '    let h = terrainHash2D(cell);',
+        '    let angle = h.x * 6.2831853;',
+        '    let c = cos(angle);',
+        '    let s = sin(angle);',
+        '    let rot = mat2x2<f32>(c, s, -s, c);',
+        '    let invRot = mat2x2<f32>(c, -s, s, c);',
+        '    let local = uv - cell - 0.5;',
+        '    let rotated = rot * local + 0.5 + h.y;',
+        '    let raw = textureSampleLevel(tex, samp, cell + rotated, layer, 0.0);',
+        '    let tsN = invRot * (raw.rg * 2.0 - 1.0);',
+        '    return vec4<f32>(tsN * 0.5 + 0.5, raw.b, raw.a);',
+        '}',
         // Per-LOD-level palette — mirrors LEVEL_COLORS / the implicit material's
         // terrainLodColor so the X-key debug view matches the rest of the terrain.
         'fn terrainLodColor(level : u32) -> vec3<f32> {',
@@ -486,7 +509,7 @@ function fragmentSource(opts: TerrainRenderOptions): string {
         '        var wN = matW0.x;',
         '        if (matW0.y > wN) { layerN = 2; wN = matW0.y; }',
         '        if (matW0.z > wN) { layerN = 4; wN = matW0.z; }',
-        '        let nrSample = stochasticSampleA(tNormalRoughness, tNormalRoughnessSampler, uvNormal, layerN);',
+        '        let nrSample = stochasticSampleNormalA(tNormalRoughness, tNormalRoughnessSampler, uvNormal, layerN);',
         '        let tsN = vec2<f32>(nrSample.r, nrSample.g) * 2.0 - 1.0;',
         '        let tsZ = sqrt(max(0.0, 1.0 - dot(tsN, tsN)));',
         '        var tangN: vec3<f32>; var bitanN: vec3<f32>;',

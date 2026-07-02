@@ -284,8 +284,8 @@ fn terrainFbmHeight(dir: vec3<f32>) -> f32 {
 // faded OUT of the gradient (not the height). At grazing the footprint along the view is huge, so the
 // fine octaves vanish from the normal there — exactly where the grain was. footprintKm <= 0 disables
 // it (height / collision callers pass 0, so geometry is never affected).
-const TERRAIN_NORMAL_FP_LO: f32 = 2.0; // wl < 2*footprint -> octave fully dropped from the normal
-const TERRAIN_NORMAL_FP_HI: f32 = 4.0; // wl > 4*footprint -> octave fully kept
+const TERRAIN_NORMAL_FP_LO: f32 = 3.0; // wl < 3*footprint -> octave fully dropped from the normal
+const TERRAIN_NORMAL_FP_HI: f32 = 6.0; // wl > 6*footprint -> octave fully kept
 
 // Two independently-normalized bands (ground-detail-v1.md Step 4b): octaves < TERRAIN_MACRO_BAND_OCTAVES
 // scale with TERRAIN_GLOBAL_AMP (macro landforms); the rest of the macro cascade AND all

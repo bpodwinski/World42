@@ -150,7 +150,7 @@ export const DEFAULT_LIGHTING: ResolvedLighting = {
         roughLo:    0.6,
         roughHi:    0.9,
         normalMapStrength: 0.6,
-        normalTileM: 0.5,
+        normalTileM: 1.0,
         f0:         0.04,
         specAa:     0.5,
         specMax:    4.0,
