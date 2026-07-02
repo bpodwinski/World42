@@ -5,6 +5,7 @@
 //   const TERRAIN_BASE_FREQ : f32 = ...;   const TERRAIN_BASE_AMP : f32 = ...;
 //   const TERRAIN_LACUNARITY : f32 = ...;  const TERRAIN_PERSISTENCE : f32 = ...;
 //   const TERRAIN_GLOBAL_AMP : f32 = ...;
+//   const TERRAIN_MACRO_BAND_OCTAVES : i32 = ...;  const TERRAIN_DETAIL_AMP : f32 = ...;
 //   var<storage, read> terrainPerm : array<u32>;   // 256 entries, values 0..255
 // Callers of the *_at (continued-detail) helpers must ALSO define:
 //   const TERRAIN_DETAIL_OCTAVES : i32 = ...;  // extra octaves past TERRAIN_OCTAVES (0 = off)
@@ -212,11 +213,18 @@ fn craterField(dir: vec3<f32>, radiusKm: f32, camDistKm: f32, skipBig: bool, foo
     return vec4<f32>(H, G);
 }
 
-// fbm with analytic gradient. Returns vec4(height, dHeight/dp.xyz).
+// fbm with analytic gradient. Returns vec4(height, dHeight/dp.xyz). Two independently-normalized
+// bands (ground-detail-v1.md Step 4b): octaves < TERRAIN_MACRO_BAND_OCTAVES scale with
+// TERRAIN_GLOBAL_AMP (macro landforms); the rest scale with the small, independent
+// TERRAIN_DETAIL_AMP (fine-grain roughness) -- so Relief height can't amplify the highest
+// frequencies into aliased "grain". Mirrors terrain_noise.ts's fbmNoise exactly.
 fn terrainFbm_d(p: vec3<f32>) -> vec4<f32> {
-    var sum: f32 = 0.0;
-    var maxPossible: f32 = 0.0;
-    var grad: vec3<f32> = vec3<f32>(0.0);
+    var sumMacro: f32 = 0.0;
+    var maxMacro: f32 = 0.0;
+    var gradMacro: vec3<f32> = vec3<f32>(0.0);
+    var sumFine: f32 = 0.0;
+    var maxFine: f32 = 0.0;
+    var gradFine: vec3<f32> = vec3<f32>(0.0);
     var freq: f32 = TERRAIN_BASE_FREQ;
     var amp: f32 = TERRAIN_BASE_AMP;
 
@@ -225,18 +233,29 @@ fn terrainFbm_d(p: vec3<f32>) -> vec4<f32> {
             break;
         }
         let sd = terrainSimplex3_d(p * freq);
-        sum = sum + sd.x * amp;
-        grad = grad + sd.yzw * (amp * freq);
-        maxPossible = maxPossible + amp;
+        if i < TERRAIN_MACRO_BAND_OCTAVES {
+            sumMacro = sumMacro + sd.x * amp;
+            gradMacro = gradMacro + sd.yzw * (amp * freq);
+            maxMacro = maxMacro + amp;
+        } else {
+            sumFine = sumFine + sd.x * amp;
+            gradFine = gradFine + sd.yzw * (amp * freq);
+            maxFine = maxFine + amp;
+        }
         freq = freq * TERRAIN_LACUNARITY;
         amp = amp * TERRAIN_PERSISTENCE;
     }
 
-    if maxPossible <= 1e-12 {
+    if maxMacro <= 1e-12 {
         return vec4<f32>(0.0);
     }
-    let inv = TERRAIN_GLOBAL_AMP / maxPossible;
-    return vec4<f32>(sum * inv, grad * inv);
+    let invMacro = TERRAIN_GLOBAL_AMP / maxMacro;
+    var result = vec4<f32>(sumMacro * invMacro, gradMacro * invMacro);
+    if maxFine > 1e-12 {
+        let invFine = TERRAIN_DETAIL_AMP / maxFine;
+        result = result + vec4<f32>(sumFine * invFine, gradFine * invFine);
+    }
+    return result;
 }
 
 fn terrainFbmHeight(dir: vec3<f32>) -> f32 {
@@ -268,10 +287,17 @@ fn terrainFbmHeight(dir: vec3<f32>) -> f32 {
 const TERRAIN_NORMAL_FP_LO: f32 = 2.0; // wl < 2*footprint -> octave fully dropped from the normal
 const TERRAIN_NORMAL_FP_HI: f32 = 4.0; // wl > 4*footprint -> octave fully kept
 
+// Two independently-normalized bands (ground-detail-v1.md Step 4b): octaves < TERRAIN_MACRO_BAND_OCTAVES
+// scale with TERRAIN_GLOBAL_AMP (macro landforms); the rest of the macro cascade AND all
+// continued-detail octaves form the fine band, scaling with the small, independent
+// TERRAIN_DETAIL_AMP -- so Relief height can't amplify the highest frequencies into aliased "grain".
 fn terrainFbm_d_at(p: vec3<f32>, camDistKm: f32, radiusKm: f32, craterSkipBig: bool, footprintKm: f32) -> vec4<f32> {
-    var sum: f32 = 0.0;
+    var sumMacro: f32 = 0.0;
     var maxMacro: f32 = 0.0;
-    var grad: vec3<f32> = vec3<f32>(0.0);
+    var gradMacro: vec3<f32> = vec3<f32>(0.0);
+    var sumFine: f32 = 0.0;
+    var maxFine: f32 = 0.0;
+    var gradFine: vec3<f32> = vec3<f32>(0.0);
     var freq: f32 = TERRAIN_BASE_FREQ;
     var amp: f32 = TERRAIN_BASE_AMP;
 
@@ -282,10 +308,16 @@ fn terrainFbm_d_at(p: vec3<f32>, camDistKm: f32, radiusKm: f32, craterSkipBig: b
         let fade = 1.0 - smoothstep(onKm, onKm * 2.0, camDistKm);
         let fpFade = select(1.0, smoothstep(footprintKm * TERRAIN_NORMAL_FP_LO, footprintKm * TERRAIN_NORMAL_FP_HI, wlKm), footprintKm > 0.0);
         let sd = terrainSimplex3_d(p * freq);
-        sum = sum + sd.x * (amp * fade);
-        grad = grad + sd.yzw * (amp * freq * fade * fpFade);
-        // maxMacro takes the UNFADED amp -> normalization fixed, full macro at the surface.
-        maxMacro = maxMacro + amp;
+        // maxMacro/maxFine take the UNFADED amp -> normalization fixed, full band at the surface.
+        if i < TERRAIN_MACRO_BAND_OCTAVES {
+            sumMacro = sumMacro + sd.x * (amp * fade);
+            gradMacro = gradMacro + sd.yzw * (amp * freq * fade * fpFade);
+            maxMacro = maxMacro + amp;
+        } else {
+            sumFine = sumFine + sd.x * (amp * fade);
+            gradFine = gradFine + sd.yzw * (amp * freq * fade * fpFade);
+            maxFine = maxFine + amp;
+        }
         freq = freq * TERRAIN_LACUNARITY;
         amp = amp * TERRAIN_PERSISTENCE;
     }
@@ -302,18 +334,26 @@ fn terrainFbm_d_at(p: vec3<f32>, camDistKm: f32, radiusKm: f32, craterSkipBig: b
         if fade > 0.0 {
             let fpFade = select(1.0, smoothstep(footprintKm * TERRAIN_NORMAL_FP_LO, footprintKm * TERRAIN_NORMAL_FP_HI, wlKm), footprintKm > 0.0);
             let sd = terrainSimplex3_d(p * freq);
-            sum = sum + sd.x * (amp * fade);
-            grad = grad + sd.yzw * (amp * freq * fade * fpFade);
+            sumFine = sumFine + sd.x * (amp * fade);
+            gradFine = gradFine + sd.yzw * (amp * freq * fade * fpFade);
         }
+        maxFine = maxFine + amp;
         freq = freq * TERRAIN_LACUNARITY;
         amp = amp * TERRAIN_PERSISTENCE;
     }
 
-    let inv = TERRAIN_GLOBAL_AMP / maxMacro;
+    let invMacro = TERRAIN_GLOBAL_AMP / maxMacro;
+    var sum = sumMacro * invMacro;
+    var grad = gradMacro * invMacro;
+    if maxFine > 1e-12 {
+        let invFine = TERRAIN_DETAIL_AMP / maxFine;
+        sum = sum + sumFine * invFine;
+        grad = grad + gradFine * invFine;
+    }
     // Craters are the dominant relief (added AFTER fbm normalization; already in km). No distance
     // fade: they are macro landforms whose shape must be stable from orbit to ground.
     let cr = craterField(p, radiusKm, camDistKm, craterSkipBig, footprintKm);
-    return vec4<f32>(sum * inv + cr.x, grad * inv + cr.yzw);
+    return vec4<f32>(sum + cr.x, grad + cr.yzw);
 }
 
 fn terrainFbmHeightAt(dir: vec3<f32>, camDistKm: f32, radiusKm: f32) -> f32 {
@@ -449,18 +489,31 @@ fn terrainNoiseNormalAt(dir: vec3<f32>, radius: f32, camDistKm: f32, footprintKm
 // maxMacro (the normalization) sums only the macro amps either way, so the macro gradient is
 // identical with or without the detail octaves.
 fn terrainFbmGradAt_core(p: vec3<f32>, camDistKm: f32, radiusKm: f32, footprintKm: f32, macroOnly: bool) -> vec3<f32> {
-    // OPT-4: precompute the full macro amplitude sum (geometric series) and the detail-loop
-    // starting freq/amp via pow() so the loops below can break early without accumulating
-    // maxMacro or carrying freq/amp across a mid-loop exit. Two scalar ops; negligible next
-    // to any simplex eval. Higher-frequency octaves have strictly smaller onKm -> fade is
-    // monotone-decreasing with loop index -> break when fade == 0 is sound.
-    let nMacro      = min(TERRAIN_OCTAVES, TERRAIN_MAX_OCTAVES);
-    let persN       = pow(TERRAIN_PERSISTENCE, f32(nMacro));
-    let fullMacro   = TERRAIN_BASE_AMP * (1.0 - persN) / max(1.0 - TERRAIN_PERSISTENCE, 1e-6);
-    let detailFreq0 = TERRAIN_BASE_FREQ * pow(TERRAIN_LACUNARITY, f32(nMacro));
-    let detailAmp0  = TERRAIN_BASE_AMP * persN;
+    // OPT-4: precompute the full amplitude sums (geometric series) and the detail-loop starting
+    // freq/amp via pow() so the loops below can break early without accumulating a running
+    // normalizer or carrying freq/amp across a mid-loop exit. Higher-frequency octaves have
+    // strictly smaller onKm -> fade is monotone-decreasing with loop index -> break when
+    // fade == 0 is sound. Two independently-normalized bands (ground-detail-v1.md Step 4b):
+    // macro (< TERRAIN_MACRO_BAND_OCTAVES) scales with TERRAIN_GLOBAL_AMP; the fine band (the
+    // rest of the macro cascade + all detail octaves) scales with the small, independent
+    // TERRAIN_DETAIL_AMP -- so Relief height can't amplify the highest frequencies into aliased
+    // "grain". fullFineBand = (full macro cascade - full macro band) + full detail-octave sum,
+    // each an analytic geometric-series sum continuing the SAME persistence chain.
+    let nMacro        = min(TERRAIN_OCTAVES, TERRAIN_MAX_OCTAVES);
+    let macroBandN    = min(TERRAIN_MACRO_BAND_OCTAVES, nMacro);
+    let onePersInv    = 1.0 / max(1.0 - TERRAIN_PERSISTENCE, 1e-6);
+    let persMacroBand = pow(TERRAIN_PERSISTENCE, f32(macroBandN));
+    let persN         = pow(TERRAIN_PERSISTENCE, f32(nMacro));
+    let fullMacroBand = TERRAIN_BASE_AMP * (1.0 - persMacroBand) * onePersInv;
+    let fullMacroAll  = TERRAIN_BASE_AMP * (1.0 - persN) * onePersInv;
+    let detailFreq0   = TERRAIN_BASE_FREQ * pow(TERRAIN_LACUNARITY, f32(nMacro));
+    let detailAmp0    = TERRAIN_BASE_AMP * persN;
+    let persDetail    = pow(TERRAIN_PERSISTENCE, f32(TERRAIN_DETAIL_OCTAVES));
+    let fullDetail    = detailAmp0 * (1.0 - persDetail) * onePersInv;
+    let fullFineBand  = (fullMacroAll - fullMacroBand) + fullDetail;
 
-    var grad: vec3<f32> = vec3<f32>(0.0);
+    var gradMacro: vec3<f32> = vec3<f32>(0.0);
+    var gradFine: vec3<f32> = vec3<f32>(0.0);
     var freq: f32 = TERRAIN_BASE_FREQ;
     var amp: f32 = TERRAIN_BASE_AMP;
 
@@ -473,7 +526,9 @@ fn terrainFbmGradAt_core(p: vec3<f32>, camDistKm: f32, radiusKm: f32, footprintK
         let fpFade = select(1.0, smoothstep(footprintKm * TERRAIN_NORMAL_FP_LO, footprintKm * TERRAIN_NORMAL_FP_HI, wlKm), footprintKm > 0.0);
         if fpFade > 0.0 {
             let sd = terrainSimplex3_d(p * freq);
-            grad = grad + sd.yzw * (amp * freq * fade * fpFade);
+            let contrib = sd.yzw * (amp * freq * fade * fpFade);
+            if i < TERRAIN_MACRO_BAND_OCTAVES { gradMacro = gradMacro + contrib; }
+            else { gradFine = gradFine + contrib; }
         }
         freq = freq * TERRAIN_LACUNARITY;
         amp = amp * TERRAIN_PERSISTENCE;
@@ -493,14 +548,18 @@ fn terrainFbmGradAt_core(p: vec3<f32>, camDistKm: f32, radiusKm: f32, footprintK
             let fpFade = select(1.0, smoothstep(footprintKm * TERRAIN_NORMAL_FP_LO, footprintKm * TERRAIN_NORMAL_FP_HI, wlKm), footprintKm > 0.0);
             if fpFade > 0.0 {
                 let sd = terrainSimplex3_d(p * freq);
-                grad = grad + sd.yzw * (amp * freq * fade * fpFade);
+                gradFine = gradFine + sd.yzw * (amp * freq * fade * fpFade);
             }
             freq = freq * TERRAIN_LACUNARITY;
             amp = amp * TERRAIN_PERSISTENCE;
         }
     }
 
-    return grad * (TERRAIN_GLOBAL_AMP / fullMacro);
+    var result = gradMacro * (TERRAIN_GLOBAL_AMP / max(fullMacroBand, 1e-12));
+    if fullFineBand > 1e-12 {
+        result = result + gradFine * (TERRAIN_DETAIL_AMP / fullFineBand);
+    }
+    return result;
 }
 
 // Twin of terrainNoiseNormalAt that takes a PRE-COMPUTED crater gradient (craterGrad) instead of running

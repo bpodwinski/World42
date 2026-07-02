@@ -42,6 +42,14 @@ export const TERRAIN_PARAM_SCHEMA: ParamSpec[] = [
     min: 0, max: 40, step: 0.5, description: 'Overall FBM relief amplitude in km (the inter-crater roughness scale).'
   },
   {
+    path: 'noise.macroBandOctaves', group: 'Relief', label: 'Macro band octaves', kind: 'baked', int: true,
+    min: 1, max: 12, step: 1, description: 'How many of the coarsest octaves scale with Relief height. Octaves beyond this use Fine detail amplitude instead, so raising Relief height cannot turn fine octaves into grain.'
+  },
+  {
+    path: 'noise.detailAmplitudeKm', group: 'Relief', label: 'Fine detail amplitude (km)', kind: 'baked',
+    min: 0, max: 1, step: 0.01, description: 'Independent, bounded amplitude for octaves past Macro band octaves (fine-grain roughness). Does not scale with Relief height.'
+  },
+  {
     path: 'noise.baseFrequency', group: 'Relief', label: 'Base frequency', kind: 'baked',
     min: 0.5, max: 16, step: 0.1, description: 'First octave frequency. Lower = larger landforms.'
   },

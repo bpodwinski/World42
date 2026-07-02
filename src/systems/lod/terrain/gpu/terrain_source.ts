@@ -63,9 +63,10 @@ export class TerrainSource implements TerrainGeometrySource {
     private readonly cullMinDot: number;
     private readonly maxLevel: number;
     private readonly minLevel: number;
-    /** Max radial relief (noise globalAmplitude). Used by the relief-aware horizon cull. The
-     *  frustum no longer needs it: the df64 eval now decodes TERRAIN-displaced positions, so
-     *  the frustum test is exact (no smooth-sphere vs displaced mismatch). */
+    /** Max radial relief (noise globalAmplitude + detailAmplitudeKm, both fbm bands). Used by the
+     *  relief-aware horizon cull. The frustum no longer needs it: the df64 eval now decodes
+     *  TERRAIN-displaced positions, so the frustum test is exact (no smooth-sphere vs displaced
+     *  mismatch). */
     private readonly heightMargin: number;
     private frame = 0;
     /** Frozen camera position (PLANET-LOCAL) the live POSITIONS buffer was last baked against.
@@ -179,7 +180,7 @@ export class TerrainSource implements TerrainGeometrySource {
         this.cullMinDot = opts.cullMinDot ?? -0.1;
         this.maxLevel = opts.maxLevel;
         this.minLevel = opts.minLevel;
-        this.heightMargin = Math.max(0, opts.noise.globalAmplitude);
+        this.heightMargin = Math.max(0, opts.noise.globalAmplitude + (opts.noise.detailAmplitudeKm ?? 0));
 
         // useIndirect: the 7 work-list passes dispatch over their candidate counts
         // (not the full pool) via PrepareIndirect + dispatchIndirect. noise: the df64 eval

@@ -101,6 +101,13 @@ function bakedHeader(opts: TerrainRenderOptions): string {
         `const TERRAIN_GLOBAL_AMP : f32 = ${f(n.globalAmplitude)};`,
         `const TERRAIN_DETAIL_OCTAVES : i32 = ${Math.max(0, Math.floor(n.detailOctaves ?? 0))};`,
         `const TERRAIN_DETAIL_RANGE : f32 = ${f(n.detailRange ?? 60)};`,
+        // Two independently-normalized fbm bands (ground-detail-v1.md Step 4b): the first
+        // TERRAIN_MACRO_BAND_OCTAVES scale with TERRAIN_GLOBAL_AMP (macro landforms); the rest
+        // (remaining macro octaves + all detail octaves) scale with the small, independent
+        // TERRAIN_DETAIL_AMP -- so raising Relief height can't amplify the highest-frequency
+        // octaves into aliased "grain".
+        `const TERRAIN_MACRO_BAND_OCTAVES : i32 = ${Math.max(0, Math.floor(n.macroBandOctaves ?? n.octaves))};`,
+        `const TERRAIN_DETAIL_AMP : f32 = ${f(n.detailAmplitudeKm ?? 0)};`,
         // Crater constants + craterParams() — generated from the active CraterParams (single source
         // shared with the CPU collision field). Replaces the block formerly hardcoded in terrain_noise.wgsl.
         craterHeaderWgsl(opts.craters ?? DEFAULT_CRATERS),

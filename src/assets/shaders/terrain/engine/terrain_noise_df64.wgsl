@@ -95,10 +95,18 @@ fn terrainSimplex3_df64_d(px : vec2<f32>, py : vec2<f32>, pz : vec2<f32>) -> vec
 // unit direction carried as df64 (dx, dy, dz). Same per-octave camera-distance fade and
 // maxMacro normalization as the f32 version, so the surface is identical wherever f32 did
 // not band, and finely resolved (cm) where it did.
+// Two independently-normalized bands (ground-detail-v1.md Step 4b), mirroring terrainFbm_d_at's
+// f32 twin: octaves < TERRAIN_MACRO_BAND_OCTAVES scale with TERRAIN_GLOBAL_AMP (macro landforms);
+// the rest of the macro cascade AND all detail octaves form the fine band, scaling with the
+// small, independent TERRAIN_DETAIL_AMP -- so Relief height can't amplify the highest
+// frequencies into aliased "grain".
 fn terrainFbm_d_at_df64(dx : vec2<f32>, dy : vec2<f32>, dz : vec2<f32>, camDistKm : f32, radiusKm : f32, craterSkipBig : bool) -> vec4<f32> {
-    var sum : f32 = 0.0;
+    var sumMacro : f32 = 0.0;
     var maxMacro : f32 = 0.0;
-    var grad : vec3<f32> = vec3<f32>(0.0);
+    var gradMacro : vec3<f32> = vec3<f32>(0.0);
+    var sumFine : f32 = 0.0;
+    var maxFine : f32 = 0.0;
+    var gradFine : vec3<f32> = vec3<f32>(0.0);
     var freq : f32 = TERRAIN_BASE_FREQ;
     var amp : f32 = TERRAIN_BASE_AMP;
 
@@ -108,9 +116,15 @@ fn terrainFbm_d_at_df64(dx : vec2<f32>, dy : vec2<f32>, dz : vec2<f32>, camDistK
         let onKm = TERRAIN_DETAIL_RANGE * wlKm;
         let fade = 1.0 - smoothstep(onKm, onKm * 2.0, camDistKm);
         let sd = terrainSimplex3_df64_d(df64_mul_f32(dx, freq), df64_mul_f32(dy, freq), df64_mul_f32(dz, freq));
-        sum = sum + sd.x * (amp * fade);
-        grad = grad + sd.yzw * (amp * freq * fade);
-        maxMacro = maxMacro + amp;
+        if (i < TERRAIN_MACRO_BAND_OCTAVES) {
+            sumMacro = sumMacro + sd.x * (amp * fade);
+            gradMacro = gradMacro + sd.yzw * (amp * freq * fade);
+            maxMacro = maxMacro + amp;
+        } else {
+            sumFine = sumFine + sd.x * (amp * fade);
+            gradFine = gradFine + sd.yzw * (amp * freq * fade);
+            maxFine = maxFine + amp;
+        }
         freq = freq * TERRAIN_LACUNARITY;
         amp = amp * TERRAIN_PERSISTENCE;
     }
@@ -126,124 +140,30 @@ fn terrainFbm_d_at_df64(dx : vec2<f32>, dy : vec2<f32>, dz : vec2<f32>, camDistK
         let fade = 1.0 - smoothstep(onKm, onKm * 2.0, camDistKm);
         if (fade > 0.0) {
             let sd = terrainSimplex3_df64_d(df64_mul_f32(dx, freq), df64_mul_f32(dy, freq), df64_mul_f32(dz, freq));
-            sum = sum + sd.x * (amp * fade);
-            grad = grad + sd.yzw * (amp * freq * fade);
+            sumFine = sumFine + sd.x * (amp * fade);
+            gradFine = gradFine + sd.yzw * (amp * freq * fade);
         }
+        maxFine = maxFine + amp;
         freq = freq * TERRAIN_LACUNARITY;
         amp = amp * TERRAIN_PERSISTENCE;
     }
 
-    let inv = TERRAIN_GLOBAL_AMP / maxMacro;
+    let invMacro = TERRAIN_GLOBAL_AMP / maxMacro;
+    var sum = sumMacro * invMacro;
+    var grad = gradMacro * invMacro;
+    if (maxFine > 1e-12) {
+        let invFine = TERRAIN_DETAIL_AMP / maxFine;
+        sum = sum + sumFine * invFine;
+        grad = grad + gradFine * invFine;
+    }
     // Craters (dominant relief). Crater cells are low-frequency (>= ~20 km) so f32 dir is exact at
     // crater scale — reuse the f32 craterField (from terrain_noise.wgsl, composed before this file) on
     // the narrowed unit dir. No distance fade (macro landforms). Added after fbm normalization.
     let cr = craterField(vec3<f32>(df64_to_f32(dx), df64_to_f32(dy), df64_to_f32(dz)), radiusKm, camDistKm, craterSkipBig, 0.0);
-    return vec4<f32>(sum * inv + cr.x, grad * inv + cr.yzw);
+    return vec4<f32>(sum + cr.x, grad + cr.yzw);
 }
 
 fn terrainFbmHeightAt_df64(dx : vec2<f32>, dy : vec2<f32>, dz : vec2<f32>, camDistKm : f32, radiusKm : f32) -> f32 {
     // HEIGHT path (geometry): keep ALL crater classes (skipBig=false) so the shape is complete.
     return terrainFbm_d_at_df64(dx, dy, dz, camDistKm, radiusKm, false).x;
-}
-
-// Per-pixel surface normal from the df64-DOMAIN fbm gradient — the df64 twin of
-// terrainNoiseNormalAt (terrain_noise.wgsl). Inputs are the WORLD-ANCHORED unit direction as
-// df64 (dx, dy, dz), so the macro+detail relief is resolved to ~cm near the ground where
-// the f32 normal banded (~1-30 m). Mirrors the f32 projection exactly: project the
-// gradient onto the sphere tangent basis and tilt the unit normal. Reuses the f32
-// terrainSphereTangents (the basis only needs the unit normal, which is well-conditioned).
-fn terrainNoiseNormalAt_df64(dx : vec2<f32>, dy : vec2<f32>, dz : vec2<f32>, radius : f32, camDistKm : f32) -> vec3<f32> {
-    let nrm = normalize(vec3<f32>(df64_to_f32(dx), df64_to_f32(dy), df64_to_f32(dz)));
-    var tang : vec3<f32>;
-    var bitan : vec3<f32>;
-    terrainSphereTangents(nrm, &tang, &bitan);
-
-    // NORMAL path: skipBig=true drops locally-flat huge craters from the per-pixel gradient (perf).
-    let grad = terrainFbm_d_at_df64(dx, dy, dz, camDistKm, radius, true).yzw;
-    let dhdt = dot(grad, tang);
-    let dhdb = dot(grad, bitan);
-
-    let sc = 1.0 / radius;
-    let pn = nrm - dhdt * sc * tang - dhdb * sc * bitan;
-    return normalize(pn);
-}
-
-// df64 fbm GRADIENT only (no craters), normalized -> = terrainFbm_d_at_df64(...).yzw minus the crater add.
-// Lets the fragment SHARE one craterField across the f32 main normal and this df64 near-ground normal:
-// the crater field is low-frequency (cells >= ~20 km), identical in f32 and df64 to f32 precision, so
-// the f32 craterGrad the fragment already computed on `dir` is reused here verbatim. The detail loop is
-// kept (the df64 normal exists precisely to carry the near-ground micro-relief the f32 path bands on).
-fn terrainFbmGradAt_df64_noCrater(dx : vec2<f32>, dy : vec2<f32>, dz : vec2<f32>, camDistKm : f32, radiusKm : f32) -> vec3<f32> {
-    var maxMacro : f32 = 0.0;
-    var grad : vec3<f32> = vec3<f32>(0.0);
-    var freq : f32 = TERRAIN_BASE_FREQ;
-    var amp : f32 = TERRAIN_BASE_AMP;
-
-    for (var i : i32 = 0; i < TERRAIN_MAX_OCTAVES; i = i + 1) {
-        if (i >= TERRAIN_OCTAVES) { break; }
-        let wlKm = radiusKm / freq;
-        let onKm = TERRAIN_DETAIL_RANGE * wlKm;
-        let fade = 1.0 - smoothstep(onKm, onKm * 2.0, camDistKm);
-        let sd = terrainSimplex3_df64_d(df64_mul_f32(dx, freq), df64_mul_f32(dy, freq), df64_mul_f32(dz, freq));
-        grad = grad + sd.yzw * (amp * freq * fade);
-        maxMacro = maxMacro + amp;
-        freq = freq * TERRAIN_LACUNARITY;
-        amp = amp * TERRAIN_PERSISTENCE;
-    }
-
-    if (maxMacro <= 1e-12) {
-        return vec3<f32>(0.0);
-    }
-
-    for (var j : i32 = 0; j < TERRAIN_MAX_DETAIL; j = j + 1) {
-        if (j >= TERRAIN_DETAIL_OCTAVES) { break; }
-        let wlKm = radiusKm / freq;
-        let onKm = TERRAIN_DETAIL_RANGE * wlKm;
-        let fade = 1.0 - smoothstep(onKm, onKm * 2.0, camDistKm);
-        if (fade > 0.0) {
-            let sd = terrainSimplex3_df64_d(df64_mul_f32(dx, freq), df64_mul_f32(dy, freq), df64_mul_f32(dz, freq));
-            grad = grad + sd.yzw * (amp * freq * fade);
-        }
-        freq = freq * TERRAIN_LACUNARITY;
-        amp = amp * TERRAIN_PERSISTENCE;
-    }
-
-    let inv = TERRAIN_GLOBAL_AMP / maxMacro;
-    return grad * inv;
-}
-
-// Twin of terrainNoiseNormalAt_df64 that takes a PRE-COMPUTED crater gradient (shared with the f32 main
-// normal) instead of running craterField again. Bit-identical to terrainNoiseNormalAt_df64 to f32 crater
-// precision when craterGrad is the f32 main normal's crater term.
-fn terrainNoiseNormalAtShared_df64(dx : vec2<f32>, dy : vec2<f32>, dz : vec2<f32>, radius : f32, camDistKm : f32, craterGrad : vec3<f32>) -> vec3<f32> {
-    let nrm = normalize(vec3<f32>(df64_to_f32(dx), df64_to_f32(dy), df64_to_f32(dz)));
-    var tang : vec3<f32>;
-    var bitan : vec3<f32>;
-    terrainSphereTangents(nrm, &tang, &bitan);
-
-    let grad = terrainFbmGradAt_df64_noCrater(dx, dy, dz, camDistKm, radius) + craterGrad;
-    let dhdt = dot(grad, tang);
-    let dhdb = dot(grad, bitan);
-
-    let sc = 1.0 / radius;
-    let pn = nrm - dhdt * sc * tang - dhdb * sc * bitan;
-    return normalize(pn);
-}
-
-// Extra high-frequency micro-relief gradient for the near-ground band (df64 domain, so
-// the very high freq on the unit dir does NOT band as it would in f32). `baseFreq` is the
-// first octave's frequency on the unit direction (= radius / wavelength); octaves double
-// the freq and halve the amplitude (persistence 0.5), matching the legacy detail hack.
-// Returns the accumulated noise gradient (domain units); the caller projects + tilts it.
-fn terrainGroundDetailGrad_df64(dx : vec2<f32>, dy : vec2<f32>, dz : vec2<f32>, baseFreq : f32, octaves : i32) -> vec3<f32> {
-    var grad : vec3<f32> = vec3<f32>(0.0);
-    var freq : f32 = baseFreq;
-    var amp : f32 = 1.0;
-    for (var i : i32 = 0; i < octaves; i = i + 1) {
-        let sd = terrainSimplex3_df64_d(df64_mul_f32(dx, freq), df64_mul_f32(dy, freq), df64_mul_f32(dz, freq));
-        grad = grad + sd.yzw * amp;
-        freq = freq * 2.0;
-        amp = amp * 0.5;
-    }
-    return grad;
 }

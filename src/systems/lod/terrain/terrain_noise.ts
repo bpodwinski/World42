@@ -138,6 +138,24 @@ export type NoiseParams = {
      * (more shimmer risk). Optional: omitted => 60.
      */
     detailRange?: number;
+    /**
+     * How many of the coarsest octaves (0-indexed, out of the first min(octaves, 12))
+     * are scaled by globalAmplitude (the "macro band" — big landforms). Octaves at or
+     * beyond this index — the rest of the macro cascade AND all detailOctaves — form an
+     * independent "fine band" instead, self-normalized and scaled by detailAmplitudeKm.
+     * This decouples fine-grain roughness from Relief height: raising globalAmplitude
+     * can no longer amplify the highest-frequency octaves into visible aliased "grain"
+     * (see ground-detail-v1.md Step 4b). Optional: omitted => all macro octaves (legacy
+     * single-band behavior, fine band empty).
+     */
+    macroBandOctaves?: number;
+    /**
+     * Independent, small amplitude (km) for the fine band (octaves at/beyond
+     * macroBandOctaves). Does NOT scale with globalAmplitude, so it stays a bounded
+     * ripple regardless of how tall Relief height is set. Optional: omitted => 0 (no
+     * fine-band contribution, legacy behavior).
+     */
+    detailAmplitudeKm?: number;
 };
 
 /**
@@ -159,6 +177,11 @@ export const DEFAULT_NOISE: NoiseParams = {
     globalAmplitude: 5,
     detailOctaves: 16,
     detailRange: 60,
+    // First 8 octaves (freq up to ~5.5*2.07^7 ≈ 900, wavelength ~radius/900 ≈ a couple km at
+    // Moon scale) are the macro band; beyond that is fine-grain roughness, capped independently
+    // of Relief height by detailAmplitudeKm below (ground-detail-v1.md Step 4b).
+    macroBandOctaves: 8,
+    detailAmplitudeKm: 0.1,
 };
 
 let cachedPerm: Uint8Array | null = null;
@@ -173,29 +196,42 @@ function getPerm(seed: number): Uint8Array {
 }
 
 /**
- * Fractal Brownian Motion noise at a 3D point.
- * Returns a value in approximately [-globalAmplitude, +globalAmplitude].
+ * Fractal Brownian Motion noise at a 3D point. Two independently-normalized bands
+ * (ground-detail-v1.md Step 4b): the first macroBandOctaves are scaled by globalAmplitude
+ * (macro landforms), the rest by the small, independent detailAmplitudeKm (fine-grain
+ * roughness) — so raising globalAmplitude can never amplify the highest-frequency octaves
+ * into aliased "grain". Returns a value in approximately
+ * [-(globalAmplitude+detailAmplitudeKm), +(globalAmplitude+detailAmplitudeKm)].
  */
 export function fbmNoise(
     x: number, y: number, z: number,
     params: NoiseParams
 ): number {
     const perm = getPerm(params.seed);
-    let sum = 0;
-    let maxPossible = 0;
+    const macroBandN = Math.min(params.macroBandOctaves ?? params.octaves, params.octaves);
+    let sumMacro = 0;
+    let maxMacro = 0;
+    let sumFine = 0;
+    let maxFine = 0;
     let freq = params.baseFrequency;
     let amp = params.baseAmplitude;
 
     for (let i = 0; i < params.octaves; i++) {
-        sum += simplex3(perm, x * freq, y * freq, z * freq) * amp;
-        maxPossible += amp;
+        const contrib = simplex3(perm, x * freq, y * freq, z * freq) * amp;
+        if (i < macroBandN) {
+            sumMacro += contrib;
+            maxMacro += amp;
+        } else {
+            sumFine += contrib;
+            maxFine += amp;
+        }
         freq *= params.lacunarity;
         amp *= params.persistence;
     }
 
-    return maxPossible > 1e-12
-        ? (sum / maxPossible) * params.globalAmplitude
-        : 0;
+    const macroTerm = maxMacro > 1e-12 ? (sumMacro / maxMacro) * params.globalAmplitude : 0;
+    const fineTerm = maxFine > 1e-12 ? (sumFine / maxFine) * (params.detailAmplitudeKm ?? 0) : 0;
+    return macroTerm + fineTerm;
 }
 
 // --- CRATER FIELD — SINGLE SOURCE OF TRUTH (GPU bake + CPU collision) ----------------------
@@ -430,38 +466,53 @@ export function fbmGroundHeight(
 ): number {
     const perm = getPerm(params.seed);
     const range = params.detailRange ?? 60;
-    let sum = 0;
-    let maxMacro = 0;
     let freq = params.baseFrequency;
     let amp = params.baseAmplitude;
 
-    // Macro octaves (shader caps at TERRAIN_MAX_OCTAVES = 12), band-limited by distance.
+    // Two independently-normalized bands (ground-detail-v1.md Step 4b): macro (scaled by
+    // globalAmplitude) vs fine (scaled by the small, independent detailAmplitudeKm), so raising
+    // Relief height can't amplify the highest-frequency octaves into aliased "grain". Octaves
+    // beyond macroBandOctaves — the rest of the macro cascade AND all continued-detail octaves —
+    // fall into the fine band. Macro octaves capped at TERRAIN_MAX_OCTAVES = 12 (mirrors the shader).
     const macroN = Math.min(params.octaves, 12);
+    const macroBandN = Math.min(params.macroBandOctaves ?? macroN, macroN);
+    let sumMacro = 0;
+    let maxMacro = 0;
+    let sumFine = 0;
+    let maxFine = 0;
     for (let i = 0; i < macroN; i++) {
         const onKm = range * (radiusKm / freq);
         const fade = 1 - smoothstep01(onKm, onKm * 2, camDistKm);
-        sum += simplex3(perm, x * freq, y * freq, z * freq) * amp * fade;
-        maxMacro += amp; // unfaded -> normalization fixed, full macro at the surface
+        const contrib = simplex3(perm, x * freq, y * freq, z * freq) * amp * fade;
+        // unfaded amp -> normalization fixed, full band at the surface (matches the shader).
+        if (i < macroBandN) {
+            sumMacro += contrib;
+            maxMacro += amp;
+        } else {
+            sumFine += contrib;
+            maxFine += amp;
+        }
         freq *= params.lacunarity;
         amp *= params.persistence;
     }
     if (maxMacro <= 1e-12) return 0;
 
-    // Continued-detail octaves (shader caps at TERRAIN_MAX_DETAIL = 12).
+    // Continued-detail octaves (shader caps at TERRAIN_MAX_DETAIL = 12) — always fine band.
     const detailN = Math.min(params.detailOctaves ?? 0, 12);
     for (let j = 0; j < detailN; j++) {
         const onKm = range * (radiusKm / freq);
         const fade = 1 - smoothstep01(onKm, onKm * 2, camDistKm);
-        if (fade > 0) sum += simplex3(perm, x * freq, y * freq, z * freq) * amp * fade;
+        if (fade > 0) sumFine += simplex3(perm, x * freq, y * freq, z * freq) * amp * fade;
+        maxFine += amp;
         freq *= params.lacunarity;
         amp *= params.persistence;
     }
 
+    const macroTerm = (sumMacro / maxMacro) * params.globalAmplitude;
+    const fineTerm = maxFine > 1e-12 ? (sumFine / maxFine) * (params.detailAmplitudeKm ?? 0) : 0;
+
     // Craters are the dominant relief: added (in km) on top of the reduced fbm. Big classes never
     // fade; small classes band-limit by camDistKm (matching the GPU). MUST match the GPU df64 eval
     // (terrainFbm_d_at_df64) so the camera collides with the rendered crater floors/rims.
-    return (
-        (sum / maxMacro) * params.globalAmplitude +
-        craterField(x, y, z, perm, radiusKm, camDistKm, craters)
-    );
+    return macroTerm + fineTerm + craterField(x, y, z, perm, radiusKm, camDistKm, craters);
 }

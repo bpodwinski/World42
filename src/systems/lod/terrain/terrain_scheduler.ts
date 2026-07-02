@@ -236,7 +236,8 @@ export class TerrainPlanet {
         const dist = this.tmpCollOffset.length();
         if (dist < 1e-6) return false;
         // Above the highest possible ground + clearance: nothing to do.
-        const maxGround = this.radiusSim + this.noise.globalAmplitude + clearanceSim;
+        const maxGround =
+            this.radiusSim + this.noise.globalAmplitude + (this.noise.detailAmplitudeKm ?? 0) + clearanceSim;
         if (dist >= maxGround) return false;
         // Local (rotating-frame) direction = inverse(renderParent rotation) * worldOffset.
         // TransformNormal uses the matrix' 3x3 only, so the per-frame render-space
@@ -356,9 +357,9 @@ export class TerrainPlanet {
         return this._visible;
     }
 
-    /** Bounding-sphere radius (sea level + max relief) for the render-space frustum test. */
+    /** Bounding-sphere radius (sea level + max relief, both fbm bands) for the render-space frustum test. */
     get boundingRadiusSim(): number {
-        return this.radiusSim + this.noise.globalAmplitude;
+        return this.radiusSim + this.noise.globalAmplitude + (this.noise.detailAmplitudeKm ?? 0);
     }
 
     /**

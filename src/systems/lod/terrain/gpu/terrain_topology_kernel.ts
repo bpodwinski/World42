@@ -550,6 +550,8 @@ export class TerrainTopologyKernel {
                       `const TERRAIN_GLOBAL_AMP : f32 = ${f(n.globalAmplitude)};`,
                       `const TERRAIN_DETAIL_OCTAVES : i32 = ${Math.max(0, Math.floor(n.detailOctaves ?? 0))};`,
                       `const TERRAIN_DETAIL_RANGE : f32 = ${f(n.detailRange ?? 60)};`,
+                      `const TERRAIN_MACRO_BAND_OCTAVES : i32 = ${Math.max(0, Math.floor(n.macroBandOctaves ?? n.octaves))};`,
+                      `const TERRAIN_DETAIL_AMP : f32 = ${f(n.detailAmplitudeKm ?? 0)};`,
                       // Crater consts + craterParams() from the active CraterParams (same single
                       // source the render material bakes), so the df64 vertex height matches it.
                       craterHeaderWgsl(craters),
@@ -565,6 +567,8 @@ export class TerrainTopologyKernel {
                       'const TERRAIN_GLOBAL_AMP : f32 = 0.0;',
                       'const TERRAIN_DETAIL_OCTAVES : i32 = 0;',
                       'const TERRAIN_DETAIL_RANGE : f32 = 60.0;',
+                      'const TERRAIN_MACRO_BAND_OCTAVES : i32 = 0;',
+                      'const TERRAIN_DETAIL_AMP : f32 = 0.0;',
                       // No craters either: empty class list -> TERRAIN_CRATER_CLASSES = 0 (loops skip).
                       craterHeaderWgsl({ ...DEFAULT_CRATERS, rayClasses: 0, classes: [] }),
                       '@group(0) @binding(21) var<storage, read> terrainPerm : array<u32>;'
